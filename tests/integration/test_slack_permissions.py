@@ -10,7 +10,7 @@ from unittest import mock
 
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
-from src.db.falkordb_client import client, connect  # noqa: E402
+from src.db.falkordb_client import connect  # noqa: E402
 from src.domain.access import approvals  # noqa: E402
 from src.domain.access.roles import role_of  # noqa: E402
 from src.domain.knowledge import ask_service  # noqa: E402

@@ -1,6 +1,7 @@
 services:
   falkordb:
-    image: falkordb/falkordb:latest
+    # Same engine version as production (deploy/docker-compose.yml).
+    image: falkordb/falkordb:v4.22.1
     ports:
       - "6379:6379"
       - "3000:3000"

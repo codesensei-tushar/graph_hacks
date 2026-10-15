@@ -1,0 +1,12 @@
+[Unit]
+Description=Renew the brain/gdb Let's Encrypt certificate, then reload nginx
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/brain
+# certbot only renews when the certificate is within 30 days of expiry.
+ExecStart=/usr/bin/docker compose exec -T certbot certbot renew --quiet --no-random-sleep-on-renew
+# Runs only if the renew step succeeded.
+ExecStartPost=/usr/bin/docker compose exec -T nginx nginx -s reload

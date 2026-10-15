@@ -1,0 +1,121 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    # GCP only trusts main (the workload identity binding is on refs/heads/main).
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # One deploy at a time. A newer push waits; it doesn't cancel a deploy in flight.
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SHA: ${{ github.sha }}
+      ZONE: ${{ vars.GCP_ZONE }}
+      VM: ${{ vars.GCP_VM }}
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/brain/backend
+      PUBLIC_HOST: brain.noobsurd.space
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+          token_format: access_token
+          access_token_lifetime: 1800s
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: "585.0.0"
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      # Tags in the registry are immutable, so a re-run for the same commit reuses its image.
+      - name: Look for an image already built for ${{ github.sha }}
+        id: existing
+        run: |
+          if gcloud artifacts docker images describe "$IMAGE:$SHA" --quiet >/dev/null 2>&1; then
+            echo "built=true" >>"$GITHUB_OUTPUT"
+            echo "$IMAGE:$SHA already exists; reusing it."
+          else
+            echo "built=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.existing.outputs.built != 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - if: steps.existing.outputs.built != 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ vars.GCP_REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Build and push ${{ github.sha }}
+        if: steps.existing.outputs.built != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Stage deploy/ on the VM as release ${{ github.sha }}
+        run: |
+          tar -czf "$RUNNER_TEMP/deploy.tgz" -C deploy .
+          gcloud compute scp "$RUNNER_TEMP/deploy.tgz" "$VM:/tmp/brain-deploy-$SHA.tgz" \
+            --zone "$ZONE" --tunnel-through-iap --quiet
+          gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --quiet --command "
+            set -e
+            r=/opt/brain/releases/$SHA
+            sudo rm -rf \"\$r\"
+            sudo install -d -m 0755 \"\$r\"
+            sudo tar -xzf /tmp/brain-deploy-$SHA.tgz -C \"\$r\" --no-same-owner
+            rm -f /tmp/brain-deploy-$SHA.tgz
+            sudo install -m 0755 \"\$r/deploy.sh\" /opt/brain/deploy.sh"
+
+      - name: Deploy (rolls back on failure)
+        run: |
+          gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --quiet \
+            --command "sudo /opt/brain/deploy.sh $SHA"
+
+      - name: Verify the public /healthz
+        run: |
+          # Port 80 answers 503 only while the HTTP-only bootstrap site is active (before
+          # deploy/bootstrap-tls.sh has run); deploy.sh already checked the backend on the VM.
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://$PUBLIC_HOST/" || true)
+          if [ "$code" = 503 ]; then
+            echo "::warning::TLS isn't bootstrapped yet, so the public HTTPS check was skipped."
+            exit 0
+          fi
+          for attempt in $(seq 1 10); do
+            if body=$(curl -fsS --max-time 10 "https://$PUBLIC_HOST/healthz") &&
+              jq -e --arg sha "$SHA" '.git_sha == $sha and .falkordb == "ok"' <<<"$body" >/dev/null; then
+              echo "$body"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::https://$PUBLIC_HOST/healthz does not report $SHA with FalkorDB ok"
+          exit 1

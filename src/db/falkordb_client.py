@@ -7,7 +7,7 @@ from src.core.config import settings
 
 @lru_cache(maxsize=1)
 def client() -> FalkorDB:
-    return FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port)
+    return FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port, password=settings.falkordb_password or None)
 
 
 def graph_name() -> str:
