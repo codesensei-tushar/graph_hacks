@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass
 
 from src.db.falkordb_client import connect
+from src.domain.memory.writeback import SHARED_TEAM_BRAIN_CONTAINER_TAG
 
 MENTIONABLE = ("Service", "Document", "Ticket", "Decision")
 MIN_WORDS = 3
@@ -51,7 +52,11 @@ def worth_keeping(text: str) -> bool:
 
 
 def write(text: str, scope: str, author_id: str, channel_id: str, ts: str, mention_scopes: list[str] | None = None) -> Memory:
-    """``mention_scopes`` limits which scoped nodes (tickets) this memory may link to. Defaults to its own scope."""
+    """``mention_scopes`` limits which scoped nodes (tickets) this memory may link to.
+
+    Defaults to org_shared plus the memory's own container, so a memory never links
+    to something its readers could not see.
+    """
     _, graph = connect()
     memory = Memory(id=uuid.uuid4().hex, text=text, scope=scope, author=author_id, channel_id=channel_id, ts=ts)
     graph.query(
@@ -73,7 +78,7 @@ def write(text: str, scope: str, author_id: str, channel_id: str, ts: str, menti
             "now": int(time.time()),
         },
     )
-    for node_id in _mentioned_ids(graph, text, mention_scopes or [scope]):
+    for node_id in _mentioned_ids(graph, text, mention_scopes or [SHARED_TEAM_BRAIN_CONTAINER_TAG, scope]):
         graph.query(
             "MATCH (m:Memory {id: $memory}), (n {id: $node}) MERGE (m)-[:MENTIONS]->(n)",
             {"memory": memory.id, "node": node_id},
@@ -110,11 +115,16 @@ def search(query: str, scopes: list[str], limit: int = 5) -> list[dict]:
     ]
 
 
-def forget_scope(scope: str) -> int:
+def forget_scope(scope: str, channel_id: str | None = None) -> int:
+    """Delete a container's memories. ``channel_id`` narrows org_shared to one public channel."""
     _, graph = connect()
     rows = graph.query(
-        "MATCH (m:Memory {scope: $scope}) WITH m, m.id AS id DETACH DELETE m RETURN count(id)",
-        {"scope": scope},
+        """
+        MATCH (m:Memory {scope: $scope})
+        WHERE $channel IS NULL OR m.channel_id = $channel
+        WITH m, m.id AS id DETACH DELETE m RETURN count(id)
+        """,
+        {"scope": scope, "channel": channel_id},
     ).result_set
     return int(rows[0][0]) if rows else 0
 
@@ -124,10 +134,10 @@ def _mentioned_ids(graph, text: str, scopes: list[str]) -> list[str]:
         """
         MATCH (n)
         WHERE labels(n)[0] IN $labels AND n.name IS NOT NULL
-          AND coalesce(n.scope, 'org_shared') IN $scopes
+          AND coalesce(n.scope, $shared) IN $scopes
         RETURN n.id, n.name, coalesce(n.aliases, '')
         """,
-        {"labels": list(MENTIONABLE), "scopes": scopes},
+        {"labels": list(MENTIONABLE), "scopes": scopes, "shared": SHARED_TEAM_BRAIN_CONTAINER_TAG},
     ).result_set
     lowered = text.lower()
     found = []

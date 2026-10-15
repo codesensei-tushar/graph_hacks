@@ -22,9 +22,7 @@ class Settings:
     slack_owner_id: str = field(default_factory=lambda: os.getenv("SLACK_OWNER_ID", ""))
     slack_admin_ids: frozenset[str] = field(default_factory=lambda: _csv(os.getenv("SLACK_ADMIN_IDS", "")))
 
-    approval_ttl_seconds: int = 15 * 60
-    event_dedupe_ttl_seconds: int = 60 * 60
-    bot_thread_ttl_seconds: int = 24 * 60 * 60
+    bot_thread_ttl_seconds: int = 7 * 24 * 60 * 60
 
     @property
     def slack_enabled(self) -> bool:

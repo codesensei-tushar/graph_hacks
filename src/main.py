@@ -1,59 +1,48 @@
-from pathlib import Path
+import logging
+import threading
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
 
-from app.ask import ask, ingest_ticket
-from app.graph import connect
-from app.seed import reset_and_seed
+from src.api.v1 import health, slack
+from src.core.config import settings
+from src.db.falkordb_client import connect
+from src.domain.memory.memory_service import ensure_indexes
+from src.domain.slack.channel_membership import reconcile_channel_membership
+from src.domain.slack.workspace import bot_identity, get_workspace_by_team_id
+from src.seed.seed import reset_and_seed
 
-app = FastAPI(title="Company Brain")
-STATIC = Path(__file__).parent / "static"
-
-
-class AskBody(BaseModel):
-    question: str
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+log = logging.getLogger(__name__)
 
 
-class TicketBody(BaseModel):
-    title: str
-    about: str = ""
-
-
-@app.on_event("startup")
-def seed_if_empty() -> None:
-    _, graph = connect()
-    count = graph.query("MATCH (n) RETURN count(n) AS nodes").result_set
-    nodes = count[0][0] if count else 0
-    if nodes == 0:
-        reset_and_seed()
-
-
-@app.get("/")
-def index():
-    return FileResponse(STATIC / "index.html")
-
-
-@app.post("/api/ask")
-def ask_route(body: AskBody):
-    return ask(body.question)
-
-
-@app.post("/api/tickets")
-def ticket_route(body: TicketBody):
-    created = ingest_ticket(body.title, body.about)
-    follow = ask(f"who should look at {created['about_name']}")
-    return {
-        "ticket": created["id"],
-        "about": created["about_name"],
-        "answer": f"Added {created['id']} about {created['about_name']}. {follow['answer']}",
-        "path": created["path"] + follow["path"],
-    }
-
-
-@app.get("/api/health")
-def health():
+def _seed_if_empty() -> None:
     _, graph = connect()
     nodes = graph.query("MATCH (n) RETURN count(n)").result_set[0][0]
-    return {"ok": True, "nodes": nodes}
+    if nodes == 0:
+        log.info("graph is empty; seeding the sample company")
+        reset_and_seed()
+    ensure_indexes()
+
+
+def _reconcile_membership() -> None:
+    """Catch private-channel joins and leaves missed while the app was down."""
+    identity = bot_identity()
+    workspace = get_workspace_by_team_id(identity["team_id"]) if identity else None
+    if workspace is not None:
+        reconcile_channel_membership(workspace.client)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _seed_if_empty()
+    if settings.slack_enabled:
+        threading.Thread(target=_reconcile_membership, daemon=True).start()
+    else:
+        log.warning("Slack is not configured: set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET")
+    yield
+
+
+app = FastAPI(title="Company Brain", lifespan=lifespan)
+app.include_router(slack.router)
+app.include_router(health.router)

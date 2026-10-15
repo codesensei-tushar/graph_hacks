@@ -1,0 +1,60 @@
+# Slack app manifest for a local Company Brain dev app.
+# Adapted from github.com/supermemoryai/company-brain (docs/slack-app-manifest.yaml).
+# Usage: https://api.slack.com/apps -> Create New App -> From a manifest -> pick your
+# sandbox workspace -> paste this file. See docs/SLACK.md.
+#
+# Before pasting, replace:
+#   YOUR-TUNNEL.ngrok-free.app  -> your public tunnel hostname (Slack server -> your machine)
+display_information:
+  name: Company Brain (dev)
+  description: Company knowledge graph on FalkorDB, local development
+  background_color: "#000b36"
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: company-brain
+    always_online: true
+oauth_config:
+  scopes:
+    # Read-mostly: every extra scope is another line on the install consent screen.
+    bot:
+      - app_mentions:read
+      - channels:history
+      - channels:read
+      - chat:write
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - im:write
+      - mpim:history
+      - mpim:read
+      - reactions:read
+      - reactions:write
+      - team:read
+      - users:read
+      - users:read.email
+settings:
+  event_subscriptions:
+    # Server-to-server POST from Slack, must be your public tunnel.
+    request_url: https://YOUR-TUNNEL.ngrok-free.app/slack/events
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+      - member_joined_channel
+      - member_left_channel
+      - reaction_added
+      - team_join
+      - user_change
+  interactivity:
+    is_enabled: true
+    request_url: https://YOUR-TUNNEL.ngrok-free.app/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

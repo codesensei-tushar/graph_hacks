@@ -10,7 +10,7 @@ Local template for the Company Brain project. Nothing here is the agent yet. It 
 | Graph browser | FalkorDB Browser on port 3000 | Inspect the graph while building. Ships with the Docker image. |
 | API and agent | Python 3.11+, FastAPI | Official `falkordb` client. Agent tools are Python functions that run Cypher. |
 | Agent model | Any chat model with tool calling | The model picks a tool. The graph supplies the facts. |
-| UI | Small web page served by the API | Question in, answer plus source path out. |
+| UI | Slack app (`slack_sdk`) | Question in, answer plus source path out. See [SLACK.md](SLACK.md). |
 | Seed data | Cypher file loaded at startup | A fictional company so the demo does not depend on live integrations. |
 
 Not in the first cut: a second database, a vector store, or a hosted graph. FalkorDB is the context layer.
@@ -48,14 +48,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python scripts/check_graph.py
 python scripts/seed_graph.py
-uvicorn app.main:app --reload
+uvicorn src.main:app --reload
 ```
 
-`scripts/seed_graph.py` replaces the `company` graph with the seed company. The app is at [http://localhost:8000](http://localhost:8000). On startup it seeds only when the graph is empty.
+`scripts/seed_graph.py` replaces the `company` graph with the seed company. The API listens on [http://localhost:8000](http://localhost:8000) and has no web page; you talk to it in Slack. On startup it seeds only when the graph is empty.
 
 ## Environment
 
-Copy the example file and fill in a model key when the agent exists:
+Copy the example file and fill in the Slack values from [SLACK.md](SLACK.md):
 
 ```bash
 cp .env.example .env
@@ -66,6 +66,10 @@ cp .env.example .env
 | `FALKORDB_HOST` | `localhost` | Graph host |
 | `FALKORDB_PORT` | `6379` | Graph port |
 | `FALKORDB_GRAPH` | `company` | Graph name inside the instance |
+| `SLACK_BOT_TOKEN` | empty | Bot token (`xoxb-...`) |
+| `SLACK_SIGNING_SECRET` | empty | Verifies requests from Slack |
+| `SLACK_OWNER_ID` | empty | Slack member id of the installer (owner role) |
+| `SLACK_ADMIN_IDS` | empty | Comma-separated member ids that start as admins |
 | `LLM_API_KEY` | empty | Chat model, later |
 | `LLM_MODEL` | empty | Model name, later |
 
@@ -73,8 +77,8 @@ cp .env.example .env
 
 1. `docker-compose.yml` runs FalkorDB.
 2. A seed script writes the company into the `company` graph.
-3. FastAPI exposes ask and ingest endpoints.
+3. FastAPI receives Slack events at `/slack/events` and button clicks at `/slack/interactions`.
 4. Each agent tool runs one Cypher query and returns nodes and edges.
-5. The UI prints the answer and that path.
+5. The bot replies in Slack with the answer and that path, reading only the scopes the asker may see.
 
 Official references: [Getting started](https://docs.falkordb.com/getting-started), [Docker](https://docs.falkordb.com/operations/docker), [Cypher](https://docs.falkordb.com/cypher).

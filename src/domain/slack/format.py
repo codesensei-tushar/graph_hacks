@@ -1,0 +1,56 @@
+"""Slack mrkdwn for brain replies. Every answer cites its graph path and where memories came from."""
+
+from src.domain.memory.writeback import scope_label
+
+MAX_PATH_STEPS = 10
+MAX_MEMORY_SNIPPET = 220
+
+HELP_TEXT = "\n".join(
+    [
+        "*Ask me about the company.* Who owns something, why a decision was made, what breaks if a service goes down.",
+        "",
+        "• `remember: <note>` saves a note to this conversation's memory",
+        "• `ticket: <title>` files a ticket in the company graph after you approve it",
+        "• `what can you see` lists the memory I can read from here",
+        "• Admins: `promote @user`, `demote @user`, `forget this channel`",
+        "",
+        "_In a public channel I only use public memory. In a private channel I add that channel. In a DM I also use every private channel you're in._",
+    ]
+)
+
+
+def _clip(text: str, size: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= size else text[: size - 1] + "…"
+
+
+def format_path(path: list[dict]) -> list[str]:
+    lines = [f"• {step['from']} —{step['rel']}→ {step['to']}" for step in path[:MAX_PATH_STEPS]]
+    if len(path) > MAX_PATH_STEPS:
+        lines.append(f"_…and {len(path) - MAX_PATH_STEPS} more edges_")
+    return lines
+
+
+def format_answer(result: dict, memories: list[dict], read_tags: list[str], channel_names: dict[str, str]) -> str:
+    parts = [result.get("answer") or "I couldn't find that in the company graph."]
+    path = result.get("path") or []
+    if path:
+        parts += ["", f"*Path* (`{result.get('tool', 'graph')}`)", *format_path(path)]
+    if memories:
+        parts += ["", "*From conversations*"]
+        for memory in memories:
+            where = scope_label(memory["scope"], channel_names)
+            if memory.get("channel_id") and memory["scope"] == "org_shared":
+                where = f"<#{memory['channel_id']}>"
+            parts.append(f"• “{_clip(memory['text'], MAX_MEMORY_SNIPPET)}” — {memory['author']}, {where}")
+    parts += ["", f"_Read from: {', '.join(scope_label(tag, channel_names) for tag in read_tags)}_"]
+    return "\n".join(parts)
+
+
+def format_scopes(read_tags: list[str], write_tag: str | None, channel_names: dict[str, str]) -> str:
+    lines = ["*From here I can read:*", *[f"• {scope_label(tag, channel_names)}" for tag in read_tags]]
+    if write_tag:
+        lines += ["", f"*New memories from here go to:* {scope_label(write_tag, channel_names)}"]
+    else:
+        lines += ["", "_Nothing said here is saved._"]
+    return "\n".join(lines)
