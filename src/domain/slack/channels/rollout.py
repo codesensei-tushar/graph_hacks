@@ -207,7 +207,7 @@ def _granted_scopes(ws) -> set[str] | None:
 
 
 def _installer(ws, explicit: str | None) -> str | None:
-    return explicit or getattr(ws, "installed_by_slack_user_id", None) or settings.slack_owner_id or None
+    return explicit or getattr(ws, "installed_by", None) or settings.slack_owner_id or None
 
 
 def _rollout_actor_name(value: str) -> str:
@@ -627,6 +627,51 @@ def start_public_channel_rollout(payload: dict) -> None:
         reply_channel,
         user,
         "On it. I’ll join eligible public channels, ingest the last seven days, cross-check channel themes against organization-shared read-only tools, and introduce myself only after memory processing finishes.",
+    )
+
+
+def start_public_channel_rollout_from_command(team_id: str, slack_user_id: str) -> str:
+    """The admin command ``backfill public channels``. Returns the reply.
+
+    Same run and checks as the card button, for when nobody can click it: a
+    token-mode install with no ``SLACK_OWNER_ID``, or an admin who isn't the
+    installer and so never got the DM card. Not in company-brain.
+    """
+    ws = _workspace(team_id)
+    if ws is None:
+        return "I couldn't find this workspace's Company Brain installation."
+    scopes = _granted_scopes(ws)
+    missing = [s for s in REQUIRED_SCOPES if scopes is not None and s not in scopes]
+    if missing:
+        return (
+            "This installation needs to be reauthorized before I can join and read public channels. "
+            f"Missing Slack scopes: {', '.join(missing)}. Reinstall the Company Brain Slack app, then try again."
+        )
+    profile = _lookup_user(ws.client, slack_user_id)
+    if profile is None or not role_at_least(role_of(slack_user_id), "admin"):
+        return "Only a Company Brain organization admin can add me across the workspace."
+    active = current_run(team_id)
+    if active and active["status"] == "running":
+        return "I’m already working through the public channels. I’ll keep the card in the home channel updated."
+
+    card = rollout_card(team_id)
+    home_channel_id = card["home_channel_id"] if card else None
+    if not home_channel_id:
+        # No card means install never bootstrapped; set up the home channel and card first.
+        from src.domain.slack.bootstrap import bootstrap_slack_workspace
+
+        home = bootstrap_slack_workspace(workspace=ws, slack_user_id=slack_user_id)
+        if not home:
+            return "I couldn't set up the #company-brain home channel, so I didn't start. Check the app's scopes and try again."
+        card = rollout_card(team_id)
+        home_channel_id = card["home_channel_id"] if card else home["channel_id"]
+
+    _begin_rollout_run(
+        team_id, ws.client, home_channel_id=home_channel_id, actor_slack_user_id=slack_user_id, actor_name=_actor_name(profile)
+    )
+    return (
+        f"On it. I’ll join eligible public channels, import the last {PUBLIC_CHANNEL_ROLLOUT_DAYS} days, "
+        f"and introduce myself in each one. Progress is on the card in <#{home_channel_id}>."
     )
 
 

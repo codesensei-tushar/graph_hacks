@@ -114,6 +114,22 @@ A single workspace only needs `SLACK_BOT_TOKEN`. To install into several workspa
 
 Bot tokens are encrypted with `TOKEN_ENCRYPTION_KEY` (Fernet) when the `cryptography` package is installed. Without it they're stored as plain text and the app logs a warning once.
 
+### Backfill when you onboard
+
+What happens after an install, ported from company-brain's `bootstrap.ts` and `public-channel-rollout.ts`:
+
+1. **Bootstrap.** Create or adopt `#company-brain`, post the welcome and a read-only status card, and invite the installer. The installer gets a DM with the "Add me to my public channels" button.
+2. **Beachhead, 5 minutes later.** The bot joins the two busiest eligible public channels on its own, imports their last 7 days, and posts a read-out in `#company-brain`. It skips this if a run already exists.
+3. **Full rollout, opt-in.** The button, or the `backfill public channels` command, runs discover → join → collect → introduce, one scheduled step at a time. It imports the last 7 days of history and thread replies, written as daily documents into `org_shared`. It skips #general, #company-brain, private, archived and Slack Connect channels. Slack rate limits reschedule the step instead of failing it. Progress shows on the card.
+4. **After that,** new messages in joined channels are kept as they arrive. With a model configured, channel-observe distills them instead.
+
+When this runs:
+
+- **OAuth install:** the callback runs steps 1–2 for the installer.
+- **Token install (`SLACK_BOT_TOKEN`):** there is no callback, so the app runs the same steps once per workspace at startup, with `SLACK_OWNER_ID` as the installer (`src/domain/slack/token_install.py`). A Redis marker stops it running again; a disconnect clears it. Without `SLACK_OWNER_ID` nobody gets the DM button, so an admin uses `backfill public channels` instead.
+
+Not backfilled, as in company-brain: private channel history (the bot records who is in a private channel when invited, then keeps only new messages), DMs, and per-person history when someone joins the workspace. A new member reads public memory straight away, and a private channel's memory once Slack shows them in it.
+
 ## Using it
 
 The bot answers when you DM it, @mention it, address it by name ("hey company brain, ..."), or reply in a thread it's already in.
@@ -127,6 +143,7 @@ The bot answers when you DM it, @mention it, address it by name ("hey company br
 | `link my account` | Sends you a private one-time link to connect your Slack user to a person in the graph. |
 | `promote @user` / `demote @user` | Admins and owner only. Grants or removes admin. |
 | `forget this channel` | In a DM, clears your own DM memory. In a channel, admins and owner only: deletes that room's memories (for a public channel, only messages from that channel). |
+| `backfill public channels` | Admins and owner only. Joins eligible public channels and imports their last 7 days (see [Backfill when you onboard](#backfill-when-you-onboard)). |
 | `disconnect` | Admins and owner only. Posts a farewell, uninstalls the app and clears this workspace's state. |
 | `stop` (in a thread while it's working) | Cancels the running answer. Only the person who asked can stop it. |
 | anything else | A question, answered from the graph plus the memories you can read. The reply cites the nodes and edges it used. |
@@ -210,6 +227,13 @@ What a conversation can read depends on where you ask:
 | Manifest | `domain/slack/manifest.py`, `slack_app/manifest.yaml` | `setup/manifest.ts` |
 
 Delayed work (approval expiry, rollout paging, observe batches, reaction spacing, invite waves) runs on `src/core/scheduler.py`, a Redis sorted set polled by one thread, in place of Durable Object alarms.
+
+## What's left for the product: the agent and vector search
+
+The Slack layer from company-brain runs entirely on FalkorDB. Two pieces that matter for the product are not ported yet:
+
+- **Agent.** company-brain's main answer step is an LLM agent with tools (`computeTurn`). It is not ported yet, because agents come later. Today, answers come from the graph lookups (who owns, decision trace, blast radius) plus full-text search over memories. The plug-in point is `register_turn_agent()` in `src/domain/slack/compute.py`.
+- **Search.** supermemory searched memories with vector (semantic) search. Here that is replaced with FalkorDB's full-text index, which is keyword matching. FalkorDB has vector indexes too, so semantic recall can be added later using an embedding model.
 
 ## Differences from company-brain
 

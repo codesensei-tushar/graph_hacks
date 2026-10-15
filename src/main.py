@@ -10,6 +10,7 @@ from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.memory.memory_service import ensure_indexes
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
+from src.domain.slack import token_install
 from src.domain.slack.channel_membership import reconcile_channel_membership
 from src.domain.slack.channels import observe, rollout  # noqa: F401  register rollout and observe jobs
 from src.domain.slack.channels import reset as channel_reset
@@ -41,8 +42,13 @@ def _recover() -> None:
             job()
         except Exception:
             log.exception("startup recovery failed: %s", name)
-    # Private-channel joins and leaves missed while the app was down.
     for workspace in list_connected_workspaces():
+        # Token-mode installs never hit the OAuth callback; run its after-install steps once.
+        try:
+            token_install.ensure_token_workspace_bootstrapped(workspace)
+        except Exception:
+            log.exception("token-mode bootstrap failed team=%s", workspace.team_id)
+        # Private-channel joins and leaves missed while the app was down.
         try:
             reconcile_channel_membership(workspace.client)
         except Exception:
@@ -54,6 +60,7 @@ async def lifespan(_app: FastAPI):
     _seed_if_empty()
     turn_reset.register()
     channel_reset.register()
+    token_install.register()
     scheduler.start()
     if settings.slack_enabled or settings.slack_oauth_enabled:
         threading.Thread(target=_recover, name="brain-recover", daemon=True).start()
