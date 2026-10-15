@@ -1,0 +1,71 @@
+# Slack app manifest for the PRODUCTION app, central-brain, served from brain-vm.
+# Reference only; nothing reads this file. To apply it: api.slack.com/apps -> central-brain
+# -> App Manifest -> paste -> Save, then reinstall if Slack asks.
+#
+# The local dev app (dev-central-brain) keeps slack_app/manifest.yaml, pointed at its own
+# tunnel. A Slack app delivers events to exactly one URL, so the two must stay separate.
+#
+# Scopes and events follow the code (src/domain/slack/manifest.py); the running server
+# also serves this manifest at https://brain.noobsurd.space/slack/manifest.json.
+#
+# No slash command: the code has no handler for one. /slack/events accepts JSON only, so a
+# /brain command pointed there would get a 400. Add a command here when the code handles it.
+display_information:
+  name: central-brain
+  description: A company brain on a knowledge graph that lives in your Slack.
+  background_color: "#000b36"
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: company-brain
+    always_online: true
+oauth_config:
+  # Only used by the multi-workspace install (/slack/oauth/install).
+  redirect_urls:
+    - https://brain.noobsurd.space/slack/oauth/callback
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - channels:join
+      - channels:manage
+      - channels:read
+      - channels:write.invites
+      - chat:write
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - im:write
+      - mpim:history
+      - mpim:read
+      - reactions:read
+      - reactions:write
+      - team:read
+      - usergroups:read
+      - users:read
+      - users:read.email
+settings:
+  event_subscriptions:
+    request_url: https://brain.noobsurd.space/slack/events
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+      - member_joined_channel
+      - member_left_channel
+      - reaction_added
+      - reaction_removed
+      - team_join
+      - user_change
+  interactivity:
+    is_enabled: true
+    request_url: https://brain.noobsurd.space/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

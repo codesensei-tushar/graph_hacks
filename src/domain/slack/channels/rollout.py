@@ -29,7 +29,7 @@ import re
 import time
 import uuid
 from dataclasses import asdict
-from typing import Any, Literal
+from typing import Literal
 from urllib.parse import parse_qs
 
 from src.core import scheduler

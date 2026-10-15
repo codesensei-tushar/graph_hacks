@@ -88,7 +88,7 @@ curl -s localhost:8000/api/health
 
 - Run the app behind HTTPS on a stable domain and put that domain in both `request_url` values, in **Event Subscriptions** and **Interactivity & Shortcuts**.
 - Set the same four variables in the host's secret store instead of a `.env` file.
-- Keep FalkorDB off the public internet: don't publish port 6379. The local `docker-compose.yml` publishes it with no password, and the app doesn't read a FalkorDB password yet.
+- Keep FalkorDB off the public internet: don't publish port 6379. The local `docker-compose.yml` publishes it with no password. The app reads `FALKORDB_PASSWORD`, and production sets it; see [DEPLOY.md](DEPLOY.md).
 - If you add scopes or events to the manifest, Slack asks you to **Reinstall to Workspace**. The bot token may change; update `SLACK_BOT_TOKEN` if it does.
 - If the signing secret leaks, regenerate it under **Basic Information** and redeploy.
 
