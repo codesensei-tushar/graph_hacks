@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.api import ops
-from src.api.v1 import health, slack, slack_install
+from src.api.v1 import github, health, slack, slack_install
 from src.core import scheduler
 from src.core.config import settings
 from src.db.falkordb_client import connect
+from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
 from src.domain.memory.memory_service import ensure_indexes
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
 from src.domain.slack import token_install
@@ -64,6 +65,8 @@ async def lifespan(_app: FastAPI):
     channel_reset.register()
     token_install.register()
     scheduler.start()
+    if settings.github_enabled and not scheduler.exists(github_backfill.COLLABORATOR_REFRESH_JOB_ID):
+        github_backfill.schedule_collaborator_refresh()
     if settings.slack_enabled or settings.slack_oauth_enabled:
         threading.Thread(target=_recover, name="brain-recover", daemon=True).start()
     else:
@@ -74,5 +77,6 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Company Brain", lifespan=lifespan)
 app.include_router(slack.router)
 app.include_router(slack_install.router)
+app.include_router(github.router)
 app.include_router(health.router)
 ops.install(app)

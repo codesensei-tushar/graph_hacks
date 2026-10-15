@@ -42,9 +42,27 @@ class Settings:
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
     llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "") or "claude-haiku-5-5")
 
+    # GitHub App (Settings -> Developer settings -> GitHub Apps). See docs/GITHUB.md.
+    github_app_id: str = field(default_factory=lambda: os.getenv("GITHUB_APP_ID", ""))
+    github_webhook_secret: str = field(default_factory=lambda: os.getenv("GITHUB_WEBHOOK_SECRET", ""))
+    # The app's private key: a path to the .pem locally, or the PEM text itself in production.
+    github_private_key_path: str = field(default_factory=lambda: os.getenv("GITHUB_PRIVATE_KEY_PATH", ""))
+    github_private_key: str = field(default_factory=lambda: os.getenv("GITHUB_PRIVATE_KEY", ""))
+    # OAuth credentials of the same app, used only to verify `link github` in Slack.
+    github_client_id: str = field(default_factory=lambda: os.getenv("GITHUB_CLIENT_ID", ""))
+    github_client_secret: str = field(default_factory=lambda: os.getenv("GITHUB_CLIENT_SECRET", ""))
+
     @property
     def llm_enabled(self) -> bool:
         return bool(self.llm_api_key)
+
+    @property
+    def github_enabled(self) -> bool:
+        return bool(self.github_app_id and self.github_webhook_secret and (self.github_private_key or self.github_private_key_path))
+
+    @property
+    def github_link_enabled(self) -> bool:
+        return bool(self.github_enabled and self.github_client_id and self.github_client_secret)
 
     @property
     def slack_enabled(self) -> bool:

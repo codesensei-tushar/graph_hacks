@@ -1,5 +1,8 @@
 """Our own company: the Company Brain project in this repo.
 
+Each service lists the repo ``paths`` it owns, so GitHub pull requests that change
+those files link to it.
+
 Services are the real components under src/ plus the outside systems they call.
 Dependencies follow the imports between those packages. Documents, tickets, and
 decisions are the real ones from docs/ and from building the Slack layer.
@@ -18,6 +21,7 @@ TEAMS = [
 SERVICES = [
     {
         "id": "slack-events",
+        "paths": ["src/api/v1/slack.py", "src/api/v1/slack_install.py", "slack_app"],
         "name": "Slack events API",
         "team": "core",
         "aliases": "slack events, events endpoint, interactions, slack routes, request url, signature check",
@@ -25,6 +29,7 @@ SERVICES = [
     },
     {
         "id": "slack-workspace",
+        "paths": ["src/domain/slack"],
         "name": "Slack workspace",
         "team": "core",
         "aliases": "slack, slack app, bot, workspace, install, channels, membership",
@@ -32,6 +37,7 @@ SERVICES = [
     },
     {
         "id": "turn-engine",
+        "paths": ["src/domain/slack/turn"],
         "name": "Turn engine",
         "team": "core",
         "aliases": "turn, turn loop, triage, chime, steering, reactions",
@@ -39,6 +45,7 @@ SERVICES = [
     },
     {
         "id": "slack-client",
+        "paths": ["src/integrations/slack"],
         "name": "Slack client",
         "team": "core",
         "aliases": "slack client, block kit, slack sdk, message formatting",
@@ -46,6 +53,7 @@ SERVICES = [
     },
     {
         "id": "access-control",
+        "paths": ["src/domain/access"],
         "name": "Access control",
         "team": "core",
         "aliases": "permissions, access, scopes, roles, approvals, admin, owner",
@@ -53,6 +61,7 @@ SERVICES = [
     },
     {
         "id": "memory-layer",
+        "paths": ["src/domain/memory"],
         "name": "Memory layer",
         "team": "core",
         "aliases": "memory, memories, writeback, remember, search brain",
@@ -60,6 +69,7 @@ SERVICES = [
     },
     {
         "id": "knowledge-tools",
+        "paths": ["src/domain/knowledge"],
         "name": "Knowledge tools",
         "team": "core",
         "aliases": "who knows, who owns, decision trace, blast radius, cypher tools, ask service",
@@ -67,6 +77,7 @@ SERVICES = [
     },
     {
         "id": "llm-gateway",
+        "paths": ["src/integrations/llm"],
         "name": "LLM gateway",
         "team": "core",
         "aliases": "llm, model, claude, haiku, anthropic sdk",
@@ -74,13 +85,23 @@ SERVICES = [
     },
     {
         "id": "scheduler",
+        "paths": ["src/core/scheduler.py"],
         "name": "Scheduler",
         "team": "core",
         "aliases": "scheduler, jobs, background jobs, expiry",
         "summary": "src/core/scheduler.py: background jobs such as approval expiry and channel rollout.",
     },
     {
+        "id": "github-ingest",
+        "paths": ["src/api/v1/github.py", "src/domain/github", "src/integrations/github"],
+        "name": "GitHub ingest",
+        "team": "core",
+        "aliases": "github, github app, webhooks, pull requests, prs, issues, link github",
+        "summary": "Writes pull requests, reviews, and issues from the GitHub App into the graph, scoped per repo.",
+    },
+    {
         "id": "falkordb",
+        "paths": ["src/db", "src/seed", "scripts/seed_graph.py", "docker-compose.yml"],
         "name": "FalkorDB",
         "team": "core",
         "aliases": "falkordb, graph, graph database, database, redis",
@@ -92,6 +113,13 @@ SERVICES = [
         "team": "core",
         "aliases": "slack api, slack servers",
         "summary": "Slack itself. Sends events to us and receives our replies.",
+    },
+    {
+        "id": "github-platform",
+        "name": "GitHub",
+        "team": "core",
+        "aliases": "github api, github.com",
+        "summary": "GitHub itself. Sends webhooks to the GitHub App and answers its API reads.",
     },
     {
         "id": "claude-api",
@@ -128,6 +156,10 @@ DEPENDS_ON = [
     ("slack-client", "slack-platform"),
     ("slack-client", "falkordb"),
     ("llm-gateway", "claude-api"),
+    ("github-ingest", "knowledge-tools"),
+    ("github-ingest", "falkordb"),
+    ("github-ingest", "github-platform"),
+    ("memory-layer", "github-ingest"),
 ]
 
 # (person, relation, service)
@@ -141,9 +173,11 @@ WORK = [
     ("tushar", "OWNS", "knowledge-tools"),
     ("tushar", "OWNS", "llm-gateway"),
     ("tushar", "OWNS", "scheduler"),
+    ("tushar", "OWNS", "github-ingest"),
     ("tushar", "OWNS", "falkordb"),
     ("tushar", "KNOWS", "slack-platform"),
     ("tushar", "KNOWS", "claude-api"),
+    ("tushar", "KNOWS", "github-platform"),
 ]
 
 DOCUMENTS = [

@@ -12,9 +12,10 @@ HELP_TEXT = "\n".join(
         "• `remember: <note>` saves a note to this conversation's memory",
         "• `ticket: <title>` files a ticket in the company graph after you approve it",
         "• `what can you see` lists the memory I can read from here",
+        "• `link github` (in a DM) connects your GitHub account so I can use private repos you work on",
         "• Admins: `promote @user`, `demote @user`, `forget this channel`, `backfill public channels`",
         "",
-        "_In a public channel I only use public memory. In a private channel I add that channel. In a DM I also use every private channel you're in._",
+        "_In a public channel I only use public memory. In a private channel I add that channel. In a DM I also use every private channel you're in and every private repo your linked GitHub account can see._",
     ]
 )
 

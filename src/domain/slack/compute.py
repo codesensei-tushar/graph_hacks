@@ -19,6 +19,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from src.domain.github.repos import repo_names
 from src.domain.access.roles import ROLE_OWNER, role_at_least, role_of, set_role
 from src.domain.knowledge import ask_service
 from src.domain.memory import memory_service
@@ -42,6 +43,7 @@ _SCOPES = re.compile(r"^(?:what can you see|scopes?|what do you know about me)\?
 _PROMOTE = re.compile(r"^(promote|demote)\b", re.IGNORECASE)
 _FORGET = re.compile(r"^forget (?:this )?(?:channel|conversation|dm)\b", re.IGNORECASE)
 _LINK = re.compile(r"^link (?:my )?(?:slack )?account\b", re.IGNORECASE)
+_LINK_GITHUB = re.compile(r"^link (?:my )?github\b", re.IGNORECASE)
 _BACKFILL = re.compile(r"^(?:backfill|import|add me to|join)(?: (?:the|my|all))? public channels\b", re.IGNORECASE)
 _DISCONNECT = re.compile(r"^disconnect(?: (?:company brain|slack|this workspace))?\s*$", re.IGNORECASE)
 
@@ -140,7 +142,7 @@ def _memory_row(row: dict) -> dict:
 
 def channel_names(tags: list[str]) -> dict[str, str]:
     ids = [tag.removeprefix("slack_channel_") for tag in tags if tag.startswith("slack_channel_")]
-    return channel_membership.channel_names(ids)
+    return {**channel_membership.channel_names(ids), **repo_names(tags)}
 
 
 # --- built-in commands -------------------------------------------------------------------
@@ -190,6 +192,9 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
     if _LINK.match(text):
         return TurnOutcome(reply=_link_account(request))
 
+    if _LINK_GITHUB.match(text):
+        return TurnOutcome(reply=_link_github(request))
+
     if _BACKFILL.match(text):
         from src.domain.slack.channels.rollout import start_public_channel_rollout_from_command
 
@@ -238,6 +243,22 @@ def _forget(asker: str, scope: SlackMemoryScope, write_tag: str | None, names: d
     count = memory_service.forget_scope(write_tag, channel_filter)
     where = f"<#{scope.channel_id}>" if channel_filter else scope_label(write_tag, names)
     return f"Forgot {count} memories from {where}."
+
+
+def _link_github(request: TurnRequest) -> str:
+    from src.core.config import settings
+    from src.domain.github.account_link import create_github_link_url
+
+    if not settings.github_link_enabled:
+        return "GitHub linking isn't set up on this server yet."
+    if not request.is_dm:
+        # The link is personal; it belongs in a DM, not a channel.
+        return "Send `link github` to me in a DM and I'll give you a sign-in link."
+    url = create_github_link_url(request.asker_slack_user_id)
+    return (
+        f"<{url}|Sign in with GitHub> to link your account. It expires in 15 minutes. "
+        "Once linked, I can use private repos you collaborate on when you ask me in a DM."
+    )
 
 
 def _link_account(request: TurnRequest) -> str:
