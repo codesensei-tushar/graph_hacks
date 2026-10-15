@@ -1,0 +1,92 @@
+# Production stack on brain-vm, at /opt/brain/docker-compose.yml. deploy.sh writes
+# /opt/brain/.env (IMAGE_TAG and the secrets, root-only) next to it.
+#
+# Only nginx publishes ports. FalkorDB (6379) and the browser (3000) are reachable on the
+# internal Docker network only; the browser goes out through nginx at gdb.noobsurd.space.
+name: brain
+
+services:
+  nginx:
+    image: nginx:1.30.6-alpine@sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5
+    restart: unless-stopped
+    # Config lives in a mounted directory so file swaps (and the active.conf symlink) show up on reload.
+    command: ["nginx", "-c", "/etc/nginx/brain/nginx.conf", "-g", "daemon off;"]
+    environment:
+      NGINX_ENTRYPOINT_QUIET_LOGS: "1"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/brain:ro
+      - certbot-webroot:/var/www/certbot:ro
+      - letsencrypt:/etc/letsencrypt:ro
+
+  certbot:
+    image: certbot/certbot:v5.8.0@sha256:f70ad0adbb7e117f0fe42a63c553f28ea451edabc0148757b6efcd9735acaa20
+    restart: unless-stopped
+    # Idles; bootstrap-tls.sh and the host renewal timer run `docker compose exec certbot certbot ...`.
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do sleep 1d & wait $${!}; done"]
+    volumes:
+      - certbot-webroot:/var/www/certbot
+      - letsencrypt:/etc/letsencrypt
+
+  backend:
+    image: asia-south1-docker.pkg.dev/graphhacks-brain-8490/brain/backend:${IMAGE_TAG:?IMAGE_TAG must be a git SHA}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      PUBLIC_URL: https://brain.noobsurd.space
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  falkordb:
+    # Server-only image (no bundled browser); same engine and version as falkordb/falkordb:v4.22.1.
+    image: falkordb/falkordb-server:v4.22.1@sha256:2e99eb1cfa3309ce338beebe24b5e9f44f9eb8ead6d6ef63dcaca436afbbaeec
+    restart: unless-stopped
+    environment:
+      REDIS_ARGS: --requirepass ${FALKORDB_PASSWORD:?} --appendonly yes --appendfsync everysec
+      # redis-cli reads this, so the healthcheck needs no password on its command line.
+      REDISCLI_AUTH: ${FALKORDB_PASSWORD:?}
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  falkordb-browser:
+    image: falkordb/falkordb-browser:v2.7.0@sha256:07852f547dad7d33d5008ea9de28ba92d476c764a199650876efe313c07ea942
+    restart: unless-stopped
+    environment:
+      NEXTAUTH_URL: https://gdb.noobsurd.space
+      AUTH_URL: https://gdb.noobsurd.space
+      # Fixed secret so sessions survive container restarts (the image would otherwise mint one per container).
+      AUTH_SECRET: ${NEXTAUTH_SECRET:?}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?}
+      # Prefill the login form with the internal host; the FalkorDB password is still typed by the user.
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      FALKORDB_AUTO_CONNECT: "false"
+      # nginx is the one proxy appending to X-Forwarded-For.
+      TRUSTED_PROXY_HOPS: "1"
+    expose:
+      - "3000"
+    depends_on:
+      falkordb:
+        condition: service_healthy
+
+volumes:
+  falkordb-data:
+  certbot-webroot:
+  letsencrypt:

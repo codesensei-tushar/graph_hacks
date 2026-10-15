@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    # main runs these same checks inside deploy.yml, right before it deploys.
+    branches-ignore: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: ruff + pytest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      falkordb:
+        image: falkordb/falkordb-server:v4.22.1@sha256:2e99eb1cfa3309ce338beebe24b5e9f44f9eb8ead6d6ef63dcaca436afbbaeec
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: requirements*.txt
+      - name: Install dependencies
+        run: |
+          uv venv .venv
+          uv pip install --python .venv -r requirements-dev.txt
+      - name: Ruff
+        run: .venv/bin/ruff check --output-format github .
+      - name: Pytest
+        run: .venv/bin/pytest -q
+
+  image:
+    name: docker build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
