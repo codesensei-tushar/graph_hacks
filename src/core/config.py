@@ -15,6 +15,8 @@ class Settings:
     falkordb_host: str = field(default_factory=lambda: os.getenv("FALKORDB_HOST", "localhost"))
     falkordb_port: int = field(default_factory=lambda: int(os.getenv("FALKORDB_PORT", "6379")))
     falkordb_graph: str = field(default_factory=lambda: os.getenv("FALKORDB_GRAPH", "company"))
+    # Seed the company graph on startup when it's empty. Local development only; off in production.
+    seed_on_startup: bool = field(default_factory=lambda: os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"))
 
     slack_bot_token: str = field(default_factory=lambda: os.getenv("SLACK_BOT_TOKEN", ""))
     slack_signing_secret: str = field(default_factory=lambda: os.getenv("SLACK_SIGNING_SECRET", ""))

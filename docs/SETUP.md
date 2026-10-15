@@ -51,7 +51,7 @@ python scripts/seed_graph.py
 uvicorn src.main:app --reload
 ```
 
-`scripts/seed_graph.py` replaces the `company` graph with the seed company. The API listens on [http://localhost:8000](http://localhost:8000) and has no web page; you talk to it in Slack. On startup it seeds only when the graph is empty.
+`scripts/seed_graph.py` replaces the `company` graph with Company Brain itself: this repo's components, docs, open work, and decisions. It's for local development; never run it against production, because it deletes the whole graph first. The API listens on [http://localhost:8000](http://localhost:8000) and has no web page; you talk to it in Slack. With `SEED_ON_STARTUP=true` it also seeds on startup when the graph is empty.
 
 ## Environment
 
@@ -66,6 +66,7 @@ cp .env.example .env
 | `FALKORDB_HOST` | `localhost` | Graph host |
 | `FALKORDB_PORT` | `6379` | Graph port |
 | `FALKORDB_GRAPH` | `company` | Graph name inside the instance |
+| `SEED_ON_STARTUP` | empty (off) | `true` seeds an empty graph on startup. Local development only. |
 | `SLACK_BOT_TOKEN` | empty | Bot token (`xoxb-...`) |
 | `SLACK_SIGNING_SECRET` | empty | Verifies requests from Slack |
 | `SLACK_OWNER_ID` | empty | Slack member id of the installer (owner role) |
