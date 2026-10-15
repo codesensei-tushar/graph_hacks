@@ -23,6 +23,7 @@ from src.domain.slack.turn.approval_expiry import _job_id  # noqa: E402
 from src.domain.slack.turn.bot_threads import has_bot_thread, is_thread_muted  # noqa: E402
 from src.domain.slack.workspace import SlackWorkspace  # noqa: E402
 from src.integrations.slack.events import SlackEventInner, SlackReactionItem  # noqa: E402
+from src.seed import quillfern  # noqa: E402
 from src.seed.seed import reset_and_seed  # noqa: E402
 from tests.integration.test_slack_permissions import FakeSlack  # noqa: E402
 
@@ -30,7 +31,7 @@ from tests.integration.test_slack_permissions import FakeSlack  # noqa: E402
 class SlackTurnFlowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        reset_and_seed()
+        reset_and_seed(quillfern)
 
     @classmethod
     def tearDownClass(cls):
