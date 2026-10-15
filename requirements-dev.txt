@@ -1,0 +1,5 @@
+# CI and local checks. The app's own dependencies stay in requirements.txt.
+-r requirements.txt
+httpx==0.28.1
+pytest==9.1.1
+ruff==0.17.1

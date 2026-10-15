@@ -15,6 +15,8 @@ class Settings:
     falkordb_host: str = field(default_factory=lambda: os.getenv("FALKORDB_HOST", "localhost"))
     falkordb_port: int = field(default_factory=lambda: int(os.getenv("FALKORDB_PORT", "6379")))
     falkordb_graph: str = field(default_factory=lambda: os.getenv("FALKORDB_GRAPH", "company"))
+    # Empty locally (the dev docker-compose has no password); set in production.
+    falkordb_password: str = field(default_factory=lambda: os.getenv("FALKORDB_PASSWORD", ""))
 
     slack_bot_token: str = field(default_factory=lambda: os.getenv("SLACK_BOT_TOKEN", ""))
     slack_signing_secret: str = field(default_factory=lambda: os.getenv("SLACK_SIGNING_SECRET", ""))

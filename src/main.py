@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.api import ops
 from src.api.v1 import health, slack, slack_install
 from src.core import scheduler
 from src.core.config import settings
@@ -66,3 +67,4 @@ app = FastAPI(title="Company Brain", lifespan=lifespan)
 app.include_router(slack.router)
 app.include_router(slack_install.router)
 app.include_router(health.router)
+ops.install(app)

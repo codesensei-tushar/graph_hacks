@@ -366,7 +366,7 @@ def run_slack_channel_lookup(ctx: SlackLookupContext, args: ChannelLookupArgs, n
         header = f'Links/files ({rng.label}){f" matching \"{query}\"" if query else ""}:{incomplete_caveat}'
         return "\n".join(
             [header]
-            + [f"[{l.when}] {l.speaker} — {l.label}: {l.url}{' (file)' if l.kind == 'file' else ''}" for l in top]
+            + [f"[{link.when}] {link.speaker} — {link.label}: {link.url}{' (file)' if link.kind == 'file' else ''}" for link in top]
         )
 
     formatted = format_channel_messages(raw, ctx.user_names, ctx.tz_offset_seconds)

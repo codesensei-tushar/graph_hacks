@@ -6,7 +6,6 @@ upserts by ``custom_id`` (company-brain's full-replace write).
 """
 
 import hashlib
-import re
 from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timezone
 from typing import Any

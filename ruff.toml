@@ -1,0 +1,7 @@
+# Pinned to ruff's classic core rules (syntax errors, undefined names, unused imports)
+# so a newer ruff release can't turn CI red on its own. Widen this on purpose.
+target-version = "py312"
+line-length = 160
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
