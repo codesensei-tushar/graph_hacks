@@ -40,16 +40,18 @@ Stop it with:
 docker compose down
 ```
 
-Check it from Python:
+Check it from Python, then load the company and start the app:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python scripts/check_graph.py
+python scripts/seed_graph.py
+uvicorn app.main:app --reload
 ```
 
-You should see the `company` graph name and a node count. On a fresh database the count is `0` until seed data is loaded.
+`scripts/seed_graph.py` replaces the `company` graph with the seed company. The app is at [http://localhost:8000](http://localhost:8000). On startup it seeds only when the graph is empty.
 
 ## Environment
 

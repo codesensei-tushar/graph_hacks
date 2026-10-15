@@ -10,7 +10,8 @@ docker compose up -d
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-python scripts/check_graph.py
+python scripts/seed_graph.py
+uvicorn app.main:app --reload
 ```
 
-Graph browser: [http://localhost:3000](http://localhost:3000)
+App: [http://localhost:8000](http://localhost:8000). Graph browser: [http://localhost:3000](http://localhost:3000).
