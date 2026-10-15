@@ -4,14 +4,11 @@ Runs against a throwaway graph (``company_test``) so the dev graph is untouched.
 Needs FalkorDB on localhost:6379 (``docker compose up -d``).
 """
 
-import os
 import unittest
 import uuid
 from unittest import mock
 
-os.environ["FALKORDB_GRAPH"] = "company_test"
-os.environ["SLACK_OWNER_ID"] = "UOWNER"
-os.environ["SLACK_ADMIN_IDS"] = ""
+import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from src.db.falkordb_client import client, connect  # noqa: E402
 from src.domain.access import approvals  # noqa: E402
@@ -19,7 +16,12 @@ from src.domain.access.roles import role_of  # noqa: E402
 from src.domain.knowledge import ask_service  # noqa: E402
 from src.domain.slack import channel_membership, turn_service  # noqa: E402
 from src.domain.slack.workspace import SlackWorkspace  # noqa: E402
-from src.integrations.slack.client import SlackConversationInfo, SlackUserInfo  # noqa: E402
+from src.integrations.slack.client import (  # noqa: E402
+    SlackConversationInfo,
+    SlackThreadHistory,
+    SlackUserInfo,
+    SlackUserInfoLookup,
+)
 from src.integrations.slack.events import SlackEventInner  # noqa: E402
 from src.seed.seed import reset_and_seed  # noqa: E402
 
@@ -28,16 +30,32 @@ PUBLIC_FACT = "billing service dashboards moved to the new metrics board"
 
 
 class FakeSlack:
+    """The SlackClient surface the turn loop uses. Unknown calls are recorded no-ops."""
+
     def __init__(self, run: str):
         self.posts: list[tuple[str, str, str | None]] = []
         self.ephemerals: list[tuple[str, str, str]] = []
         self.cards: list[tuple[str, object]] = []
+        self.reactions: list[tuple[str, str, str]] = []
+        self.other_calls: list[str] = []
         self.private = {f"GPRIV{run}"}
         self.members = {f"GPRIV{run}": ["UBOT", f"UALICE{run}"]}
         self.guests: set[str] = set()
+        self.thread_messages: dict[str, list[dict]] = {}
 
+    def __getattr__(self, name):
+        def noop(*args, **kwargs):
+            self.other_calls.append(name)
+            return None
+
+        return noop
+
+    # --- conversations ---
     def conversation_info(self, channel):
         return SlackConversationInfo(id=channel, name=channel.lower(), is_private=channel in self.private)
+
+    def get_cached_slack_conversation_info(self, team_id, channel):
+        return self.conversation_info(channel)
 
     def conversation_members(self, channel):
         return list(self.members.get(channel, []))
@@ -45,27 +63,62 @@ class FakeSlack:
     def bot_private_channels(self):
         return [SlackConversationInfo(id=c, name=c.lower(), is_private=True) for c in self.private]
 
-    def user_info(self, user_id):
-        return SlackUserInfo(id=user_id, real_name=user_id.lower(), is_restricted=user_id in self.guests)
-
     def open_conversation(self, user_id):
         return f"D{user_id}"
 
+    def get_slack_thread_history(self, channel, thread_ts, **kwargs):
+        return SlackThreadHistory(ok=True, messages=list(self.thread_messages.get(thread_ts, [])), complete=True)
+
+    # --- people ---
+    def user_info(self, user_id):
+        return SlackUserInfo(
+            id=user_id,
+            real_name=user_id.lower(),
+            email=f"{user_id.lower()}@quillfern.example.com",
+            is_restricted=user_id in self.guests,
+        )
+
+    def lookup_slack_user_info(self, user_id):
+        return SlackUserInfoLookup(ok=True, user=self.user_info(user_id))
+
+    # --- messages ---
     def post_message(self, channel, text, thread_ts=None, blocks=None):
         self.posts.append((channel, text, thread_ts))
         return f"{len(self.posts)}.0"
 
+    post_slack_message = post_message
+
+    def post_slack_reply(self, channel, reply, thread_ts=None, extra_blocks=None):
+        return self.post_message(channel, reply, thread_ts)
+
     def post_ephemeral(self, channel, user, text, thread_ts=None):
         self.ephemerals.append((channel, user, text))
+        return True
 
-    def post_approval_card(self, channel, thread_ts, card):
+    post_slack_ephemeral = post_ephemeral
+
+    def post_slack_approval_card(self, channel, thread_ts, card):
         self.cards.append((channel, card))
         return "card.1"
 
-    def add_reaction(self, *args):
+    post_approval_card = post_slack_approval_card
+
+    def get_slack_message_blocks(self, channel, thread_ts, message_ts):
+        return {"text": "reply", "blocks": []}
+
+    def update_slack_message(self, channel, ts, text, blocks=None):
+        self.other_calls.append("update_slack_message")
         return True
 
-    def swap_reaction(self, *args):
+    # --- reactions ---
+    def add_slack_reaction(self, channel, ts, name, quiet_errors=None):
+        self.reactions.append((channel, ts, name))
+        return True
+
+    def add_reaction(self, channel, ts, name):
+        return self.add_slack_reaction(channel, ts, name)
+
+    def remove_slack_reaction(self, channel, ts, name):
         pass
 
 
@@ -89,6 +142,14 @@ class SlackPermissionsTest(unittest.TestCase):
         self.slack = FakeSlack(run)
         self.ws = SlackWorkspace(team_id="T1", bot_user_id="UBOT", bot_name="company-brain", client=self.slack)
         self.ts = 1000
+
+    def tearDown(self):
+        # Approval cards arm real expiry jobs in the shared scheduler queue; drop ours.
+        from src.core import scheduler as _scheduler
+        from src.domain.slack.turn.approval_expiry import _job_id as _expiry_job_id
+
+        for _channel, card in self.slack.cards:
+            _scheduler.cancel(_expiry_job_id(card.approval_id))
 
     def _ts(self) -> str:
         self.ts += 1
@@ -157,8 +218,10 @@ class SlackPermissionsTest(unittest.TestCase):
         self.slack.guests.add(guest)
         before = len(self.slack.posts)
         self.say(guest, f"D{guest}", "who owns billing", "im")
-        self.assertEqual(len(self.slack.posts), before)
-        self.assertIn("full members", self.slack.ephemerals[-1][2])
+        # In a DM the denial is the bot's reply (upstream posts it there, not ephemerally).
+        self.assertEqual(len(self.slack.posts), before + 1)
+        self.assertIn("full members", self.slack.posts[-1][1])
+        self.assertNotIn("Path", self.slack.posts[-1][1])
 
     def test_thread_reply_in_someone_elses_thread_is_context(self):
         ev = SlackEventInner(

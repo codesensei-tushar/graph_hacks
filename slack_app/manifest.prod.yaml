@@ -1,0 +1,56 @@
+# Slack app manifest for the production Company Brain app.
+# Served from https://brain.noobsurd.space (Events API over HTTPS, signed requests).
+# Usage: https://api.slack.com/apps -> Create New App -> From a manifest -> pick the
+# workspace -> paste this file. See docs/SLACK.md.
+display_information:
+  name: Company Brain
+  description: Company knowledge graph on FalkorDB
+  background_color: "#000b36"
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: company-brain
+    always_online: true
+oauth_config:
+  scopes:
+    # Read-mostly: every extra scope is another line on the install consent screen.
+    bot:
+      - app_mentions:read
+      - channels:history
+      - channels:read
+      - chat:write
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - im:write
+      - mpim:history
+      - mpim:read
+      - reactions:read
+      - reactions:write
+      - team:read
+      - users:read
+      - users:read.email
+settings:
+  event_subscriptions:
+    request_url: https://brain.noobsurd.space/slack/events
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+      - member_joined_channel
+      - member_left_channel
+      - reaction_added
+      - team_join
+      - user_change
+  interactivity:
+    is_enabled: true
+    request_url: https://brain.noobsurd.space/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

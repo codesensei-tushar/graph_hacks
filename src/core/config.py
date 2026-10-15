@@ -24,9 +24,31 @@ class Settings:
 
     bot_thread_ttl_seconds: int = 7 * 24 * 60 * 60
 
+    # Multi-workspace install over OAuth (Basic Information -> App Credentials).
+    slack_client_id: str = field(default_factory=lambda: os.getenv("SLACK_CLIENT_ID", ""))
+    slack_client_secret: str = field(default_factory=lambda: os.getenv("SLACK_CLIENT_SECRET", ""))
+    # Public origin Slack and browsers reach this server at, e.g. https://brain.example.com.
+    public_url: str = field(default_factory=lambda: os.getenv("PUBLIC_URL", "").rstrip("/"))
+    # Fernet key for bot tokens stored in FalkorDB. Needs the `cryptography` package.
+    token_encryption_key: str = field(default_factory=lambda: os.getenv("TOKEN_ENCRYPTION_KEY", ""))
+    # Bearer token for the install/status/disconnect routes; there is no web login.
+    brain_admin_token: str = field(default_factory=lambda: os.getenv("BRAIN_ADMIN_TOKEN", ""))
+
+    # Anthropic API key and model for every model profile (src/integrations/llm/model.py).
+    llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
+    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "") or "claude-haiku-5-5")
+
+    @property
+    def llm_enabled(self) -> bool:
+        return bool(self.llm_api_key)
+
     @property
     def slack_enabled(self) -> bool:
         return bool(self.slack_bot_token and self.slack_signing_secret)
+
+    @property
+    def slack_oauth_enabled(self) -> bool:
+        return bool(self.slack_client_id and self.slack_client_secret and self.slack_signing_secret)
 
 
 settings = Settings()

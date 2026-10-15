@@ -1,0 +1,274 @@
+"""``compute_turn``: the one place a Slack turn decides what to say.
+
+company-brain's ``computeTurn`` (``brain/turn/compute.ts``) is the LLM agent loop:
+it picks tools, reads memory, proposes writes, and returns a reply, a memory
+writeback, or an approval suspension. That agent is not built yet.
+
+**Agent plug-in point.** Call ``register_turn_agent(fn)`` with a function that takes a
+``TurnRequest`` and returns a ``TurnOutcome``. Until one is registered, the default
+below answers from the company graph (``domain/knowledge``) and scoped memory
+(``memory/search_brain``), and handles the built-in commands.
+
+Everything around this seam (turn control, steering, approvals, streaming, memory
+writeback, reactions) is the ported turn loop in ``turn_service.py``, so an agent only
+has to produce a ``TurnOutcome``.
+"""
+
+import logging
+import re
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
+from src.domain.access.roles import ROLE_OWNER, role_at_least, role_of, set_role
+from src.domain.knowledge import ask_service
+from src.domain.memory import memory_service
+from src.domain.memory.search_brain import search_brain
+from src.domain.memory.writeback import (
+    SHARED_TEAM_BRAIN_CONTAINER_TAG,
+    SlackMemoryScope,
+    scope_label,
+    slack_memory_container_tag,
+)
+from src.domain.slack import channel_membership, format
+from src.integrations.slack.events import SlackEventInner, mentioned_user_ids
+
+log = logging.getLogger(__name__)
+
+TICKET_TOOL_NAME = "Create ticket"
+
+_REMEMBER = re.compile(r"^(?:remember|note)\s*[:\-]\s*(.+)$", re.IGNORECASE | re.DOTALL)
+_TICKET = re.compile(r"^(?:ticket|file ticket|new ticket)\s*[:\-]\s*(.+)$", re.IGNORECASE | re.DOTALL)
+_SCOPES = re.compile(r"^(?:what can you see|scopes?|what do you know about me)\??$", re.IGNORECASE)
+_PROMOTE = re.compile(r"^(promote|demote)\b", re.IGNORECASE)
+_FORGET = re.compile(r"^forget (?:this )?(?:channel|conversation|dm)\b", re.IGNORECASE)
+_LINK = re.compile(r"^link (?:my )?(?:slack )?account\b", re.IGNORECASE)
+_DISCONNECT = re.compile(r"^disconnect(?: (?:company brain|slack|this workspace))?\s*$", re.IGNORECASE)
+
+
+@dataclass
+class TurnApproval:
+    """A consequential write waiting for the asker's Approve/Deny."""
+
+    tool_name: str
+    tool_input: dict
+    summary: str
+    container_tag: str
+
+
+@dataclass
+class TurnRequest:
+    workspace: object
+    event: SlackEventInner
+    question: str
+    raw_text: str
+    asker_slack_user_id: str
+    asker_name: str | None
+    memory_scope: SlackMemoryScope
+    read_tags: list[str]
+    thread: list[dict]
+    channel: str
+    thread_ts: str
+    is_dm: bool
+    progress: object | None = None
+    trace_id: str | None = None
+    turn_steering: str | None = None
+    live_updates: list[str] = field(default_factory=list)
+    passive_investigation: dict | None = None
+    agent_main_effort: str | None = None
+
+
+@dataclass
+class TurnOutcome:
+    # "done" | "suspended"
+    status: str = "done"
+    reply: str = ""
+    # MemoryWriteback docs (memory/writeback.py) to save after the reply.
+    memory: object | None = None
+    approval: TurnApproval | None = None
+    # Passive investigation concluded there is nothing worth saying.
+    silent_conclusion: bool = False
+    # Side effect a command wants after delivery, e.g. disconnecting the workspace.
+    after_reply: Callable[[], None] | None = None
+
+
+TurnAgent = Callable[[TurnRequest], TurnOutcome]
+_agent: TurnAgent | None = None
+
+
+def register_turn_agent(agent: TurnAgent | None) -> None:
+    """Install the LLM agent. ``None`` restores the built-in graph answerer."""
+    global _agent
+    _agent = agent
+
+
+def compute_turn(request: TurnRequest) -> TurnOutcome:
+    command = _command(request)
+    if command is not None:
+        return command
+    if _agent is not None:
+        return _agent(request)
+    return _answer_from_graph(request)
+
+
+# --- default answerer ------------------------------------------------------------------
+
+
+def _answer_from_graph(request: TurnRequest) -> TurnOutcome:
+    if request.passive_investigation:
+        # Investigating unprompted needs the agent; without it, stay silent.
+        return TurnOutcome(silent_conclusion=True)
+    question = request.question
+    if request.live_updates:
+        question = " ".join([question, *request.live_updates])
+    result = ask_service.ask(question, request.read_tags)
+    found = search_brain(question, request.memory_scope, trace_id=request.trace_id)
+    memories = [_memory_row(row) for row in (found.get("results") or [])[:3]]
+    names = channel_names(request.read_tags)
+    return TurnOutcome(reply=format.format_answer(result, memories, request.read_tags, names))
+
+
+def _memory_row(row: dict) -> dict:
+    metadata = row.get("metadata") or {}
+    return {
+        "text": row.get("memory") or row.get("content") or row.get("text") or "",
+        "scope": row.get("container_tag") or row.get("scope") or SHARED_TEAM_BRAIN_CONTAINER_TAG,
+        "channel_id": metadata.get("slack_channel_id") or row.get("channel_id"),
+        "author": row.get("author") or metadata.get("author_name") or metadata.get("author_id") or "someone",
+    }
+
+
+def channel_names(tags: list[str]) -> dict[str, str]:
+    ids = [tag.removeprefix("slack_channel_") for tag in tags if tag.startswith("slack_channel_")]
+    return channel_membership.channel_names(ids)
+
+
+# --- built-in commands -------------------------------------------------------------------
+
+
+def _command(request: TurnRequest) -> TurnOutcome | None:
+    text = request.question
+    asker = request.asker_slack_user_id
+    scope = request.memory_scope
+    write_tag = slack_memory_container_tag(scope)
+    names = channel_names(request.read_tags + ([write_tag] if write_tag else []))
+
+    if not text or text.lower() in ("help", "?"):
+        return TurnOutcome(reply=format.HELP_TEXT)
+    if _SCOPES.match(text):
+        return TurnOutcome(reply=format.format_scopes(request.read_tags, write_tag, names))
+
+    if match := _REMEMBER.match(text):
+        if not write_tag:
+            return TurnOutcome(reply="I can't save anything from here.")
+        memory_service.write(match.group(1).strip(), write_tag, asker, scope.channel_id or "", request.event.ts or "")
+        return TurnOutcome(reply=f"Saved. Anyone who can read {scope_label(write_tag, names)} can recall it.")
+
+    if match := _TICKET.match(text):
+        title = match.group(1).strip()
+        container = write_tag or SHARED_TEAM_BRAIN_CONTAINER_TAG
+        return TurnOutcome(
+            status="suspended",
+            approval=TurnApproval(
+                tool_name=TICKET_TOOL_NAME,
+                tool_input={"title": title},
+                summary=(
+                    f"Create a ticket titled *{title}* in the company graph and link it to the service it's about. "
+                    f"Visible to {scope_label(container, names)}."
+                ),
+                container_tag=container,
+            ),
+        )
+
+    if _PROMOTE.match(text):
+        # Mentions are stripped from the question; read targets from the raw message.
+        return TurnOutcome(reply=_change_role(asker, text, request.raw_text, request.workspace.bot_user_id))
+
+    if _FORGET.match(text):
+        return TurnOutcome(reply=_forget(asker, scope, write_tag, names))
+
+    if _LINK.match(text):
+        return TurnOutcome(reply=_link_account(request))
+
+    if _DISCONNECT.match(text):
+        if not role_at_least(role_of(asker), "admin"):
+            return TurnOutcome(reply="Only owners and admins can disconnect Company Brain.")
+        from src.domain.slack.workspace import disconnect_slack_workspace
+
+        team_id = request.workspace.team_id
+        return TurnOutcome(
+            reply="Disconnecting Company Brain from this workspace. An admin can reinstall it anytime.",
+            after_reply=lambda: disconnect_slack_workspace(team_id),
+        )
+    return None
+
+
+def _change_role(asker: str, text: str, raw_text: str, bot_user_id: str | None) -> str:
+    if not role_at_least(role_of(asker), "admin"):
+        return "Only owners and admins can change roles."
+    targets = mentioned_user_ids(raw_text, bot_user_id)
+    if not targets:
+        return "Mention who to change, like `promote @someone`."
+    promote = text.lower().startswith("promote")
+    done = []
+    for target in targets:
+        if role_of(target) == ROLE_OWNER:
+            continue
+        set_role(target, "admin" if promote else "member")
+        done.append(f"<@{target}>")
+    if not done:
+        return "The owner's role can't be changed here."
+    return f"{', '.join(done)} {'is now an admin' if promote else 'is now a member'}."
+
+
+def _forget(asker: str, scope: SlackMemoryScope, write_tag: str | None, names: dict[str, str]) -> str:
+    if not write_tag:
+        return "There's nothing saved from here."
+    if scope.kind == "dm":
+        count = memory_service.forget_scope(write_tag)
+        return f"Forgot {count} memories from your DMs."
+    if not role_at_least(role_of(asker), "admin"):
+        return "Only owners and admins can wipe a channel's memory."
+    channel_filter = scope.channel_id if write_tag == SHARED_TEAM_BRAIN_CONTAINER_TAG else None
+    count = memory_service.forget_scope(write_tag, channel_filter)
+    where = f"<#{scope.channel_id}>" if channel_filter else scope_label(write_tag, names)
+    return f"Forgot {count} memories from {where}."
+
+
+def _link_account(request: TurnRequest) -> str:
+    from src.domain.slack.account_link import post_slack_account_link_prompt
+
+    workspace = request.workspace
+    info = workspace.client.user_info(request.asker_slack_user_id)
+    posted = post_slack_account_link_prompt(
+        web=workspace.client.web,
+        team_id=workspace.team_id,
+        slack_user_id=request.asker_slack_user_id,
+        org_name=workspace.team_name or "this workspace",
+        channel=request.channel,
+        is_dm=request.is_dm,
+        thread_ts=request.thread_ts,
+        slack_email=info.email if info else None,
+        slack_display_name=request.asker_name,
+    )
+    if not posted:
+        return "I couldn't create a link just now. Try again in a minute."
+    return "" if request.is_dm else "I sent you a private link to connect your account."
+
+
+# --- approved actions -------------------------------------------------------------------
+
+
+def execute_approved_action(tool_name: str, tool_input: dict, container_tag: str) -> str:
+    """Run an approved write. Only the built-in ticket tool exists until the agent lands."""
+    if tool_name != TICKET_TOOL_NAME:
+        raise ValueError(f"unknown approved tool {tool_name}")
+    title = tool_input["title"]
+    created = ask_service.ingest_ticket(title, "", container_tag)
+    read_tags = list(dict.fromkeys([SHARED_TEAM_BRAIN_CONTAINER_TAG, container_tag]))
+    follow = ask_service.who_knows(created["about_name"], read_tags)
+    result = {
+        "tool": "ingest",
+        "answer": f"Filed *{created['id']}* about {created['about_name']}. {follow['answer']}",
+        "path": created["path"] + follow["path"],
+    }
+    return format.format_answer(result, [], read_tags, channel_names(read_tags))

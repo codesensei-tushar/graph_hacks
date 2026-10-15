@@ -70,8 +70,8 @@ cp .env.example .env
 | `SLACK_SIGNING_SECRET` | empty | Verifies requests from Slack |
 | `SLACK_OWNER_ID` | empty | Slack member id of the installer (owner role) |
 | `SLACK_ADMIN_IDS` | empty | Comma-separated member ids that start as admins |
-| `LLM_API_KEY` | empty | Chat model, later |
-| `LLM_MODEL` | empty | Model name, later |
+| `LLM_API_KEY` | empty | Anthropic API key. Turns on triage, chime-in and memory extraction (see docs/SLACK.md) |
+| `LLM_MODEL` | `claude-opus-5-5` | Model for every profile |
 
 ## How the pieces will connect
 

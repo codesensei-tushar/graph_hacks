@@ -25,6 +25,28 @@ class SlackReactionItem(_Model):
     ts: str | None = None
 
 
+class SlackNestedMessage(_Model):
+    type: str | None = None
+    user: str | None = None
+    text: str | None = None
+    ts: str | None = None
+    thread_ts: str | None = None
+    bot_id: str | None = None
+    app_id: str | None = None
+    subtype: str | None = None
+
+
+class SlackFile(_Model):
+    id: str
+    name: str | None = None
+    mode: str | None = None
+    file_access: str | None = None
+    mimetype: str | None = None
+    size: int | None = None
+    url_private: str | None = None
+    url_private_download: str | None = None
+
+
 class SlackEventInner(_Model):
     type: str
     user: str | None = None
@@ -40,6 +62,11 @@ class SlackEventInner(_Model):
     assistant_thread: SlackAssistantThread | None = None
     reaction: str | None = None
     item: SlackReactionItem | None = None
+    tab: str | None = None
+    files: list[SlackFile] | None = None
+    deleted_ts: str | None = None
+    message: SlackNestedMessage | None = None
+    previous_message: SlackNestedMessage | None = None
 
 
 class SlackUrlVerification(_Model):

@@ -1,7 +1,20 @@
-"""Slack HTTP surface. Port of company-brain ``routes/slack/index.ts`` (events + interactions).
+"""Port of company-brain `routes/slack/index.ts` (events + interactions).
 
 Slack needs an answer within 3 seconds, so every route verifies, dedupes, classifies,
-returns ``{"ok": true}`` and hands the work to a background task.
+returns ``{"ok": true}`` and hands the work to a background task. Install, OAuth,
+status, disconnect and account-link routes live in ``slack_install.py``.
+
+Event dispatch, in upstream order:
+
+| Kind                         | Handler                                         |
+|------------------------------|-------------------------------------------------|
+| team_join / user_change      | ``team_invite.on_slack_team_join`` / ``on_slack_user_change`` |
+| agent surface events         | acknowledged                                    |
+| debug / mute reactions       | ``turn_service.run_slack_debug_reaction`` / ``run_slack_mute_reaction`` |
+| channel membership           | ``channel_membership.run_slack_membership_event`` |
+| explicit (DM, @mention, thread, plain-name wake) | ``turn_service.run_slack_turn`` |
+| top-level chime candidate    | ``chime.run_slack_chime_in``                    |
+| other messages               | ``turn_service.run_slack_context_event``        |
 """
 
 import json
@@ -14,9 +27,17 @@ from fastapi.responses import JSONResponse, Response
 from src.core.config import settings
 from src.db.falkordb_client import kv
 from src.domain.slack import channel_membership, turn_service
-from src.domain.slack.workspace import get_workspace_by_team_id, upsert_slack_user
+from src.domain.slack.channels import rollout
+from src.domain.slack.team_invite import (
+    on_slack_team_join,
+    on_slack_user_change,
+    parse_team_invite_interaction_payload,
+    start_team_invite_wave,
+)
+from src.domain.slack.turn import chime
+from src.domain.slack.workspace import get_workspace_by_team_id
 from src.integrations.slack.bot_address import collect_bot_address_aliases, is_bot_addressed_by_name
-from src.integrations.slack.client import APPROVAL_APPROVE_ACTION_ID, APPROVAL_DENY_ACTION_ID, SlackUserInfo
+from src.integrations.slack.client import APPROVAL_APPROVE_ACTION_ID, APPROVAL_DENY_ACTION_ID
 from src.integrations.slack.events import (
     SlackEventInner,
     SlackUrlVerification,
@@ -24,13 +45,13 @@ from src.integrations.slack.events import (
     is_agent_surface_event,
     is_answered_event,
     is_channel_membership_event,
+    is_chime_in_event,
     is_context_retention_event,
     is_debug_reaction_event,
     is_direct_message,
     is_mute_reaction_event,
     is_name_wake_candidate,
     parse_envelope,
-    parse_workspace_user_event,
 )
 from src.integrations.slack.verify import is_slack_retry, verify_slack_signature
 
@@ -69,6 +90,24 @@ def _run_and_mark(key: str, fn, *args, **kwargs) -> None:
         log.exception("[slack] %s failed", getattr(fn, "__name__", "handler"))
 
 
+def _run_team_join(key: str, team_id: str, user: dict) -> None:
+    # Only dedup terminal outcomes so Slack's retries can redeliver after transient failures.
+    try:
+        if on_slack_team_join(team_id, user):
+            _mark_seen(key)
+    except Exception:
+        log.exception("[slack] on_slack_team_join failed")
+
+
+def _workspace_user_event(body: dict) -> tuple[str, str, str, dict] | None:
+    if body.get("type") != "event_callback":
+        return None
+    event = body.get("event") or {}
+    if event.get("type") not in ("team_join", "user_change") or not isinstance(event.get("user"), dict):
+        return None
+    return body.get("team_id") or "", body.get("event_id") or "", event["type"], event["user"]
+
+
 @router.post("/events")
 async def slack_events(request: Request, background: BackgroundTasks):
     raw_body = await request.body()
@@ -89,20 +128,16 @@ async def slack_events(request: Request, background: BackgroundTasks):
         return JSONResponse({"error": "invalid signature"}, status_code=401)
 
     # team_join / user_change first: their nested user object fails the generic schema.
-    workspace_user = parse_workspace_user_event(body)
+    workspace_user = _workspace_user_event(body)
     if workspace_user:
-        team_id, event_id, _kind, user = workspace_user
+        team_id, event_id, kind, user = workspace_user
         key = f"slack:evt:{event_id}"
         if _seen(key) or get_workspace_by_team_id(team_id) is None:
             return {"ok": True}
-        info = SlackUserInfo(
-            id=user.id,
-            name=user.name,
-            real_name=user.real_name,
-            is_bot=bool(user.is_bot),
-            is_restricted=bool(user.is_restricted or user.is_ultra_restricted or user.is_stranger or user.deleted),
-        )
-        background.add_task(_run_and_mark, key, upsert_slack_user, info)
+        if kind == "team_join":
+            background.add_task(_run_team_join, key, team_id, user)
+        else:
+            background.add_task(_run_and_mark, key, on_slack_user_change, team_id, user)
         return {"ok": True}
 
     envelope = parse_envelope(body)
@@ -129,9 +164,11 @@ async def slack_events(request: Request, background: BackgroundTasks):
         _log_event("ignored", event, reason="workspace_not_connected")
         return {"ok": True}
 
-    if is_debug_reaction_event(event) or is_mute_reaction_event(event):
-        # Debug traces and mute arrive with the agent; acknowledge for now.
-        _mark_seen(key)
+    if is_debug_reaction_event(event):
+        background.add_task(_run_and_mark, key, turn_service.run_slack_debug_reaction, workspace, event)
+        return {"ok": True}
+    if is_mute_reaction_event(event):
+        background.add_task(_run_and_mark, key, turn_service.run_slack_mute_reaction, workspace, event)
         return {"ok": True}
 
     if is_channel_membership_event(event):
@@ -151,26 +188,35 @@ async def slack_events(request: Request, background: BackgroundTasks):
             is_explicit_turn = addressed_by_name = True
             _log_event("name wake", event, event_id=event_id)
 
-    # Chime-in needs the agent's triage; until then those messages are kept as context.
-    is_context_turn = not is_explicit_turn and is_context_retention_event(event, bot_user_id)
-    if not is_explicit_turn and not is_context_turn:
+    is_chime_turn = not addressed_elsewhere and not is_explicit_turn and is_chime_in_event(event, bot_user_id)
+    is_context_turn = is_context_retention_event(event, bot_user_id)
+    if not is_explicit_turn and not is_chime_turn and not is_context_turn:
         _log_event("ignored", event, event_id=event_id, reason="not_answered")
         return {"ok": True}
 
-    # The same user message can arrive as several event types; lock on channel+ts per turn.
+    # The same user message can race in via several event types; lock on channel+ts per turn.
     if event.channel and event.ts:
-        kind = "turn" if is_explicit_turn else "context"
+        kind = "chime" if is_chime_turn else "turn" if is_explicit_turn else "context"
         turn_key = f"slack:{kind}:{team_id}:{event.channel}:{event.ts}"
         if not kv().set(turn_key, "1", nx=True, ex=EVENT_DEDUP_TTL_SECONDS):
-            _log_event("turn dedup skip", event, event_id=event_id)
+            _log_event("turn dedup skip", event, event_id=event_id, turn_key=turn_key)
             return {"ok": True}
 
-    _log_event("dispatch" if is_explicit_turn else "context dispatch", event, event_id=event_id)
     if is_explicit_turn:
+        _log_event("dispatch", event, event_id=event_id, routing="directed_to_other_user" if addressed_elsewhere else "-")
         background.add_task(_run_and_mark, key, turn_service.run_slack_turn, workspace, event, addressed_by_name)
+    elif is_chime_turn:
+        _log_event("chime dispatch", event, event_id=event_id)
+        background.add_task(_run_and_mark, key, _run_chime, workspace, event)
     else:
+        _log_event("context dispatch", event, event_id=event_id)
         background.add_task(_run_and_mark, key, turn_service.run_slack_context_event, workspace, event)
     return {"ok": True}
+
+
+def _run_chime(workspace, event: SlackEventInner) -> None:
+    turn_service.retain_without_model(workspace, event)
+    chime.run_slack_chime_in(workspace, event, run_turn=turn_service.run_turn)
 
 
 def parse_interaction_payload(raw_body: bytes) -> dict | None:
@@ -201,6 +247,17 @@ def parse_interaction_payload(raw_body: bytes) -> dict | None:
     }
 
 
+def _decoded_payload(raw_body: bytes) -> dict | None:
+    payload = parse_qs(raw_body.decode()).get("payload", [None])[0]
+    if not payload:
+        return None
+    try:
+        parsed = json.loads(payload)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 @router.post("/interactions")
 async def slack_interactions(request: Request, background: BackgroundTasks):
     raw_body = await request.body()
@@ -218,5 +275,16 @@ async def slack_interactions(request: Request, background: BackgroundTasks):
             approval["user_id"],
             approval["response_url"],
         )
+        return {"ok": True}
+
+    rollout_click = rollout.parse_public_channel_rollout_interaction_payload(raw_body)
+    if rollout_click:
+        background.add_task(rollout.start_public_channel_rollout, rollout_click)
+        return {"ok": True}
+
+    decoded = _decoded_payload(raw_body)
+    team_invite = parse_team_invite_interaction_payload(decoded) if decoded else None
+    if team_invite:
+        background.add_task(start_team_invite_wave, **team_invite)
         return {"ok": True}
     return Response(status_code=200)

@@ -79,6 +79,7 @@ def insert_pending_approval(
     summary: str,
     container_tag: str,
     now: int | None = None,
+    extra: dict | None = None,
 ) -> PendingApproval:
     now = now or _now_ms()
     approval = PendingApproval(
@@ -94,6 +95,7 @@ def insert_pending_approval(
         status="pending",
         created_at=now,
         expires_at=now + APPROVAL_EXPIRY_MS,
+        extra=dict(extra or {}),
     )
     kv().set(_key(approval.approval_id), json.dumps(asdict(approval)), ex=_RECORD_TTL_SECONDS)
     return approval
