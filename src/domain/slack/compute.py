@@ -42,6 +42,7 @@ _SCOPES = re.compile(r"^(?:what can you see|scopes?|what do you know about me)\?
 _PROMOTE = re.compile(r"^(promote|demote)\b", re.IGNORECASE)
 _FORGET = re.compile(r"^forget (?:this )?(?:channel|conversation|dm)\b", re.IGNORECASE)
 _LINK = re.compile(r"^link (?:my )?(?:slack )?account\b", re.IGNORECASE)
+_BACKFILL = re.compile(r"^(?:backfill|import|add me to|join)(?: (?:the|my|all))? public channels\b", re.IGNORECASE)
 _DISCONNECT = re.compile(r"^disconnect(?: (?:company brain|slack|this workspace))?\s*$", re.IGNORECASE)
 
 
@@ -188,6 +189,11 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
 
     if _LINK.match(text):
         return TurnOutcome(reply=_link_account(request))
+
+    if _BACKFILL.match(text):
+        from src.domain.slack.channels.rollout import start_public_channel_rollout_from_command
+
+        return TurnOutcome(reply=start_public_channel_rollout_from_command(request.workspace.team_id, asker))
 
     if _DISCONNECT.match(text):
         if not role_at_least(role_of(asker), "admin"):
