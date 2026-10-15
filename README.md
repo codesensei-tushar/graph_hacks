@@ -5,6 +5,9 @@ Hackathon project for Graph Hacks track 03. FalkorDB holds how a company is conn
 - What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
 - How to run the graph: [docs/SETUP.md](docs/SETUP.md)
 - Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
+- Production deploy, CI/CD and operations: [docs/DEPLOY.md](docs/DEPLOY.md)
+
+AI assistance: parts of this project were written with Claude Code (Anthropic), including the production infrastructure, deploy pipeline and their docs.
 
 ```bash
 docker compose up -d
