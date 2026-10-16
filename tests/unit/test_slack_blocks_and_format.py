@@ -42,7 +42,7 @@ class FormatTests(unittest.TestCase):
         memories = [{"text": "billing retries are flaky", "scope": "slack_channel_G1", "channel_id": "G1", "author": "Bo"}]
         text = format_answer(result, memories, ["org_shared", "slack_channel_G1"], {"G1": "pay"})
         self.assertTrue(text.startswith("Billing is owned by A."))
-        self.assertIn("A —OWNS→ Billing", text)
+        self.assertIn("A -[OWNS]-> Billing", text)
         self.assertIn("who_knows", text)
         self.assertIn("billing retries are flaky", text)
         self.assertIn("#pay", text)

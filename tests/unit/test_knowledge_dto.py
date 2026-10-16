@@ -3,7 +3,7 @@
 import unittest
 
 from src.domain.knowledge import catalogue
-from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
+from src.domain.knowledge.dto import MemoryLine, PathStep, ToolResult, ToolSpec
 
 
 class PathStepTest(unittest.TestCase):
@@ -20,7 +20,10 @@ class ToolResultTest(unittest.TestCase):
         result = ToolResult(tool="who_owns", answer="Billing Service is owned by Arjun Mehta.")
         self.assertTrue(result.found)
         self.assertEqual(result.candidates, [])
-        self.assertEqual(result.to_dict(), {"tool": "who_owns", "answer": "Billing Service is owned by Arjun Mehta.", "path": []})
+        self.assertEqual(
+            result.to_dict(),
+            {"tool": "who_owns", "answer": "Billing Service is owned by Arjun Mehta.", "path": [], "found": True, "candidates": []},
+        )
 
     def test_mutable_defaults_are_per_instance(self):
         first, second = ToolResult(tool="t", answer=""), ToolResult(tool="t", answer="")
@@ -41,6 +44,15 @@ class ToolResultTest(unittest.TestCase):
         result = ToolResult(tool="who_knows", answer="The graph doesn't know that.", found=False, candidates=["Billing Service", "API Gateway"])
         self.assertFalse(result.found)
         self.assertEqual(result.candidates, ["Billing Service", "API Gateway"])
+        self.assertFalse(result.to_dict()["found"])
+        self.assertEqual(result.to_dict()["candidates"], ["Billing Service", "API Gateway"])
+
+    def test_memories_carry_when_they_were_learned(self):
+        line = MemoryLine(text="billing retries moved to the invoice worker", learned_at="2026-10-17", author="Bo", scope="slack_channel_G1", channel_id="G1")
+        result = ToolResult(tool="recall", answer="", memories=[line])
+        self.assertEqual(result.to_dict()["memories"], [line.to_dict()])
+        self.assertEqual(line.to_dict()["learned_at"], "2026-10-17")
+        self.assertNotIn("memories", ToolResult(tool="recall", answer="").to_dict())
 
 
 class CatalogueTest(unittest.TestCase):
