@@ -1,18 +1,20 @@
 """A fictional company used as test data by the integration tests.
 
 Quillfern is made up: a small SaaS that sells a team notebook. Every person,
-service, document, ticket, and decision here is invented.
+service, document, ticket, and decision here is invented. People carry a GitHub
+login and services the repo paths they own, so the scripted pull requests in
+``quillfern_workspace.py`` link to them on ingest.
 """
 
 COMPANY = {"id": "quillfern", "name": "Quillfern"}
 
 PEOPLE = [
-    {"id": "maya", "name": "Maya Ortiz", "role": "Platform lead", "email": "maya@quillfern.example.com"},
-    {"id": "arjun", "name": "Arjun Mehta", "role": "Billing engineer", "email": "arjun@quillfern.example.com"},
-    {"id": "lena", "name": "Lena Fischer", "role": "Backend engineer", "email": "lena@quillfern.example.com"},
-    {"id": "kofi", "name": "Kofi Mensah", "role": "Data engineer", "email": "kofi@quillfern.example.com"},
-    {"id": "sara", "name": "Sara Lindqvist", "role": "Site reliability engineer", "email": "sara@quillfern.example.com"},
-    {"id": "tomas", "name": "Tomas Reyes", "role": "Engineering manager", "email": "tomas@quillfern.example.com"},
+    {"id": "maya", "name": "Maya Ortiz", "role": "Platform lead", "email": "maya@quillfern.example.com", "github": "maya-ortiz"},
+    {"id": "arjun", "name": "Arjun Mehta", "role": "Billing engineer", "email": "arjun@quillfern.example.com", "github": "arjun-mehta"},
+    {"id": "lena", "name": "Lena Fischer", "role": "Backend engineer", "email": "lena@quillfern.example.com", "github": "lena-fischer"},
+    {"id": "kofi", "name": "Kofi Mensah", "role": "Data engineer", "email": "kofi@quillfern.example.com", "github": "kofi-mensah"},
+    {"id": "sara", "name": "Sara Lindqvist", "role": "Site reliability engineer", "email": "sara@quillfern.example.com", "github": "sara-lindqvist"},
+    {"id": "tomas", "name": "Tomas Reyes", "role": "Engineering manager", "email": "tomas@quillfern.example.com", "github": "tomas-reyes"},
 ]
 
 TEAMS = [
@@ -22,15 +24,15 @@ TEAMS = [
 ]
 
 SERVICES = [
-    {"id": "auth-service", "name": "Auth Service", "team": "platform", "aliases": "auth, authentication, login, sessions"},
-    {"id": "api-gateway", "name": "API Gateway", "team": "platform", "aliases": "gateway, api"},
-    {"id": "billing-service", "name": "Billing Service", "team": "payments", "aliases": "billing, payments, subscriptions"},
-    {"id": "invoice-worker", "name": "Invoice Worker", "team": "payments", "aliases": "invoices, invoicing"},
-    {"id": "notification-service", "name": "Notification Service", "team": "platform", "aliases": "notifications, email, alerts"},
-    {"id": "search-service", "name": "Search Service", "team": "data", "aliases": "search"},
-    {"id": "memory-layer", "name": "Memory Layer", "team": "data", "aliases": "memory, memory layer, notebook memory"},
-    {"id": "postgres", "name": "Postgres", "team": "platform", "aliases": "postgresql, primary database, db"},
-    {"id": "graph-store", "name": "Graph Store", "team": "data", "aliases": "graph, graph database"},
+    {"id": "auth-service", "name": "Auth Service", "team": "platform", "aliases": "auth, authentication, login, sessions", "paths": ["services/auth"]},
+    {"id": "api-gateway", "name": "API Gateway", "team": "platform", "aliases": "gateway, api", "paths": ["services/gateway"]},
+    {"id": "billing-service", "name": "Billing Service", "team": "payments", "aliases": "billing, payments, subscriptions", "paths": ["services/billing"]},
+    {"id": "invoice-worker", "name": "Invoice Worker", "team": "payments", "aliases": "invoices, invoicing", "paths": ["workers/invoice"]},
+    {"id": "notification-service", "name": "Notification Service", "team": "platform", "aliases": "notifications, email, alerts", "paths": ["services/notify"]},
+    {"id": "search-service", "name": "Search Service", "team": "data", "aliases": "search", "paths": ["services/search"]},
+    {"id": "memory-layer", "name": "Memory Layer", "team": "data", "aliases": "memory, memory layer, notebook memory", "paths": ["services/memory"]},
+    {"id": "postgres", "name": "Postgres", "team": "platform", "aliases": "postgresql, primary database, db", "paths": ["infra/postgres"]},
+    {"id": "graph-store", "name": "Graph Store", "team": "data", "aliases": "graph, graph database", "paths": ["infra/graph"]},
 ]
 
 # child depends on parent

@@ -74,6 +74,27 @@ cp .env.example .env
 | `LLM_API_KEY` | empty | Anthropic API key. Turns on triage, chime-in and memory extraction (see docs/SLACK.md) |
 | `LLM_MODEL` | `claude-haiku-5-5` | Model for every profile. Haiku only; the profile sets effort, not the model |
 
+## Replay the synthetic company
+
+`src/seed/quillfern.py` is a made-up company and `src/seed/quillfern_workspace.py` its scripted Slack history, demo steps, and GitHub repos. The replay plays that script into the app through the real routes, with real request signatures, so the graph ends up the way a used workspace would leave it.
+
+Locally, with nothing but FalkorDB running:
+
+```bash
+python scripts/replay_workspace.py --graph company_demo
+```
+
+That starts a fake Slack Web API (`scripts/replay/slack_api.py`), points the app at it through `SLACK_API_BASE_URL`, seeds Quillfern, loads the repos, plays the chat history and the seven demo steps from [STRATEGY.md](STRATEGY.md), and prints every reply. Nothing reaches Slack, and nothing calls the model unless you pass `--with-model`: without one, channel messages are kept as raw memories. `tests/integration/test_demo_replay.py` runs the same script and asserts the answers.
+
+To load a real dev workspace before a live demo, run the app with `SEED_ON_STARTUP` off, seed Quillfern with `python scripts/seed_graph.py --company quillfern`, then post the history to the running instance, mapping the scripted ids to the real ones:
+
+```bash
+python scripts/replay_workspace.py --app-url http://localhost:8000 --team T0123 --bot U0BOT \
+    --map CENGINEERING=C0ENG --map GPAYMENTS=G0PAY --map UMAYA=U0MAYA --map UARJUN=U0ARJUN ...
+```
+
+The instance verifies the events with `SLACK_SIGNING_SECRET` from `.env`, so the script reads the same file. Replies land in Slack. Add `--steps demo` to fire the seven steps too; Approve clicks happen in Slack by hand.
+
 ## How the pieces will connect
 
 1. `docker-compose.yml` runs FalkorDB.

@@ -21,6 +21,8 @@ class Settings:
     seed_on_startup: bool = field(default_factory=lambda: os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"))
 
     slack_bot_token: str = field(default_factory=lambda: os.getenv("SLACK_BOT_TOKEN", ""))
+    # Slack Web API origin. Tests and the demo replay point it at a local fake (scripts/replay/slack_api.py).
+    slack_api_base_url: str = field(default_factory=lambda: os.getenv("SLACK_API_BASE_URL", "") or "https://slack.com/api/")
     slack_signing_secret: str = field(default_factory=lambda: os.getenv("SLACK_SIGNING_SECRET", ""))
     # Slack user ids. The owner is the person who installed the app; admins are set by the owner.
     slack_owner_id: str = field(default_factory=lambda: os.getenv("SLACK_OWNER_ID", ""))
