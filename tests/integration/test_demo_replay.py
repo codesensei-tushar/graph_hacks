@@ -42,8 +42,8 @@ WEBHOOK_SECRET = "replay-webhook-secret"
 
 
 def edge(source: str, rel: str, target: str) -> str:
-    """One cited edge as it reaches Slack (the markdown pass turns the em-dash arrow into ' - ')."""
-    return f"• {source} - {rel}→ {target}"
+    """One cited edge as the reply renders it."""
+    return f"• {source} -[{rel}]-> {target}"
 
 
 class DemoReplayTest(unittest.TestCase):
@@ -102,7 +102,7 @@ class DemoReplayTest(unittest.TestCase):
 
     def assert_cites_path(self, reply: str) -> None:
         self.assertIn("*Path*", reply)
-        self.assertRegex(reply, r"• .+ - [A-Z_]+→ .+")
+        self.assertRegex(reply, r"• .+ -\[[A-Z_]+\]-> .+")
 
     # --- what the replay itself did ----------------------------------------------------------------
 
