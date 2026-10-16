@@ -11,8 +11,8 @@ From the [rules](https://www.wemakedevs.org/hackathons/falkordb/rules) and [over
 | Required | Status |
 | --- | --- |
 | Public source repository | Done |
-| README with setup instructions **and the graph data model** | Partly. Setup is in SETUP.md; the data model needs one place that lists every label and edge. |
-| **The Cypher queries or graph algorithms the product depends on**, in the README | Not yet. List each tool's query. |
+| README with setup instructions **and the graph data model** | Done. README, "Graph data model". Update it as the Decision edges and the vector index land. |
+| **The Cypher queries or graph algorithms the product depends on**, in the README | Done. README, "Cypher queries the product depends on". Update it as the tool catalogue PRs land. |
 | Demo video of the working project | Not yet. Script below. |
 | Live deployment, or complete local setup | Deployed at `brain.noobsurd.space` (DEPLOY.md). Keep it up through judging. |
 | Tracks named at submission | Enter 01, 02 and 03. Each has its own prize. |
