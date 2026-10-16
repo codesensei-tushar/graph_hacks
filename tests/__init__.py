@@ -12,3 +12,8 @@ os.environ["SLACK_OWNER_ID"] = "UOWNER"
 os.environ["SLACK_ADMIN_IDS"] = ""
 # Tests never call a real model; LLM-gated code takes its no-model fallback.
 os.environ["LLM_API_KEY"] = ""
+# Tests never reach a real Slack workspace: with a blank bot token any call that slips
+# past a fake fails on auth instead of posting somewhere. The signing secret is a fixed
+# dummy so tests can sign events for /slack/events without reading the dev .env value.
+os.environ["SLACK_BOT_TOKEN"] = ""
+os.environ["SLACK_SIGNING_SECRET"] = "test-signing-secret"
