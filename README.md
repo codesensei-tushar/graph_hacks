@@ -3,6 +3,7 @@
 Hackathon project for Graph Hacks track 03. FalkorDB holds how a company is connected. An agent answers from that graph and shows the path behind each answer.
 
 - What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
+- Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
 - How to run the graph: [docs/SETUP.md](docs/SETUP.md)
 - Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
 - GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
