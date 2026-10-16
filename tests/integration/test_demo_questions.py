@@ -23,6 +23,11 @@ def _step(source: str, rel: str, target: str) -> dict:
     return {"from": source, "rel": rel, "to": target}
 
 
+def _ask(question: str, scopes: list[str]) -> dict:
+    """The tool result in the dict shape the Slack formatter consumes."""
+    return ask_service.ask(question, scopes).to_dict()
+
+
 class DemoQuestionsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -51,7 +56,7 @@ class DemoQuestionsTest(unittest.TestCase):
             self.assertEqual(set(step), {"from", "rel", "to"})
 
     def test_who_owns_billing_and_who_else_worked_on_it(self):
-        result = ask_service.ask("Who owns billing, and who else has worked on it?", ORG)
+        result = _ask("Who owns billing, and who else has worked on it?", ORG)
         self.assertEqual(result["tool"], "who_knows")
         self.assert_cites_path(result)
         self.assertIn("Billing Service is owned by Arjun Mehta", result["answer"])
@@ -68,7 +73,7 @@ class DemoQuestionsTest(unittest.TestCase):
             self.assertIn(step, result["path"])
 
     def test_why_the_memory_layer_left_postgres(self):
-        result = ask_service.ask("Why did we move the memory layer off Postgres?", ORG)
+        result = _ask("Why did we move the memory layer off Postgres?", ORG)
         self.assertEqual(result["tool"], "decision_trace")
         self.assert_cites_path(result)
         decision = "Move the memory layer off Postgres"
@@ -88,7 +93,7 @@ class DemoQuestionsTest(unittest.TestCase):
             self.assertIn(step, result["path"])
 
     def test_what_breaks_when_auth_goes_down(self):
-        result = ask_service.ask("What breaks if the auth service goes down?", ORG)
+        result = _ask("What breaks if the auth service goes down?", ORG)
         self.assertEqual(result["tool"], "blast_radius")
         self.assert_cites_path(result)
         affected = {step["from"] for step in result["path"]}
@@ -103,15 +108,15 @@ class DemoQuestionsTest(unittest.TestCase):
             self.assertIn(name, result["answer"])
 
     def test_a_new_billing_ticket_changes_the_next_answer(self):
-        before = ask_service.ask(NEW_TICKET, ORG)
+        before = _ask(NEW_TICKET, ORG)
         self.assertEqual(before["tool"], "who_knows")
         self.assertNotIn("TKT-104", before["answer"])
 
         written = ask_service.ingest_ticket("Billing bug: refunds double-charged", "billing", ask_service.ORG_SHARED)
-        self.assertEqual((written["id"], written["about_name"]), ("TKT-104", "Billing Service"))
-        self.assertEqual(written["path"], [_step("TKT-104", "ABOUT", "Billing Service")])
+        self.assertEqual((written.id, written.about_name), ("TKT-104", "Billing Service"))
+        self.assertEqual([step.to_dict() for step in written.path], [_step("TKT-104", "ABOUT", "Billing Service")])
 
-        after = ask_service.ask(NEW_TICKET, ORG)
+        after = _ask(NEW_TICKET, ORG)
         self.assert_cites_path(after)
         self.assertIn(_step("TKT-104", "ABOUT", "Billing Service"), after["path"])
         self.assertEqual(len(after["path"]), len(before["path"]) + 1)
@@ -121,13 +126,13 @@ class DemoQuestionsTest(unittest.TestCase):
     def test_a_ticket_from_a_private_room_stays_in_that_room(self):
         room = "channel:CPRIVATE"
         ask_service.ingest_ticket("Billing bug: refunds double-charged", "billing", room)
-        outsider = ask_service.ask(NEW_TICKET, ORG)
+        outsider = _ask(NEW_TICKET, ORG)
         self.assertNotIn(_step("TKT-104", "ABOUT", "Billing Service"), outsider["path"])
         self.assertNotIn("TKT-104", outsider["answer"])
-        insider = ask_service.ask(NEW_TICKET, ORG + [room])
+        insider = _ask(NEW_TICKET, ORG + [room])
         self.assertIn(_step("TKT-104", "ABOUT", "Billing Service"), insider["path"])
 
     def test_something_not_in_the_graph_says_so(self):
-        result = ask_service.ask("Who owns the espresso machine?", ORG)
+        result = _ask("Who owns the espresso machine?", ORG)
         self.assertEqual(result["path"], [])
         self.assertIn("Nothing in the graph matches", result["answer"])

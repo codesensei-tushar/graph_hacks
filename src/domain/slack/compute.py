@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 from src.domain.github.repos import repo_names
 from src.domain.access.roles import ROLE_OWNER, role_at_least, role_of, set_role
-from src.domain.knowledge import ask_service
+from src.domain.knowledge import ask_service, catalogue
 from src.domain.memory import memory_service
 from src.domain.memory.search_brain import search_brain
 from src.domain.memory.writeback import (
@@ -123,7 +123,7 @@ def _answer_from_graph(request: TurnRequest) -> TurnOutcome:
     question = request.question
     if request.live_updates:
         question = " ".join([question, *request.live_updates])
-    result = ask_service.ask(question, request.read_tags)
+    result = ask_service.ask(question, request.read_tags).to_dict()
     found = search_brain(question, request.memory_scope, trace_id=request.trace_id)
     memories = [_memory_row(row) for row in (found.get("results") or [])[:3]]
     names = channel_names(request.read_tags)
@@ -286,16 +286,10 @@ def _link_account(request: TurnRequest) -> str:
 
 
 def execute_approved_action(tool_name: str, tool_input: dict, container_tag: str) -> str:
-    """Run an approved write. Only the built-in ticket tool exists until the agent lands."""
-    if tool_name != TICKET_TOOL_NAME:
-        raise ValueError(f"unknown approved tool {tool_name}")
-    title = tool_input["title"]
-    created = ask_service.ingest_ticket(title, "", container_tag)
+    """Run an approved write through the tool catalogue. The write lands in ``container_tag``."""
     read_tags = list(dict.fromkeys([SHARED_TEAM_BRAIN_CONTAINER_TAG, container_tag]))
-    follow = ask_service.who_knows(created["about_name"], read_tags)
-    result = {
-        "tool": "ingest",
-        "answer": f"Filed *{created['id']}* about {created['about_name']}. {follow['answer']}",
-        "path": created["path"] + follow["path"],
-    }
-    return format.format_answer(result, [], read_tags, channel_names(read_tags))
+    spec = catalogue.get_tool("ingest_ticket" if tool_name == TICKET_TOOL_NAME else tool_name)
+    if spec is None or not spec.needs_approval:
+        raise ValueError(f"unknown approved tool {tool_name}")
+    result = spec.run({**tool_input, "scope": container_tag}, read_tags)
+    return format.format_answer(result.to_dict(), [], read_tags, channel_names(read_tags))
