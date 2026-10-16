@@ -77,7 +77,15 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 ## Cypher queries the product depends on
 
-The agent never writes Cypher. Each tool in `src/domain/knowledge/` is a parameterised query written by hand; the model only picks the tool and its arguments. Every tool returns the nodes and edges it walked, and the Slack reply prints them as `A -[REL]-> B` lines. `$scopes` is always the asker's read set.
+The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The model only picks a tool and fills in its arguments; without a model, a keyword router in `ask_service.py` picks one. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s, and the Slack reply prints them as `A -[REL]-> B` lines. Tools that write the graph are marked `needs_approval` and run only after the asker clicks Approve. `$scopes` is always the asker's read set.
+
+| Tool | Answers | Writes |
+| --- | --- | --- |
+| `who_owns` | Who owns a service, and which team runs it | no |
+| `who_knows` | Everyone connected to a service, document or ticket, and through which edge | no |
+| `decision_trace` | Why a decision was made, who proposed and approved it, what it cites | no |
+| `blast_radius` | What stops working if a service goes down | no |
+| `ingest_ticket` | Files a ticket about a service, then answers who should look at it | yes, after Approve |
 
 **Name resolution, before any tool runs.** The question is matched against names, aliases and titles the asker may see. No match means the tool answers that the graph doesn't know the thing, and names the nearest candidates. It never guesses.
 
@@ -86,6 +94,19 @@ MATCH (n)
 WHERE labels(n)[0] IN $labels AND n.name IS NOT NULL
   AND coalesce(n.scope, 'org_shared') IN $scopes
 RETURN n.id, n.name, labels(n)[0], coalesce(n.aliases, ''), coalesce(n.title, '')
+```
+
+**who_owns** (the named owner and the team that runs a service; a document or ticket resolves to the service it is about first):
+
+```cypher
+MATCH (node {id: $id})-[rel:ABOUT|DESCRIBES]->(service:Service)
+RETURN service.id, service.name, type(rel) LIMIT 1
+
+MATCH (person:Person)-[:OWNS]->(service:Service {id: $id})
+RETURN person.id, person.name ORDER BY person.name
+
+MATCH (team:Team)-[:RUNS]->(service:Service {id: $id})
+RETURN team.id, team.name ORDER BY team.name
 ```
 
 **who_knows** (owner, past work, tickets, pull requests and reviews for one service):
@@ -128,7 +149,7 @@ MATCH (child:Service)-[:DEPENDS_ON]->(parent:Service)
 RETURN child.id, child.name, parent.id, parent.name
 ```
 
-**ingest_ticket** (the `ticket:` command, after Approve):
+**ingest_ticket** (the `ticket:` command; runs through the catalogue after Approve with the room's write scope, then asks `who_knows` about the service):
 
 ```cypher
 CREATE (ticket:Ticket {id: $id, name: $id, title: $title, summary: $title, scope: $scope})
