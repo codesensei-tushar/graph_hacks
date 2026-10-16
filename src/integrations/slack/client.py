@@ -25,6 +25,7 @@ from typing import Any, Literal
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
+from src.core.config import settings
 from src.integrations.slack.format import (
     humanize_tool_action,
     markdown_reply_blocks,
@@ -372,7 +373,7 @@ def _is_transient_slack_conversation_error(status: int, error: str | None) -> bo
 class SlackClient:
     def __init__(self, token: str, web: WebClient | None = None):
         self.token = token
-        self.web = web or WebClient(token=token)
+        self.web = web or WebClient(token=token, base_url=settings.slack_api_base_url)
 
     def _call(
         self,
@@ -1413,7 +1414,7 @@ def delete_interaction_response(response_url: str) -> bool:
 def exchange_slack_oauth(client_id: str, client_secret: str, code: str, redirect_uri: str) -> SlackOAuthResult:
     """oauth.v2.access. Raises when Slack refuses, like the original."""
     try:
-        data = WebClient().oauth_v2_access(client_id=client_id, client_secret=client_secret, code=code, redirect_uri=redirect_uri).data
+        data = WebClient(base_url=settings.slack_api_base_url).oauth_v2_access(client_id=client_id, client_secret=client_secret, code=code, redirect_uri=redirect_uri).data
     except SlackApiError as error:
         raise RuntimeError(f"slack oauth.v2.access failed: {error.response.get('error') or 'unknown'}") from error
     team = data.get("team") or {}

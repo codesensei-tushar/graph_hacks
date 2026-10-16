@@ -23,6 +23,7 @@ If the thing you named is not in the graph, it says so and offers the nearest ma
 - GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
 - What's left for the product (agent, vector search): [docs/SLACK.md#whats-left-for-the-product-the-agent-and-vector-search](docs/SLACK.md#whats-left-for-the-product-the-agent-and-vector-search)
 - Production deploy, CI/CD and operations: [docs/DEPLOY.md](docs/DEPLOY.md)
+- Replay the synthetic company for a demo or a test: [docs/SETUP.md](docs/SETUP.md#replay-the-synthetic-company)
 
 AI assistance: parts of this project were written with Claude Code (Anthropic), including the production infrastructure, deploy pipeline and their docs.
 

@@ -309,7 +309,7 @@ def exchange_slack_oauth(code: str, redirect_uri: str, web: WebClient | None = N
     if not (settings.slack_client_id and settings.slack_client_secret):
         raise RuntimeError("Slack is not configured: set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET")
     data = slack_call(
-        web or WebClient(),
+        web or WebClient(base_url=settings.slack_api_base_url),
         "oauth.v2.access",
         client_id=settings.slack_client_id,
         client_secret=settings.slack_client_secret,
