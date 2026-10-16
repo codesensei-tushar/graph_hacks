@@ -228,6 +228,53 @@ Production keeps the Company Brain self-seed plus the real workspace and GitHub 
 
 Step 4 depends on `blast_radius` taking a depth; until then ask once and read the full set. Step 5 depends on the approval card showing the resolved service. Step 7 needs the private test repo and one `link github` done the day before.
 
+## Specs for items 6 and 7
+
+Written for coder A to build straight after the D slice. Domain logic stays in `src/domain/`, routes stay thin, nothing here needs a model key.
+
+### Item 6: proof that the graph does the work
+
+What it shows: the same catalogue, the same questions, run twice, once with FalkorDB and once with every graph read returning nothing. The report lists, per question, the tool, the answer with the graph, the answer without, and whether the capability collapsed. The video shows the text form for ten seconds.
+
+- **Mechanism.** A context variable in `src/db/falkordb_client.py`, `graph_reads_disabled`, with a `dark_graph()` context manager that sets it. While set, `connect()` returns the real client plus a proxy graph whose `query` and `ro_query` return an object with an empty `result_set` without touching FalkorDB. Nothing else changes: the resolver sees no rows and returns `found=False`, every tool returns an empty path, memory search returns nothing. The proof only runs read tools, so the proxy never has to refuse a write; still, log a warning if `query` is called with `CREATE`, `MERGE`, `SET` or `DELETE` in it.
+- **Domain.** `src/domain/knowledge/proof.py`. `QUESTIONS: dict[str, list[str]]` keyed by the seeded `Company.id` (`quillfern`, `company-brain`), six read questions each: ownership, who knows, a decision, blast radius, a path or depth question, and a question about something not in the graph. `run_proof(scopes=("org_shared",)) -> ProofReport`. Dataclasses: `ProofOutcome(answer, found, steps)`, `ProofRow(question, tool, with_graph, without_graph, collapsed)`, `ProofReport(company, rows, collapsed, total)`. Each question goes through `ask_service.route` and the catalogue, never the model, so the result is deterministic. `collapsed = with_graph.found and with_graph.steps > 0 and not (without_graph.found and without_graph.steps > 0)`. The not-in-graph question is expected to refuse both ways; its row says so, which is the point: the refusal does not depend on the graph being up.
+- **Route.** `GET /api/proof` in `src/api/v1/proof.py`, bearer `BRAIN_ADMIN_TOKEN` exactly like `/slack/status` (503 until set, 401 on a wrong token). Returns the report as JSON; `?format=text` returns a fixed-width table for the terminal shot. One function call in the route, nothing else.
+- **Tests.** Unit: the proxy returns empty result sets and never opens a connection. Integration on Quillfern: `collapsed == total - 1`, every `with_graph` row has at least one step, the `without_graph` answers are refusals, and the route answers 401 and 200.
+- **README.** One line under the query section: the curl and what the report means.
+
+### Item 7: the same tools over MCP
+
+Verified on this machine in a scratch venv, not the shared one. Add the dependency to `requirements.txt`, install it in the shared venv, and tell the others.
+
+- **Package.** `mcp==2.2.0`, the official Python SDK, released 7 Sep 2026 (2.3.0 of 2 Oct is also past two weeks). Wheel 357 KB; with its dependencies 57 MB of site-packages in a venv that already holds fastapi and uvicorn, so roughly 20 to 25 MB net on the image. New transitive packages: `httpx2`, `jsonschema`, `mcp-types`, `opentelemetry-api`, `python-multipart`, `sse-starlette`, `typing-inspection`. Python 3.10 or newer; the image is 3.12.
+- **2.x API.** `FastMCP` is renamed: `from mcp.server.mcpserver import MCPServer`. `server.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True)` returns a Starlette app. Mount it with `app.mount("/mcp", sub)` and run `async with server.session_manager.run(): yield` inside `main.py`'s lifespan. Verified: `initialize`, `tools/list`, `tools/call` and session `DELETE` all answered 200, and a tool returning a dict comes back as JSON text plus structured content. Two traps: the sub-app's own path defaults to `/mcp`, so without `streamable_http_path="/"` the endpoint is `/mcp/mcp`, which nginx does not proxy; and the client's tool objects use `input_schema`, not `inputSchema`. Host checks: calls through `127.0.0.1` and `localhost` succeeded with the defaults and with `host="brain.noobsurd.space"`; `TransportSecuritySettings(enable_dns_rebinding_protection, allowed_hosts, allowed_origins)` exists if we want to pin the public name. Remove the 501 placeholder routes from `src/api/ops.py`.
+- **Mapping.** One MCP tool per `ToolSpec` with `needs_approval=False`: same name, same description, `args_schema` passed as the input schema verbatim (use the SDK path that accepts an explicit schema rather than deriving one from a Python signature; the low-level `Server` with `list_tools` and `call_tool` handlers if `MCPServer` cannot take a schema). The handler runs `spec.run(args, scopes)` and returns `ToolResult.to_dict()`, so an MCP caller gets the same answer, path, `found` and `candidates` as Slack. Writing tools are not exposed: the server is read-only, like FalkorDB's own MCP server in read-only mode.
+- **Scope and auth.** MCP callers read `org_shared` only, stated in the README: there is no Slack identity to derive a wider read set from. Auth: a new `MCP_TOKEN` setting (not the admin token, which must not be shared), checked as a bearer header by a small Starlette middleware around the mounted app, 503 when unset. The token goes to the judges in the private submission notes, never in the repo.
+- **Tests.** Unit: the MCP tool list equals the read-only catalogue names and schemas. Integration: start the FastAPI app in a thread and use `mcp.client.streamable_http.streamable_http_client` plus `ClientSession` to list tools and call `who_owns` on Quillfern, asserting the path in the structured result (this is exactly the probe that passed here).
+- **Why it matters.** Track 01 names tool selection through MCP as a focus, the organizers' reference build exposes its six tools over MCP, and MERIDIAN already ships eight. It also makes the Track 02 "handoff" claim true: the Slack agent and any MCP client walk one graph under one permission model.
+
+### Tracks 01 and 02: what each needs from the submission
+
+From the track briefs on the hackathon page. The same build enters all three; the copy must say what each track is looking for in its own words.
+
+| Track 01 focus | What we show | Copy line |
+| --- | --- | --- |
+| Multi-hop reasoning | `blast_radius` at a chosen depth, `path_between` over `algo.SPpaths` | "Depth is a parameter; the route comes back with the answer." |
+| Graph queries and algorithms as agent tools | The catalogue, PageRank for load-bearing services, betweenness for connectors | "Ranking and routing are a `CALL`, not code." |
+| Tool selection through MCP | Item 7 | "The same catalogue over MCP, read-only, `org_shared`." |
+| Actions based on what the graph shows | Tickets filed after approval, routed to the people the graph ranks | "It acts, after a human clicks Approve on a card that names the target." |
+| Explainable results | Path lines, the picked-by footer, the proof route | "Explanation is the traversal." |
+
+| Track 02 focus | What we show | Copy line |
+| --- | --- | --- |
+| Episodic, semantic, procedural memory | Dated Memory nodes per room; a tag topic tree and `MENTIONS` edges; a workspace prompt | Say "episodic and semantic"; do not claim procedural memory beyond the workspace prompt |
+| Persistent conversation history | Memories, bot threads and a seven-day event ring, all in FalkorDB | "It remembers between sessions because the session is in the graph." |
+| Shared state and handoffs between agents | One graph and one permission model shared by the Slack agent and MCP clients; approvals as the human handoff | Say "single agent in Slack, plus any MCP client"; do not claim a multi-agent crew |
+| High-concurrency reads and writes | FalkorDB, background jobs and the scheduler on one instance | No numbers; we have no benchmark |
+| Separate memory per user or tenant | Scopes per person, private channel and repo; one install per workspace | This is the strongest Track 02 line; lead with it |
+
+Honesty rule for the copy: Track 03 is primary; Track 01 is credible once the D slice and MCP land; Track 02 rests on isolation and persistence, and the description says "single agent" plainly.
+
 ## Sources
 
 - [Graph Hacks overview](https://www.wemakedevs.org/hackathons/falkordb), [rules](https://www.wemakedevs.org/hackathons/falkordb/rules), [schedule](https://www.wemakedevs.org/hackathons/falkordb/schedule), [resources](https://www.wemakedevs.org/hackathons/falkordb/resources)
