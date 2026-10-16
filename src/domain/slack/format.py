@@ -26,7 +26,8 @@ def _clip(text: str, size: int) -> str:
 
 
 def format_path(path: list[dict]) -> list[str]:
-    lines = [f"• {step['from']} —{step['rel']}→ {step['to']}" for step in path[:MAX_PATH_STEPS]]
+    # The same citation PathStep.cite() produces, and the shape the README promises.
+    lines = [f"• {step['from']} -[{step['rel']}]-> {step['to']}" for step in path[:MAX_PATH_STEPS]]
     if len(path) > MAX_PATH_STEPS:
         lines.append(f"_…and {len(path) - MAX_PATH_STEPS} more edges_")
     return lines
@@ -43,7 +44,8 @@ def format_answer(result: dict, memories: list[dict], read_tags: list[str], chan
             where = scope_label(memory["scope"], channel_names)
             if memory.get("channel_id") and memory["scope"] == "org_shared":
                 where = f"<#{memory['channel_id']}>"
-            parts.append(f"• “{_clip(memory['text'], MAX_MEMORY_SNIPPET)}” — {memory['author']}, {where}")
+            learned = f", learned {memory['learned_at']}" if memory.get("learned_at") else ""
+            parts.append(f"• “{_clip(memory['text'], MAX_MEMORY_SNIPPET)}” — {memory['author']}, {where}{learned}")
     parts += ["", f"_Read from: {', '.join(scope_label(tag, channel_names) for tag in read_tags)}_"]
     return "\n".join(parts)
 

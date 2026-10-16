@@ -29,6 +29,20 @@ class PathStep:
         return f"{self.from_name} -[{self.rel}]-> {self.to_name}"
 
 
+@dataclass(frozen=True)
+class MemoryLine:
+    """A memory a tool answered from, with when it was learned. Memories are dated nodes."""
+
+    text: str
+    learned_at: str
+    author: str = "someone"
+    scope: str = "org_shared"
+    channel_id: str | None = None
+
+    def to_dict(self) -> dict:
+        return {"text": self.text, "learned_at": self.learned_at, "author": self.author, "scope": self.scope, "channel_id": self.channel_id}
+
+
 @dataclass
 class ToolResult:
     tool: str
@@ -40,6 +54,8 @@ class ToolResult:
     candidates: list[str] = field(default_factory=list)
     # Traversal depth the tool used, for tools that have one (blast radius, paths).
     depth: int | None = None
+    # Memories the answer drew on, each with the date it was learned.
+    memories: list[MemoryLine] = field(default_factory=list)
 
     def add(self, step: PathStep) -> None:
         """Append an edge unless the path already has it."""
@@ -52,10 +68,27 @@ class ToolResult:
 
     def to_dict(self) -> dict:
         """The shape the Slack formatter and the approval flow already consume."""
-        result = {"tool": self.tool, "answer": self.answer, "path": [step.to_dict() for step in self.path]}
+        result = {
+            "tool": self.tool,
+            "answer": self.answer,
+            "path": [step.to_dict() for step in self.path],
+            "found": self.found,
+            "candidates": list(self.candidates),
+        }
         if self.depth is not None:
             result["depth"] = self.depth
+        if self.memories:
+            result["memories"] = [memory.to_dict() for memory in self.memories]
         return result
+
+
+@dataclass
+class TicketCreated:
+    """What ``ingest_ticket`` wrote: the new ticket and the edge linking it to its service."""
+
+    id: str
+    about_name: str
+    path: list[PathStep] = field(default_factory=list)
 
 
 ToolRunner = Callable[[dict, list[str]], ToolResult]

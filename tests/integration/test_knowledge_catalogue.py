@@ -72,7 +72,34 @@ class KnowledgeCatalogueTest(unittest.TestCase):
             result = _run(name, {"name": "the espresso machine"})
             self.assertFalse(result.found, name)
             self.assertEqual(result.path, [])
+            self.assertEqual(result.candidates, [])
+            self.assertIn("Nothing in the graph matches “espresso machine”", result.answer)
         self.assertFalse(_run("decision_trace", {"topic": "espresso"}).found)
+
+    def test_a_name_that_spans_two_nodes_is_refused_with_the_nearest_matches(self):
+        result = _run("who_knows", {"name": "who knows the payments gateway"})
+        self.assertFalse(result.found)
+        self.assertEqual(result.path, [])
+        self.assertEqual(result.candidates, ["Billing Service", "API Gateway"])
+        self.assertIn("Nothing in the graph matches “payments gateway” as one thing", result.answer)
+        self.assertIn("Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)", result.answer)
+        # The no-model router gives the same refusal, and the dict the formatter reads carries it.
+        routed = ask_service.ask("who knows the payments gateway", ORG).to_dict()
+        self.assertFalse(routed["found"])
+        self.assertEqual(routed["candidates"], ["Billing Service", "API Gateway"])
+
+    def test_a_typo_still_offers_the_nearest_name(self):
+        result = _run("who_owns", {"name": "invoce worker"})
+        self.assertFalse(result.found)
+        self.assertEqual(result.candidates[0], "Invoice Worker")
+        self.assertIn("Nearest: Invoice Worker", result.answer)
+
+    def test_the_whole_question_resolves_to_the_longest_phrase(self):
+        self.assertEqual(_run("blast_radius", {"name": "what breaks if the auth service goes down"}).path[0].to_name, "Auth Service")
+        self.assertEqual(_run("who_knows", {"name": "who is on TKT-102"}).path[0].to_name, "TKT-102")
+        decision = _run("decision_trace", {"topic": "why did we move the memory layer off postgres"})
+        self.assertTrue(decision.found)
+        self.assertTrue(decision.answer.startswith("Move the memory layer off Postgres"))
 
     def test_every_found_result_cites_at_least_one_edge(self):
         for name, args in (
@@ -91,7 +118,7 @@ class KnowledgeCatalogueTest(unittest.TestCase):
         text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Billing exports time out"}, room)
         self.assertIn("Filed *TKT-104* about Billing Service", text)
         self.assertIn("Arjun Mehta", text)
-        self.assertIn("TKT-104 —ABOUT→ Billing Service", text)
+        self.assertIn("TKT-104 -[ABOUT]-> Billing Service", text)
         _, graph = falkordb_client.connect()
         scope = graph.query("MATCH (t:Ticket {id: 'TKT-104'}) RETURN t.scope").result_set[0][0]
         self.assertEqual(scope, room)

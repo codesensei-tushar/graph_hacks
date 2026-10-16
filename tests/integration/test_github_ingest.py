@@ -115,6 +115,9 @@ class GitHubIngestTest(unittest.TestCase):
         private = ask_service.who_knows("memory layer", ["org_shared", SCOPE])
         self.assertIn("@alice-dev", private.answer)
         self.assertIn("graph_hacks#3", [step.to_name for step in private.path])
+        # A GitHub account with no linked Person is labelled as what it is.
+        alice = next(step for step in private.path if step.from_name == "@alice-dev")
+        self.assertEqual(alice.from_label, "GitHubUser")
 
     def test_dm_reads_repo_only_for_linked_collaborators(self):
         self.assertIn(SCOPE, resolve_brain_read_container_tags(_dm("UTUSHAR")))
