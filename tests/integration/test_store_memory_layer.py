@@ -9,7 +9,7 @@ import os
 import unittest
 import uuid
 
-os.environ["FALKORDB_GRAPH"] = "memory_test"
+os.environ["FALKORDB_GRAPH"] = "memory_test" + os.environ.get("TEST_GRAPH_SUFFIX", "")
 
 from src.db.falkordb_client import connect  # noqa: E402
 from src.domain.memory import documents, memory_service, memory_tools, tree  # noqa: E402
