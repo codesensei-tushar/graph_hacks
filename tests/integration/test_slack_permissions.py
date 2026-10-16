@@ -255,7 +255,7 @@ class SlackPermissionsTest(unittest.TestCase):
         scope = graph.query("MATCH (t:Ticket {id: $id}) RETURN t.scope", {"id": ticket_id}).result_set[0][0]
         self.assertEqual(scope, f"slack_channel_{self.private}")
         public = ask_service.who_knows("Billing Service", ["org_shared"])
-        self.assertNotIn(ticket_id, str(public["path"]))
+        self.assertNotIn(ticket_id, str(public.to_dict()["path"]))
 
     def test_denied_ticket_writes_nothing(self):
         _, graph = connect()

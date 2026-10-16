@@ -111,10 +111,10 @@ class GitHubIngestTest(unittest.TestCase):
 
     def test_who_knows_uses_pull_requests_only_inside_the_repo_scope(self):
         public = ask_service.who_knows("memory layer", ["org_shared"])
-        self.assertNotIn("alice-dev", public["answer"])
+        self.assertNotIn("alice-dev", public.answer)
         private = ask_service.who_knows("memory layer", ["org_shared", SCOPE])
-        self.assertIn("@alice-dev", private["answer"])
-        self.assertIn("graph_hacks#3", [step["to"] for step in private["path"]])
+        self.assertIn("@alice-dev", private.answer)
+        self.assertIn("graph_hacks#3", [step.to_name for step in private.path])
 
     def test_dm_reads_repo_only_for_linked_collaborators(self):
         self.assertIn(SCOPE, resolve_brain_read_container_tags(_dm("UTUSHAR")))
