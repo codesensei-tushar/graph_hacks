@@ -39,7 +39,11 @@ This is the design decision the rest of the post hangs on.
 
 The model does not write queries. It picks a tool from a fixed catalogue and fills in arguments. Each tool is a `ToolSpec`: a name, a description the model reads, a JSON schema for the arguments, and a `run(args, scopes)` function with a hand-written, parameterised traversal behind it. Each tool returns a `ToolResult`: a short answer and a list of `PathStep`s, the exact edges it walked, which the reply prints as `Arjun Mehta -[OWNS]-> Billing Service`.
 
-Before any tool runs, the name in the question is resolved against the graph: exact name, then aliases, then the nearest matches, all filtered by the asker's scopes. If nothing clears the bar, the tool answers with `found = false` and the nearest candidates, and the reply says the graph doesn't know that thing and offers the closest names. It never guesses. [[Verify the exact wording against the merged resolver.]]
+Before any tool runs, the name in the question is resolved against the graph. A name resolves only when a node's name, alias or title appears in the question as a whole phrase, within the asker's scopes; the longest phrase wins. Two different nodes named side by side count as one unknown thing, not two answers. If nothing resolves, the tool returns `found = false` with up to three candidates, and the reply says exactly what the graph does know:
+
+> Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”).
+
+It never guesses.
 
 Two things fall out of this. No model-generated string ever reaches a query, so there is nothing to inject and nothing to escape. And the explanation is not a sentence the model composes afterwards; it is the traversal itself. The organizers' guide warned that a post-hoc explanation "reads like reasoning and is reconstruction". That matched what we had seen, so we built the path into the return type.
 
