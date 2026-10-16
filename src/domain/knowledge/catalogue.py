@@ -53,13 +53,29 @@ def _run_blast_radius(args: dict, scopes: list[str]) -> ToolResult:
 
 
 def _run_ingest_ticket(args: dict, scopes: list[str]) -> ToolResult:
-    created = ask_service.ingest_ticket(args["title"], args.get("about") or "", args["scope"])
+    title = args["title"]
+    created = ask_service.ingest_ticket(title, args.get("about") or "", args["scope"])
+    if created.about_name is None:
+        return ToolResult(
+            tool="ingest_ticket",
+            answer=(
+                f"Filed *{created.id}*, not linked to a service: nothing in the graph matched “{title}”. "
+                f"Say `ticket: {title} about <service>` to link it."
+            ),
+        )
     follow = ask_service.who_knows(created.about_name, scopes)
-    return ToolResult(
-        tool="ingest_ticket",
-        answer=f"Filed *{created.id}* about {created.about_name}. {follow.answer}",
-        path=created.path + follow.path,
-    )
+    result = ToolResult(tool="ingest_ticket", answer=f"Filed *{created.id}* about {created.about_name}. {follow.answer}")
+    result.extend(created.path)
+    result.extend(follow.path)
+    return result
+
+
+def _preview_ingest_ticket(args: dict, _scopes: list[str]) -> str:
+    title = args["title"]
+    target = ask_service.ticket_target(title, args.get("about") or "")
+    if target is None:
+        return f"File a ticket titled *{title}* in the company graph, not linked to any service: nothing in the graph matches it"
+    return f"File a ticket titled *{title}* in the company graph, linked to *{target.name}*"
 
 
 register(
@@ -113,5 +129,6 @@ register(
         ),
         run=_run_ingest_ticket,
         needs_approval=True,
+        preview=_preview_ingest_ticket,
     )
 )

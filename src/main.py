@@ -10,12 +10,14 @@ from src.core import scheduler
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
+from src.domain.knowledge.agent import answer_turn
 from src.domain.memory.memory_service import ensure_indexes
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
 from src.domain.slack import token_install
 from src.domain.slack.channel_membership import reconcile_channel_membership
 from src.domain.slack.channels import observe, rollout  # noqa: F401  register rollout and observe jobs
 from src.domain.slack.channels import reset as channel_reset
+from src.domain.slack.compute import register_turn_agent
 from src.domain.slack.turn import approval_expiry, reaction_queue  # noqa: F401  register expiry and reaction jobs
 from src.domain.slack.turn import reset as turn_reset
 from src.domain.slack.workspace import list_connected_workspaces
@@ -61,6 +63,7 @@ def _recover() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _seed_if_empty()
+    register_turn_agent(answer_turn)
     turn_reset.register()
     channel_reset.register()
     token_install.register()

@@ -87,7 +87,8 @@ class TicketCreated:
     """What ``ingest_ticket`` wrote: the new ticket and the edge linking it to its service."""
 
     id: str
-    about_name: str
+    # None when nothing in the graph matched: the ticket exists but has no ABOUT edge.
+    about_name: str | None
     path: list[PathStep] = field(default_factory=list)
 
 
@@ -110,3 +111,6 @@ class ToolSpec:
     args_schema: dict
     run: ToolRunner
     needs_approval: bool = False
+    # For tools that need approval: one line saying what ``run`` will write, computed from the
+    # same arguments before the asker approves, so the card shows the resolved target.
+    preview: Callable[[dict, list[str]], str] | None = None

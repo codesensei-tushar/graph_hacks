@@ -167,17 +167,16 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
         return TurnOutcome(reply=f"Saved. Anyone who can read {scope_label(write_tag, names)} can recall it.")
 
     if match := _TICKET.match(text):
-        title = match.group(1).strip()
+        title, about = _split_ticket(match.group(1).strip())
         container = write_tag or SHARED_TEAM_BRAIN_CONTAINER_TAG
+        tool_input = {"title": title, "about": about} if about else {"title": title}
+        preview = catalogue.get_tool("ingest_ticket").preview(tool_input, request.read_tags)
         return TurnOutcome(
             status="suspended",
             approval=TurnApproval(
                 tool_name=TICKET_TOOL_NAME,
-                tool_input={"title": title},
-                summary=(
-                    f"Create a ticket titled *{title}* in the company graph and link it to the service it's about. "
-                    f"Visible to {scope_label(container, names)}."
-                ),
+                tool_input=tool_input,
+                summary=f"{preview}. Visible to {scope_label(container, names)}.",
                 container_tag=container,
             ),
         )
@@ -211,6 +210,14 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
             after_reply=lambda: disconnect_slack_workspace(team_id),
         )
     return None
+
+
+def _split_ticket(text: str) -> tuple[str, str]:
+    """``<title> about <service>`` names the service outright; otherwise it is read from the title."""
+    title, separator, about = text.rpartition(" about ")
+    if separator and title.strip() and about.strip():
+        return title.strip(), about.strip()
+    return text, ""
 
 
 def _change_role(asker: str, text: str, raw_text: str, bot_user_id: str | None) -> str:

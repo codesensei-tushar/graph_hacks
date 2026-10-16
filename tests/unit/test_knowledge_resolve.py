@@ -48,9 +48,15 @@ class ResolveRowsTest(unittest.TestCase):
 
     def test_stems_match_so_singulars_do_not_slip_through(self):
         self.assertTrue(same_word("payments", "payment"))
-        self.assertTrue(same_word("auth", "authentication"))
+        self.assertTrue(same_word("matches", "match"))
         self.assertFalse(same_word("api", "apis"))
         self.assertEqual(_resolve("payment gateway").reason, "ambiguous")
+
+    def test_a_longer_word_that_starts_with_an_alias_is_not_that_alias(self):
+        self.assertFalse(same_word("author", "auth"))
+        self.assertFalse(same_word("authored", "auth"))
+        self.assertFalse(same_word("auth", "authentication"))
+        self.assertIsNone(_resolve("what did the author decide last week").entity)
 
     def test_names_apart_in_the_sentence_pick_the_strongest_and_keep_the_rest(self):
         found = _resolve("the invoice worker and billing")
