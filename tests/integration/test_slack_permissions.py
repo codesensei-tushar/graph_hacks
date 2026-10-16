@@ -23,6 +23,7 @@ from src.integrations.slack.client import (  # noqa: E402
     SlackUserInfoLookup,
 )
 from src.integrations.slack.events import SlackEventInner  # noqa: E402
+from src.seed import quillfern  # noqa: E402
 from src.seed.seed import reset_and_seed  # noqa: E402
 
 PRIVATE_FACT = "the billing service retry storm comes from the invoice worker backlog"
@@ -125,7 +126,7 @@ class FakeSlack:
 class SlackPermissionsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        reset_and_seed()
+        reset_and_seed(quillfern)
 
     @classmethod
     def tearDownClass(cls):

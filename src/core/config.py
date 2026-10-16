@@ -17,6 +17,8 @@ class Settings:
     falkordb_graph: str = field(default_factory=lambda: os.getenv("FALKORDB_GRAPH", "company"))
     # Empty locally (the dev docker-compose has no password); set in production.
     falkordb_password: str = field(default_factory=lambda: os.getenv("FALKORDB_PASSWORD", ""))
+    # Seed the company graph on startup when it's empty. Local development only; off in production.
+    seed_on_startup: bool = field(default_factory=lambda: os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"))
 
     slack_bot_token: str = field(default_factory=lambda: os.getenv("SLACK_BOT_TOKEN", ""))
     slack_signing_secret: str = field(default_factory=lambda: os.getenv("SLACK_SIGNING_SECRET", ""))

@@ -1,4 +1,4 @@
-"""A fictional company for the demo graph.
+"""A fictional company used as test data by the integration tests.
 
 Quillfern is made up: a small SaaS that sells a team notebook. Every person,
 service, document, ticket, and decision here is invented.
@@ -125,7 +125,7 @@ TICKETS = [
     },
 ]
 
-DECISION = {
+DECISIONS = [{
     "id": "decision-memory-off-postgres",
     "name": "Move the memory layer off Postgres",
     "summary": "Store notebook links in the graph store instead of Postgres join tables, because multi-hop lookups timed out.",
@@ -134,12 +134,12 @@ DECISION = {
     "approver": "tomas",
     "about": "memory-layer",
     "cites": ["doc-memory-graph-rfc", "TKT-101"],
-}
+}]
 
-CHAT = {
+CHATS = [{
     "id": "chat-memory-migration",
     "name": "#data-eng thread on the memory migration",
     "summary": "Kofi shared timings from TKT-101; Sara agreed to run the graph store; Tomas signed off.",
     "author": "kofi",
     "about": "decision-memory-off-postgres",
-}
+}]

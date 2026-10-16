@@ -25,11 +25,12 @@ log = logging.getLogger(__name__)
 
 
 def _seed_if_empty() -> None:
-    _, graph = connect()
-    nodes = graph.query("MATCH (n) RETURN count(n)").result_set[0][0]
-    if nodes == 0:
-        log.info("graph is empty; seeding the sample company")
-        reset_and_seed()
+    if settings.seed_on_startup:
+        _, graph = connect()
+        nodes = graph.query("MATCH (n) RETURN count(n)").result_set[0][0]
+        if nodes == 0:
+            log.info("graph is empty; seeding the company (SEED_ON_STARTUP)")
+            reset_and_seed()
     ensure_indexes()
 
 
