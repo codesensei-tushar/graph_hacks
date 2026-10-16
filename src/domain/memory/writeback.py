@@ -321,4 +321,7 @@ def scope_label(tag: str, channel_names: dict[str, str] | None = None) -> str:
         return f"#{name}" if name else f"<#{channel_id}>"
     if tag.startswith("user_"):
         return "your DMs"
+    if tag.startswith("github_repo_"):
+        name = (channel_names or {}).get(tag)
+        return f"the {name} repo" if name else "a private GitHub repo"
     return tag

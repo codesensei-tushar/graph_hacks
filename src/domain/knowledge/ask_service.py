@@ -77,6 +77,17 @@ def who_knows(question: str, scopes: list[str]) -> dict:
         {"id": target["id"]},
     ).result_set
     path = [{"from": person, "rel": rel, "to": node} for person, rel, node in rows]
+    # GitHub people on an issue-backed ticket: who opened it and who is assigned.
+    github_rows = graph.query(
+        """
+        MATCH (gh:GitHubUser)-[rel:OPENED|ASSIGNED]->(node {id: $id})
+        OPTIONAL MATCH (gh)-[:IS]->(person:Person)
+        RETURN coalesce(person.name, '@' + gh.login), type(rel), node.name
+        ORDER BY type(rel)
+        """,
+        {"id": target["id"]},
+    ).result_set
+    path.extend({"from": who, "rel": rel, "to": node} for who, rel, node in github_rows)
 
     if target["label"] != "Service":
         links = graph.query(
@@ -114,6 +125,21 @@ def who_knows(question: str, scopes: list[str]) -> dict:
             path.append({"from": ticket, "rel": "ABOUT", "to": service})
             if person:
                 path.append({"from": person, "rel": "WORKED_ON", "to": ticket})
+        # Pull requests that changed this service's code, and who wrote or reviewed them.
+        pull_requests = graph.query(
+            f"""
+            MATCH (gh:GitHubUser)-[rel:AUTHORED|REVIEWED]->(pr:PullRequest)-[:TOUCHES]->(service:Service {{id: $id}})
+            WHERE {SCOPED.format(var="pr")}
+            OPTIONAL MATCH (gh)-[:IS]->(person:Person)
+            RETURN coalesce(person.name, '@' + gh.login), type(rel), pr.name, service.name
+            ORDER BY pr.name
+            """,
+            {"id": target["id"], "scopes": scopes},
+        ).result_set
+        for who, rel, pull_request, service in pull_requests:
+            for step in ({"from": pull_request, "rel": "TOUCHES", "to": service}, {"from": who, "rel": rel, "to": pull_request}):
+                if step not in path:
+                    path.append(step)
 
     if not path:
         return {
@@ -123,7 +149,8 @@ def who_knows(question: str, scopes: list[str]) -> dict:
         }
 
     owners = [step["from"] for step in path if step["rel"] == "OWNS"]
-    workers = [step["from"] for step in path if step["rel"] in {"WORKED_ON", "AUTHORED"} and step["from"] not in owners]
+    workers = [step["from"] for step in path if step["rel"] in {"WORKED_ON", "AUTHORED", "ASSIGNED", "OPENED"} and step["from"] not in owners]
+    reviewers = [step["from"] for step in path if step["rel"] == "REVIEWED" and step["from"] not in owners + workers]
     knowers = [step["from"] for step in path if step["rel"] == "KNOWS"]
     open_tickets = [step["from"] for step in path if step["rel"] == "ABOUT" and step["to"] == target["name"]]
     parts = []
@@ -133,6 +160,8 @@ def who_knows(question: str, scopes: list[str]) -> dict:
         parts.append(f"{target['name']} is in the graph.")
     if workers:
         parts.append(f"Also worked on by {', '.join(_unique(workers))}.")
+    if reviewers:
+        parts.append(f"Reviewed by {', '.join(_unique(reviewers))}.")
     if knowers:
         parts.append(f"Known by {', '.join(_unique(knowers))}.")
     if open_tickets:
@@ -241,6 +270,12 @@ def blast_radius(question: str, scopes: list[str]) -> dict:
         "answer": f"If {target['name']} goes down, these stop with it: {', '.join(affected)}.",
         "path": path,
     }
+
+
+def match_service(text: str) -> dict | None:
+    """The org-wide service a piece of text is most likely about, or None."""
+    _, graph = connect()
+    return _best_node(graph, text, labels=("Service",), scopes=[ORG_SHARED])
 
 
 def _best_node(graph, question: str, labels: tuple[str, ...], scopes: list[str]) -> dict | None:

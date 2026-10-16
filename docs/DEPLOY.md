@@ -123,7 +123,9 @@ writes an empty bot token and model key, and a random signing secret, so the app
 
 Optional secrets, written to `.env` only if you create them: `SLACK_OWNER_ID`,
 `SLACK_ADMIN_IDS`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `BRAIN_ADMIN_TOKEN`,
-`TOKEN_ENCRYPTION_KEY`, `LLM_MODEL` (see [SLACK.md](SLACK.md) for what each does).
+`TOKEN_ENCRYPTION_KEY`, `LLM_MODEL` (see [SLACK.md](SLACK.md) for what each does), and the GitHub App's
+`GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_PRIVATE_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+(see [GITHUB.md](GITHUB.md); the private key is stored on one line).
 
 **Add or rotate a value** without it landing in shell history, then redeploy:
 
