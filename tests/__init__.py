@@ -7,7 +7,10 @@ every test off the dev ``company`` graph and gives the role tests a known owner.
 
 import os
 
-os.environ["FALKORDB_GRAPH"] = "company_test"
+# TEST_GRAPH_SUFFIX lets several checkouts run the suite on one FalkorDB at the same
+# time without resetting each other's graph, e.g. TEST_GRAPH_SUFFIX=_a pytest.
+TEST_GRAPH_SUFFIX = os.environ.get("TEST_GRAPH_SUFFIX", "")
+os.environ["FALKORDB_GRAPH"] = f"company_test{TEST_GRAPH_SUFFIX}"
 os.environ["SLACK_OWNER_ID"] = "UOWNER"
 os.environ["SLACK_ADMIN_IDS"] = ""
 # Tests never call a real model; LLM-gated code takes its no-model fallback.
