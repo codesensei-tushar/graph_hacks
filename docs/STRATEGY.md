@@ -170,6 +170,42 @@ Before recording:
 - Coder B: the company flag on `scripts/seed_graph.py`, the replay driver pointed at the dev workspace, and the blog draft from the docs (AI disclosure, the no-vector trade-off, the graph recall).
 - Research: refresh the README query list against the merged catalogue, keep this checklist current, review every PR against the judge signals.
 
+## Round 3: submission copy and the last day
+
+### Form fields
+
+The submit page renders only in a browser, so the exact fields are unknown until someone opens it. Every hackathon form of this kind asks for the items below; the text is ready to paste and can be trimmed to any limit.
+
+**Title.** Company Brain
+
+**Tagline.** A Slack agent that answers from one FalkorDB graph and shows the path behind every answer.
+
+**Description** (about 120 words):
+
+> Company Brain is a Slack bot over a single FalkorDB graph. People, teams, services, documents, tickets, decisions and chat are nodes and edges; Slack and GitHub feed it live. Ask who owns billing, why a decision was made, or what breaks if auth goes down, and it answers by walking the graph, then prints the edges it used as `A -[REL]-> B` lines. The agent never writes Cypher: it picks from a fixed catalogue of hand-written queries, resolves names against the graph first, and refuses to guess. Decisions that change are superseded, not overwritten, so "why did we" stays current. Permissions are a graph query too: every answer is filtered by the rooms and repos the asker can read. FalkorDB is the only store.
+
+**How FalkorDB is central** (one paragraph, in case the form asks):
+
+> Every answer is a traversal. Ownership, expertise, decision lineage and blast radius are edges, not search results, and the reply cites the exact path. PageRank over `DEPENDS_ON` and over authored and reviewed pull requests ranks services and people; `algo.SPpaths` explains why two things are connected. Memories, tags, channel membership and repo access live in the same graph, and the scheduler, approvals and dedupe keys live as Redis keys in the same instance. Remove FalkorDB and nothing answers.
+
+**Tracks.** 03 Company Brain (primary), 01 Agents That Act on Connected Data, 02 Agent Memory and Coordination.
+
+**Links.** Repository: https://github.com/codesensei-tushar/graph_hacks . Live: https://brain.noobsurd.space (health at `/healthz`). Demo video: unlisted YouTube link, added on 18 Oct. Blog: added when published.
+
+**AI assistance disclosure** (if there is a field; otherwise it is in the README): parts of the project were written with Claude Code (Anthropic). The graph model, the tool catalogue, the scope rules and every query were decided and reviewed by the team, and every FalkorDB behaviour claimed was checked by running it.
+
+### 18 Oct, in order
+
+| When (IST) | What | Owner |
+| --- | --- | --- |
+| Morning | Last code PRs merge: agent loop, decisions, replay. Seed Quillfern and replay the history on the dev instance | coders, coordinator |
+| Late morning | Record the video to the storyboard above. Redo once if a step stumbles | team |
+| Early afternoon | Publish the blog from docs/BLOG.md; link it from the README | coder B |
+| Afternoon | Final merge. CI deploys main. Run the seven steps against production once | coordinator |
+| Before 22:00 | Submit: repo, README, video link, live link, tracks, description above. Leave two hours for the form | user |
+
+Nothing merges after the production run except the README link to the video and the blog.
+
 ## Sources
 
 - [Graph Hacks overview](https://www.wemakedevs.org/hackathons/falkordb), [rules](https://www.wemakedevs.org/hackathons/falkordb/rules), [schedule](https://www.wemakedevs.org/hackathons/falkordb/schedule), [resources](https://www.wemakedevs.org/hackathons/falkordb/resources)

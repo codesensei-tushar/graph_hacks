@@ -4,8 +4,20 @@
 
 Hackathon project for Graph Hacks track 03. FalkorDB holds how a company is connected. An agent answers from that graph and shows the path behind each answer.
 
+Ask it in Slack and it answers from the graph, then prints the edges it walked:
+
+| You ask | It walks |
+| --- | --- |
+| Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, pull requests and reviews |
+| Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[CITES]-> Document`, and the chat it came from |
+| What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
+| A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
+
+If the thing you named is not in the graph, it says so and offers the nearest matches. It never guesses.
+
 - What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
 - Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
+- Blog post outline: [docs/BLOG.md](docs/BLOG.md)
 - How to run the graph: [docs/SETUP.md](docs/SETUP.md)
 - Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
 - GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
