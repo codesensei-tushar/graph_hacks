@@ -1,72 +1,126 @@
-# Blog post outline
+# The answer is the path: a company brain on FalkorDB
 
-The best blog post wins a side prize, and the organizers said what they want: "Write about what you built, how FalkorDB fits in, and what you learned along the way." This is the outline the post follows. Fill each section from the docs it points to; keep the voice plain and first person plural. Target 1,400 to 1,800 words and five images. Publish on dev.to or Medium before the submission deadline, then link it from the README and the submission form.
+*Draft for the Graph Hacks 2026 blog post. Placeholders are in double brackets. Sections marked "verify" describe behaviour that was still landing when this was written; check each against main before publishing. Target length 1,400 to 1,800 words, five images.*
 
-Working title: **The answer is the path: a company brain on FalkorDB**
+*Built in four days for Graph Hacks 2026, Track 03 Company Brain. Repo: https://github.com/codesensei-tushar/graph_hacks . Live: https://brain.noobsurd.space . Video: [[link]].*
 
-Alternatives: "Agents that refuse to guess", "One graph, every answer cited".
+## The question that needs a path
 
-## 1. Open with the question, not the stack
+A ticket lands in Slack on a Friday afternoon: "Annual plan renewals charge twice on retry." Who should look at it?
 
-A new ticket lands: "annual renewals charge twice on retry". Who should look at it? The answer is not in any one record. It is the owner of the billing service, the person who touched the retry code last week, and the reviewer who approved that pull request. Three hops. Say that a search box returns documents, and a graph returns the people.
+Nobody can answer that from one record. The answer is the person who owns the billing service, plus the engineer who changed the retry code last month, plus the reviewer who approved that pull request, plus whoever wrote the runbook that says what a retry is supposed to do. Four facts in four systems, joined by relationships nobody wrote down.
 
-Image 1: the Slack reply to demo step 5, with the path lines visible.
+A search box returns documents. A graph returns people, and the reason each of them is on the list. That is the whole idea behind what we built.
 
-## 2. What we built, in one paragraph
+## What we built
 
-A Slack bot over one FalkorDB graph. People, teams, services, documents, tickets, decisions and chat are nodes and edges. Slack and GitHub feed it live. You ask in Slack, and every answer ends with the edges it walked, written as `A -[REL]-> B`. Link the repo and the live deployment. Name the three tracks entered.
+Company Brain is a Slack bot over one FalkorDB graph. People, teams, services, documents, tickets, decisions and chat are nodes and edges. Slack and GitHub feed it live: messages in channels the bot has joined become scoped memories, and pull requests and reviews become edges between people and the services whose code they touched. You ask in Slack, in a channel or a DM, and every answer ends with the edges it walked, written as `A -[REL]-> B`.
 
-## 3. The graph model
+[[Image 1: the Slack reply to "a billing bug just landed, who should look at it", with the path lines visible.]]
 
-Pull the tables from the README section "Graph data model". Explain the one convention that matters: every node written from Slack or GitHub carries a `scope`, and every query filters on the asker's read set. Keep it short; link to the README for the full list.
+We entered Track 03, and Tracks 01 and 02 with the same build, because the agent acts on connected data and the memory it keeps is the graph.
 
-Image 2: FalkorDB Browser showing a Service with its `DEPENDS_ON`, `OWNS`, `TOUCHES` edges and a Memory with `MENTIONS`.
+## The graph
 
-## 4. The agent never writes Cypher
+Four groups of nodes share one graph.
 
-This is the design decision the post is about. The model picks a tool from a fixed catalogue and fills in arguments. Humans wrote every query. Names resolve against the graph before anything runs; a miss means "the graph doesn't know that" plus the nearest matches, never a guess. Show one `ToolSpec` and one `ToolResult` from `src/domain/knowledge/`. Explain why: no model string ever reaches a query, so there is nothing to inject, and the explanation is the traversal itself rather than a sentence written afterwards.
+- **The company.** Company, Team, Person, Service, Document, Ticket, Decision, Chat. Services point at each other with `DEPENDS_ON`. People point at services with `OWNS`, `WORKED_ON` and `KNOWS`. Decisions point at what they `CITE`.
+- **Slack.** SlackWorkspace, SlackUser, Channel, and the membership edges that record who is in which private channel.
+- **Memory.** Memory nodes in a Scope, tagged into a topic tree, with `MENTIONS` edges into the company nodes they talk about.
+- **GitHub.** Repo, GitHubUser, PullRequest. A pull request `TOUCHES` the services whose paths it changed, and a GitHubUser `IS` a Person once the accounts are linked.
 
-Image 3: demo step 6, the refusal with candidates.
+One convention does most of the work. Every node written from Slack or GitHub carries a `scope`: `org_shared` for public channels and public repos, `slack_channel_<id>` for a private channel, `user_<id>` for one person's DMs with the bot, `github_repo_<id>` for a private repo. Seeded company knowledge has no scope and counts as shared. Every query ends with the same filter, `coalesce(n.scope, 'org_shared') IN $scopes`, where `$scopes` is what the asker may read. The full model, label by label, is in the README.
 
-## 5. Decisions that stay current
+[[Image 2: FalkorDB Browser, one Service with its DEPENDS_ON, OWNS and TOUCHES edges and a Memory with MENTIONS.]]
 
-The Track 03 bullet nobody demos well. A message in a channel changes the plan. The bot writes a new `Decision` that `SUPERSEDES` the old one, with both dates and the message it came from. "Why did we" then answers with the current decision and the one it replaced. Nothing is deleted. Take the example from demo step 3.
+## The agent never writes Cypher
 
-Image 4: the two replies to the same question, before and after the message.
+This is the design decision the rest of the post hangs on.
 
-## 6. Permissions are a graph query too
+The model does not write queries. It picks a tool from a fixed catalogue and fills in arguments. Each tool is a `ToolSpec`: a name, a description the model reads, a JSON schema for the arguments, and a `run(args, scopes)` function with a hand-written, parameterised traversal behind it. Each tool returns a `ToolResult`: a short answer and a list of `PathStep`s, the exact edges it walked, which the reply prints as `Arjun Mehta -[OWNS]-> Billing Service`.
 
-Public channel reads `org_shared`. Private channel adds its own scope. A DM adds the person's scope, every private channel they are a member of, and every private repo their linked GitHub account can read. Show the two read-set queries from the README. Point out that the repo check is `SlackUser -[:IS]-> Person <-[:IS]- GitHubUser -[:CAN_READ]-> Repo`, one pattern, and that it fails closed.
+Before any tool runs, the name in the question is resolved against the graph: exact name, then aliases, then the nearest matches, all filtered by the asker's scopes. If nothing clears the bar, the tool answers with `found = false` and the nearest candidates, and the reply says the graph doesn't know that thing and offers the closest names. It never guesses. [[Verify the exact wording against the merged resolver.]]
 
-## 7. Algorithms as tools, and the three things that bit us
+Two things fall out of this. No model-generated string ever reaches a query, so there is nothing to inject and nothing to escape. And the explanation is not a sentence the model composes afterwards; it is the traversal itself. The organizers' guide warned that a post-hoc explanation "reads like reasoning and is reconstruction". That matched what we had seen, so we built the path into the return type.
 
-PageRank over `DEPENDS_ON` for "what is load-bearing" and over authored and reviewed pull requests for "who knows". `algo.SPpaths` for "why is Maya connected to the invoice worker". Then the honest part, from docs/STRATEGY.md:
+Without a model key, a keyword router picks the tool instead, and every path still works. The test suite never calls a model.
 
-- A parameter is not accepted as a variable-length bound on FalkorDB 4.22. We clamp the depth in Python and build the literal.
-- `algo.SPpaths` defaults to outgoing edges, so a person-to-service route returns nothing until `relDirection: 'both'`.
-- `algo.CDLP` from the docs is not registered on that build; `algo.labelPropagation` is.
+[[Image 3: the refusal with candidates, demo step 6.]]
 
-Image 5: blast radius at depth one and depth four, side by side.
+## Decisions that stay current
 
-## 8. What we cut and why
+Most company-knowledge demos show a decision log. Few show what happens when a decision changes.
 
-We did not add vector search. An embedding model would have added a gigabyte to the image a day before the deadline, and similarity search is not graph work. Recall follows edges instead: from the entity a question resolved to, through `MENTIONS`, to the memories that talk about it and its neighbours. Say plainly that semantic recall is the first thing to add afterwards, and that FalkorDB has the vector index for it.
+In our graph a Decision has a date, points at the Service it is about, and cites the documents and tickets behind it. When a message in a channel changes the plan ("we're moving billing retries to the invoice worker, decided in today's sync"), the bot writes a new Decision that `SUPERSEDES` the old one, `DECIDED_IN` that channel, `BASED_ON` whatever it cites. Ask "why did we" and you get the current decision, the one it replaced, both dates, and the message it came from. Nothing is deleted. The history is a chain of edges. [[Verify after the decision PR merges; adjust edge names if they changed.]]
 
-## 9. One store
+[[Image 4: the same "why did we" question before and after the message.]]
 
-FalkorDB holds the graph and, as Redis keys in the same instance, the scheduler queue, approvals, running turns and dedupe. The app talks to one process. Mention the production setup in one sentence and link docs/DEPLOY.md.
+## Permissions are a graph query too
 
-## 10. How we used AI assistants
+A memory is written to exactly one scope, the narrowest room it was said in. What you can read depends on where you ask.
 
-Required by the rules, and worth a real paragraph. Claude Code wrote a large share of the code and docs. The graph model, the tool catalogue, the scope rules and every query were decided and read by the team, and the FalkorDB behaviours above were checked by running them. Say what the team would do differently.
+- A public channel reads `org_shared`.
+- A private channel adds its own scope.
+- A DM adds your own scope, every private channel you are a member of, and every private repo your linked GitHub account can read.
 
-## 11. What's next
+The last one is a single pattern: `(:SlackUser)-[:IS]->(:Person)<-[:IS]-(:GitHubUser)-[:CAN_READ]->(:Repo)`. Collaborator lists are re-synced every hour, so when someone loses access to a repo their DMs stop showing that repo's pull requests. If a channel's privacy cannot be confirmed, it is treated as private. If an account is not linked, the answer is no. Everything fails closed.
 
-MCP over the same catalogue, semantic recall, more sources. Two sentences. End on the line the whole post is about: the answer is the path.
+## Algorithms as tools, and three things that bit us
 
-## Checklist before publishing
+FalkorDB ships graph algorithms as procedures, which means ranking and routing are a `CALL` rather than code we had to write.
+
+- `algo.pageRank('Service', 'DEPENDS_ON')` says which service the most others lean on, the one to worry about first.
+- PageRank over who `AUTHORED` and `REVIEWED` the pull requests touching a service ranks "who knows billing" by structure instead of by counting.
+- `algo.SPpaths` answers "why is Maya connected to the invoice worker": `Maya -[OWNS]-> Auth <-[DEPENDS_ON]- Billing <-[DEPENDS_ON]- Invoice Worker`.
+- `algo.betweenness` finds the connector services, the ones most shortest paths run through.
+
+[[Verify which of these four are merged before publishing; drop any that are not.]]
+
+Three things we learned by running them against FalkorDB 4.22, not by reading about them:
+
+1. **A parameter is not accepted as a variable-length bound.** `MATCH p=(s)<-[:DEPENDS_ON*1..$depth]-(d)` fails. We clamp the depth to an integer in Python and build the literal. The "no model string reaches a query" rule still holds, because only a validated integer is interpolated.
+2. **`algo.SPpaths` follows outgoing edges by default.** A route from a person to a service returned nothing until we passed `relDirection: 'both'`, because `OWNS` and `DEPENDS_ON` point different ways.
+3. **The documented `algo.CDLP` is not registered on that build.** `algo.labelPropagation` is, and does the same job.
+
+Blast radius is the one to watch in the video. At depth one, Postgres going down takes out Auth. At depth four it reaches the invoice worker through Billing, and the reply shows the route. A search box cannot do that.
+
+[[Image 5: blast radius at depth one and at depth four, side by side.]]
+
+## What we cut, and why
+
+We did not add vector search, and we want to be clear that this was a choice.
+
+The honest reason is weight: an embedding model would have added about a gigabyte to a slim image a day before the deadline. The better reason is that similarity search is not graph work. The judges were asked to look for work the graph does that the agent could not do without it, and nearest-neighbour text retrieval is what every retrieval demo already has.
+
+So recall follows edges. From the entity a question resolved to, through `MENTIONS`, to the memories that talk about it, then one hop out to the memories about its neighbours, all filtered by what you may read, with FalkorDB's full-text index as the first pass. Semantic recall is the first thing we would add next. FalkorDB has the vector index for it, and the Memory node is already shaped for an `embedding` property. [[Verify that edge-based recall merged; otherwise say "is the next step".]]
+
+## One store
+
+FalkorDB holds the graph. It also holds, as Redis keys in the same instance, the scheduler queue, pending approvals, running turns, and the dedupe keys for Slack events and GitHub deliveries. The app talks to one process. Production runs the same compose file behind nginx, with a password on the database and its port closed to the internet, and the deploy pipeline ships by git SHA and rolls back by SHA. The details are in docs/DEPLOY.md.
+
+Take FalkorDB out and nothing answers. Not "answers worse". Nothing.
+
+## How we used AI assistants
+
+The rules ask for this, and it deserves a real paragraph rather than a footnote.
+
+Claude Code wrote a large share of the code and the docs, in several sessions that coordinated through pull requests. The team decided the graph model, the tool catalogue, the scope rules and the demo, read every query that went in, and checked every claim about FalkorDB behaviour in this post by running it against the database. The three gotchas above were found that way. [[Team: one or two sentences on what you would do differently.]]
+
+## What's next
+
+Expose the same catalogue over MCP, so other agents can walk the graph with the same permissions. Add semantic recall next to the full-text pass. Add more sources, each one as more edges rather than another store.
+
+The line we kept coming back to: the answer is the path.
+
+---
+
+*Repo: https://github.com/codesensei-tushar/graph_hacks . Live: https://brain.noobsurd.space . Video: [[link]]. Graph model and queries: the README.*
+
+## Before publishing
 
 - Every claim about FalkorDB behaviour matches the feature table in docs/STRATEGY.md.
+- Every "verify" note is resolved against main and removed.
 - No private data in any screenshot; the demo workspace is the synthetic company.
-- Repo, deployment and video links work in a private window.
-- The AI assistance paragraph is in.
+- Repo, deployment and video links open in a private window.
+- The AI assistance paragraph is in, with the team's own sentence.
+- Publish on dev.to or Medium, then link it from the README and the submission form.
