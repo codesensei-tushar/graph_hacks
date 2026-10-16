@@ -86,7 +86,7 @@ Three things we learned by running them against FalkorDB 4.22, not by reading ab
 2. **`algo.SPpaths` follows outgoing edges by default.** A route from a person to a service returned nothing until we passed `relDirection: 'both'`, because `OWNS` and `DEPENDS_ON` point different ways.
 3. **The documented `algo.CDLP` is not registered on that build.** `algo.labelPropagation` is, and does the same job.
 
-Blast radius is the one to watch in the video. At depth one, Postgres going down takes out Auth. At depth four it reaches the invoice worker through Billing, and the reply shows the route. A search box cannot do that.
+Blast radius is the one to watch in the video. At depth one, Auth going down takes out the gateway, billing, notifications and search. One hop further it reaches the invoice worker through Billing, and the reply shows the route. A search box cannot do that.
 
 [[Image 5: blast radius at depth one and at depth four, side by side.]]
 

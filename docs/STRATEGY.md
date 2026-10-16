@@ -78,6 +78,12 @@ Checked on 17 Oct against the local `falkordb/falkordb:v4.22.1` container by run
 | Variable-length paths | `MATCH p=(s:Service {id: $id})<-[:DEPENDS_ON*1..4]-(d:Service) RETURN [n IN nodes(p) \| n.name]` | A **parameter is not accepted as a bound** (`*1..$depth` fails with "unhandled type in inlined properties"). Clamp depth to an int in Python and build the literal |
 | Undirected shortest path | `CALL algo.SPpaths({sourceNode: a, targetNode: b, relTypes: [...], relDirection: 'both', maxLen: 6})` | The default `relDirection` is `outgoing`, which returns nothing for person -> service -> service routes. `pathCount: 0` returns every shortest path |
 | Read-only queries | `graph.ro_query(...)` on the Python client | Rejects writes ("graph.RO_QUERY is to be executed only on read-only queries"). Every read tool uses it |
+| Ranking people | A `UNION` of `OWNS\|WORKED_ON\|KNOWS` rows and `AUTHORED\|REVIEWED -> TOUCHES` rows, weighted and summed in Python | PageRank over people is flat (every Person 0.011 to 0.015), list arguments to `algo.pageRank` silently yield nothing, and grouping by a collected list of maps fails. Billing on Quillfern: Arjun 10, Lena 7, Tomas 4, Sara 1 |
+| Load-bearing services | `CALL algo.pageRank('Service', 'DEPENDS_ON')` | Quillfern: Postgres 0.113, Auth 0.086, Graph Store 0.049, the same order as transitive dependents |
+| Edge direction in a path | `UNWIND range(0, length(path)-1) AS i ... startNode(relationships(path)[i]) = nodes(path)[i]` | With `relDirection: 'both'` an edge can be walked backwards; cite the true arrow |
+| Memory expansion | `(:Memory)-[:MENTIONS]->(e)` then `(e)-[]-(n)` and `(:Memory)-[:MENTIONS]->(n)`, as two `UNION` branches with the scope filter in each, `ORDER BY` after the union | Verified with three hand-made memories: private-channel memory hidden from `org_shared`, visible with that channel in the read set; one-hop rows via the neighbour's name |
+| Connectors | `CALL algo.betweenness({nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON']})` | Quillfern: Auth 3.5, Billing 3.0, Notification 0.5 |
+| Depth truth | `*1..N` literal, `RETURN DISTINCT d.name, min(length(p))` | Quillfern: Auth at depth one reaches API Gateway, Billing, Notification, Search; depth two adds Invoice Worker; nothing new after. The contrast is one versus two, not one versus four |
 | Also registered | `algo.AStar`, `algo.BFS`, `algo.HarmonicCentrality`, `algo.SSpaths`, `algo.MSF`, `algo.maxFlow`, `db.idx.vector.queryRelationships` | |
 
 Other FalkorDB tooling the resources page lists: the [MCP server](https://docs.falkordb.com/genai-tools/mcpserver), [GraphRAG-SDK](https://github.com/FalkorDB/GraphRAG-SDK), [Graphiti](https://docs.falkordb.com/agentic-memory/graphiti) for bi-temporal episodes, and [Text-to-Cypher](https://www.falkordb.com/blog/text-to-cypher-natural-language-graph-queries/). We don't need them: the tool catalogue is hand-written Cypher by design, and our memory model already exists. Mention them in the blog as alternatives considered.
@@ -148,7 +154,7 @@ Target three minutes, hard cap three and a half. No length limit is published. R
 | 0:30 to 0:55 | Slack, public channel, demo step 1 | Read two path lines aloud. "The answer is the path." |
 | 0:55 to 1:15 | Step 2, the decision trace | "Decision, who proposed and approved it, the RFC and the ticket it cites." |
 | 1:15 to 1:45 | Step 3, post the message that changes the plan, ask again | "A new message changed the plan. The graph holds a new Decision that supersedes the old one, with both dates. Knowledge stays current without deleting history." |
-| 1:45 to 2:10 | Step 4, blast radius at depth one, then four | "At depth one, only Auth. At depth four the graph reaches Invoice Worker through Billing. A search box could not." |
+| 1:45 to 2:10 | Step 4, blast radius for Auth at depth one, then two hops out | "At depth one, four services. Two hops out the graph reaches the invoice worker through Billing and Notifications, and shows the route. A search box could not." |
 | 2:10 to 2:30 | Step 5, `ticket:` then Approve, then "who should look at it" | "Writes wait for a human. After approval the ticket is in the graph, and the people are ranked by PageRank over who authored and reviewed what." |
 | 2:30 to 2:45 | Step 6, a system not in the graph | "It says the graph doesn't know it and names the nearest match. It never guesses." |
 | 2:45 to 2:55 | Step 7, DM from a non-collaborator, then from a linked one | "Private repo data shows only to people who can read the repo. The permission check is a graph query too." |
@@ -205,6 +211,22 @@ The submit page renders only in a browser, so the exact fields are unknown until
 | Before 22:00 | Submit: repo, README, video link, live link, tracks, description above. Leave two hours for the form | user |
 
 Nothing merges after the production run except the README link to the video and the blog.
+
+## Production demo steps
+
+Production keeps the Company Brain self-seed plus the real workspace and GitHub data; nobody reseeds it. The final check runs these seven moves against production after the last merge. They are the same seven moves as the Quillfern script, on this project's own graph.
+
+| Step | Type in the workspace connected to production | Expect |
+| --- | --- | --- |
+| 1 | `who owns the memory layer, and who else has worked on it` | `Tushar -[OWNS]-> Memory layer`, then the real pull requests that touched `src/domain/memory` with `AUTHORED` and `REVIEWED` edges through the linked GitHub account |
+| 2 | `why do we store memory in FalkorDB instead of a hosted memory API` | The decision, proposed and approved by Tushar, citing the problem statement and the Slack guide, plus the design chat |
+| 3 | `why did we cut vector recall` | The current decision (recall over `MENTIONS` edges, 17 Oct, based on the strategy doc) and the one it superseded (hybrid vector recall), both dated. Coder B seeds this pair. If the live write landed, also post `decision: every model profile stays on Haiku through the demo` and ask `why haiku` again to see the chain grow |
+| 4 | `what breaks if the claude api goes down`, then `three hops out` | Depth one: the LLM gateway only. Depth three: Slack workspace, turn engine, memory layer, then Slack events. The route is shown |
+| 5 | `ticket: scheduler jobs run twice after a restart`, Approve, then `who should look at it` | The card names the service it will link to (Scheduler) before Approve. After Approve the ticket is in the graph and the answer is Tushar, with the edges |
+| 6 | `who owns the linear integration` | A refusal: nothing in the graph matches, nearest is the MCP and tool connectors ticket or GitHub ingest. No guess |
+| 7 | From a DM by a teammate whose GitHub account is not linked, then by one who is a collaborator on a private test repo installed on the production GitHub App | Only the second answer includes that repo's pull requests |
+
+Step 4 depends on `blast_radius` taking a depth; until then ask once and read the full set. Step 5 depends on the approval card showing the resolved service. Step 7 needs the private test repo and one `link github` done the day before.
 
 ## Sources
 
