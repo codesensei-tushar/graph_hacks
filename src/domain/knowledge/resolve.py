@@ -97,8 +97,13 @@ def core(text: str) -> str:
 
 
 def same_word(a: str, b: str) -> bool:
-    """Equal, or one is a stem of the other ("payments" ~ "payment", "auth" ~ "authentication")."""
-    return a == b or (len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a)))
+    """Equal, or a plural/singular pair ("payments" ~ "payment", "matches" ~ "match"). Not "author" ~ "auth"."""
+    if a == b:
+        return True
+    short, long = sorted((a, b), key=len)
+    if len(short) < 4 or not long.startswith(short):
+        return False
+    return len(long) - len(short) <= 1 or long == short + "es"
 
 
 def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> list[EntityRow]:

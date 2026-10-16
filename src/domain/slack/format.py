@@ -33,11 +33,23 @@ def format_path(path: list[dict]) -> list[str]:
     return lines
 
 
-def format_answer(result: dict, memories: list[dict], read_tags: list[str], channel_names: dict[str, str]) -> str:
+def format_answer(
+    result: dict,
+    memories: list[dict],
+    read_tags: list[str],
+    channel_names: dict[str, str],
+    chosen_by: str | None = None,
+) -> str:
+    """``chosen_by`` is "model" or "keywords" when the agent picked the tool; the footer then names both."""
     parts = [result.get("answer") or "I couldn't find that in the company graph."]
     path = result.get("path") or []
     if path:
-        parts += ["", f"*Path* (`{result.get('tool', 'graph')}`)", *format_path(path)]
+        header = f"`{result.get('tool', 'graph')}`"
+        if result.get("depth") is not None:
+            header += f", depth {result['depth']}"
+        parts += ["", f"*Path* ({header})", *format_path(path)]
+    if result.get("found", True) and result.get("candidates"):
+        parts += ["", f"_Also matched: {', '.join(result['candidates'])}. Ask again with that name to switch._"]
     if memories:
         parts += ["", "*From conversations*"]
         for memory in memories:
@@ -46,7 +58,11 @@ def format_answer(result: dict, memories: list[dict], read_tags: list[str], chan
                 where = f"<#{memory['channel_id']}>"
             learned = f", learned {memory['learned_at']}" if memory.get("learned_at") else ""
             parts.append(f"• “{_clip(memory['text'], MAX_MEMORY_SNIPPET)}” — {memory['author']}, {where}{learned}")
-    parts += ["", f"_Read from: {', '.join(scope_label(tag, channel_names) for tag in read_tags)}_"]
+    footer = f"Read from: {', '.join(scope_label(tag, channel_names) for tag in read_tags)}"
+    if chosen_by:
+        picker = "the model" if chosen_by == "model" else "keywords"
+        footer = f"Tool `{result.get('tool', 'graph')}`, picked by {picker}. {footer}"
+    parts += ["", f"_{footer}_"]
     return "\n".join(parts)
 
 

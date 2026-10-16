@@ -5,6 +5,7 @@ Every tool runs through its ``ToolSpec`` the way the agent will call it, returns
 ticket in the asker's scope and reports who should look at it.
 """
 
+import re
 import unittest
 from unittest import mock
 
@@ -13,9 +14,10 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 from src.db import falkordb_client  # noqa: E402
 from src.domain.knowledge import ask_service, catalogue  # noqa: E402
 from src.domain.slack import compute  # noqa: E402
-from src.seed import quillfern, seed  # noqa: E402
+from src.seed import company_brain, quillfern, seed  # noqa: E402
 
 GRAPH = f"company_catalogue_test{tests.TEST_GRAPH_SUFFIX}"
+PRODUCTION_SEED_GRAPH = f"company_catalogue_prod_test{tests.TEST_GRAPH_SUFFIX}"
 ORG = [ask_service.ORG_SHARED]
 
 
@@ -116,14 +118,61 @@ class KnowledgeCatalogueTest(unittest.TestCase):
     def test_approved_ticket_runs_through_the_catalogue(self):
         room = "slack_channel_GCATALOG"
         text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Billing exports time out"}, room)
-        self.assertIn("Filed *TKT-104* about Billing Service", text)
+        ticket_id = re.search(r"Filed \*(TKT-\d+)\* about Billing Service", text).group(1)
         self.assertIn("Arjun Mehta", text)
-        self.assertIn("TKT-104 -[ABOUT]-> Billing Service", text)
+        self.assertEqual(text.count(f"• {ticket_id} -[ABOUT]-> Billing Service"), 1)
         _, graph = falkordb_client.connect()
-        scope = graph.query("MATCH (t:Ticket {id: 'TKT-104'}) RETURN t.scope").result_set[0][0]
+        scope = graph.query("MATCH (t:Ticket {id: $id}) RETURN t.scope", {"id": ticket_id}).result_set[0][0]
         self.assertEqual(scope, room)
         # Only approved writers run this way.
         with self.assertRaises(ValueError):
             compute.execute_approved_action("who_owns", {"name": "billing"}, room)
         with self.assertRaises(ValueError):
             compute.execute_approved_action("no_such_tool", {}, room)
+
+    def test_the_approval_card_names_the_service_before_the_write(self):
+        preview = catalogue.get_tool("ingest_ticket").preview
+        self.assertEqual(preview({"title": "Billing exports time out"}, ORG), "File a ticket titled *Billing exports time out* in the company graph, linked to *Billing Service*")
+        self.assertEqual(preview({"title": "Exports time out", "about": "invoices"}, ORG), "File a ticket titled *Exports time out* in the company graph, linked to *Invoice Worker*")
+        self.assertIn("not linked to any service", preview({"title": "Office plants need watering"}, ORG))
+        self.assertEqual(compute._split_ticket("exports time out about invoices"), ("exports time out", "invoices"))
+        self.assertEqual(compute._split_ticket("billing exports time out"), ("billing exports time out", ""))
+
+    def test_a_ticket_nothing_matches_is_filed_unlinked_not_guessed(self):
+        text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Office plants need watering"}, "org_shared")
+        self.assertIn("not linked to a service: nothing in the graph matched “Office plants need watering”", text)
+        self.assertNotIn("*Path*", text)
+        _, graph = falkordb_client.connect()
+        linked = graph.query("MATCH (t:Ticket {title: 'Office plants need watering'})-[:ABOUT]->(s) RETURN count(s)").result_set[0][0]
+        self.assertEqual(linked, 0)
+
+
+class ProductionSeedTicketTest(unittest.TestCase):
+    """The production seed has no api-gateway node; an unmatched ticket must still file cleanly."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._patches = [
+            mock.patch.object(falkordb_client, "graph_name", return_value=PRODUCTION_SEED_GRAPH),
+            mock.patch.object(seed, "graph_name", return_value=PRODUCTION_SEED_GRAPH),
+        ]
+        for patch in cls._patches:
+            patch.start()
+        seed.reset_and_seed(company_brain)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            falkordb_client.client().select_graph(PRODUCTION_SEED_GRAPH).delete()
+        finally:
+            for patch in cls._patches:
+                patch.stop()
+
+    def test_unmatched_title_files_without_a_service(self):
+        text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Office plants need watering"}, "org_shared")
+        self.assertIn("Filed *TKT-", text)
+        self.assertIn("not linked to a service", text)
+
+    def test_matched_title_links_to_the_seeded_service(self):
+        text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Memory layer recall misses DM notes"}, "org_shared")
+        self.assertIn("about Memory layer", text)

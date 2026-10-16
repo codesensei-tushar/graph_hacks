@@ -27,38 +27,52 @@ _OWNS = re.compile(r"\b(?:owns?|owner|owned|responsible)\b", re.IGNORECASE)
 _WIDER_THAN_OWNER = re.compile(r"\b(?:else|also|worked|works|knows?|reviewed|touched)\b", re.IGNORECASE)
 
 
-def ask(question: str, scopes: list[str]) -> ToolResult:
-    """Pick a tool from the question's words. The fallback when no model is configured."""
+def route(question: str) -> tuple[str, dict]:
+    """Pick a tool and its arguments from the question's words. The fallback when no model is configured."""
     text = question.strip()
     if not text:
-        return ToolResult(tool="none", answer="Ask a question about the company graph.")
-
+        return "none", {}
     lowered = text.lower()
     if any(word in lowered for word in ("why", "decision", "decide", "decided")):
-        return decision_trace(text, scopes)
+        return "decision_trace", {"topic": text}
     if any(word in lowered for word in ("break", "breaks", "goes down", "outage", "depend", "blast")):
-        return blast_radius(text, scopes)
+        return "blast_radius", {"name": text}
     if _OWNS.search(lowered) and not _WIDER_THAN_OWNER.search(lowered):
-        return who_owns(text, scopes)
-    return who_knows(text, scopes)
+        return "who_owns", {"name": text}
+    return "who_knows", {"name": text}
+
+
+def ask(question: str, scopes: list[str]) -> ToolResult:
+    """Route by keywords and run the tool. The whole no-model path in one call."""
+    tool, args = route(question)
+    if tool == "none":
+        return ToolResult(tool="none", answer="Ask a question about the company graph.")
+    return _ROUTED[tool](args, scopes)
+
+
+def ticket_target(title: str, about: str, graph=None) -> Entity | None:
+    """The service a ticket is about: a strict match first, then a best guess. None when nothing matches."""
+    if graph is None:
+        _, graph = connect()
+    text = about or title
+    target = resolve.resolve_name(text, ("Service",), [ORG_SHARED], graph=graph).entity
+    # Classifying a ticket is a best guess, unlike answering a question; the approval card shows it first.
+    return target or resolve.best_match(text, ("Service",), [ORG_SHARED], graph=graph)
 
 
 def ingest_ticket(title: str, about: str, scope: str) -> TicketCreated:
     _, graph = connect()
-    text = about or title
-    target = resolve.resolve_name(text, ("Service",), [ORG_SHARED], graph=graph).entity
-    if target is None:
-        # Classifying a ticket is a best guess, unlike answering a question.
-        target = resolve.best_match(text, ("Service",), [ORG_SHARED], graph=graph) or _entity_by_id(graph, "api-gateway")
+    target = ticket_target(title, about, graph=graph)
     ticket_id = _next_ticket_id(graph)
     graph.query(
-        """
-        CREATE (ticket:Ticket {id: $id, name: $id, title: $title, summary: $title, scope: $scope})
-        WITH ticket
-        MATCH (service:Service {id: $service})
-        MERGE (ticket)-[:ABOUT]->(service)
-        """,
-        {"id": ticket_id, "title": title, "service": target.id, "scope": scope},
+        "CREATE (ticket:Ticket {id: $id, name: $id, title: $title, summary: $title, scope: $scope})",
+        {"id": ticket_id, "title": title, "scope": scope},
+    )
+    if target is None:
+        return TicketCreated(id=ticket_id, about_name=None)
+    graph.query(
+        "MATCH (ticket:Ticket {id: $id}), (service:Service {id: $service}) MERGE (ticket)-[:ABOUT]->(service)",
+        {"id": ticket_id, "service": target.id},
     )
     step = PathStep(ticket_id, "ABOUT", target.name, from_id=ticket_id, to_id=target.id, from_label="Ticket", to_label="Service")
     return TicketCreated(id=ticket_id, about_name=target.name, path=[step])
@@ -71,7 +85,7 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
         return _miss("who_owns", resolution)
     target = resolution.entity
 
-    result = ToolResult(tool="who_owns", answer="")
+    result = ToolResult(tool="who_owns", answer="", candidates=resolution.candidate_names())
     service = target
     if target.label != "Service":
         rows = graph.ro_query(
@@ -129,7 +143,7 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
         return _miss("who_knows", resolution)
     target = resolution.entity
 
-    result = ToolResult(tool="who_knows", answer="")
+    result = ToolResult(tool="who_knows", answer="", candidates=resolution.candidate_names())
     rows = graph.ro_query(
         """
         MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {id: $id})
@@ -278,7 +292,7 @@ def decision_trace(question: str, scopes: list[str]) -> ToolResult:
     if sources:
         answer += f" Sources: {', '.join(sources)}."
 
-    result = ToolResult(tool="decision_trace", answer=answer)
+    result = ToolResult(tool="decision_trace", answer=answer, candidates=resolution.candidate_names())
     for person_id, person, rel, decision in people:
         result.add(PathStep(person, rel, decision, from_id=person_id, to_id=target.id, from_label="Person", to_label="Decision"))
     for decision, rel, source_id, source, label in cites:
@@ -307,7 +321,7 @@ def blast_radius(question: str, scopes: list[str]) -> ToolResult:
     for child_id, child_name, parent_id, parent_name in edges:
         dependents.setdefault(parent_id, []).append((child_id, child_name, parent_name))
 
-    result = ToolResult(tool="blast_radius", answer="")
+    result = ToolResult(tool="blast_radius", answer="", candidates=resolution.candidate_names())
     seen = {target.id}
     queue = [target.id]
     while queue:
@@ -332,17 +346,20 @@ def match_service(text: str) -> dict | None:
     return {"id": entity.id, "name": entity.name, "label": entity.label} if entity else None
 
 
+_ROUTED = {
+    "decision_trace": lambda args, scopes: decision_trace(args["topic"], scopes),
+    "blast_radius": lambda args, scopes: blast_radius(args["name"], scopes),
+    "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
+    "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
+}
+
+
 def _miss(tool: str, resolution: Resolution, kind: str = "service, document, or ticket") -> ToolResult:
     return ToolResult(tool=tool, answer=resolve.describe_miss(resolution, kind), found=False, candidates=resolution.candidate_names())
 
 
 def _step(source: Entity, rel: str, target: Entity) -> PathStep:
     return PathStep(source.name, rel, target.name, from_id=source.id, to_id=target.id, from_label=source.label, to_label=target.label)
-
-
-def _entity_by_id(graph, node_id: str) -> Entity:
-    row = graph.ro_query("MATCH (n {id: $id}) RETURN n.id, n.name, labels(n)[0]", {"id": node_id}).result_set[0]
-    return Entity(row[0], row[1], row[2])
 
 
 def _next_ticket_id(graph) -> str:
