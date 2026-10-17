@@ -178,3 +178,58 @@ class AlgorithmToolsTest(unittest.TestCase):
         self.assertIn("@ext-contrib (wrote app#43)", private.answer)
         step = next(step for step in private.path if step.from_name == "@ext-contrib")
         self.assertEqual(step.from_label, "GitHubUser")
+
+    # --- label propagation and decisions that are no longer the last word ---
+
+    def test_working_groups_cross_the_org_chart(self):
+        result = algorithms.working_groups(ORG)
+        self.assertEqual(result.tool, "working_groups")
+        self.assertIn("Label propagation over who owns or worked on the same service finds 2 work clusters.", result.answer)
+        self.assertIn("Arjun Mehta, Lena Fischer and Tomas Reyes.", result.answer)
+        self.assertIn(
+            "The org chart splits them: Arjun Mehta and Lena Fischer are on Payments and Tomas Reyes is on Platform.",
+            result.answer,
+        )
+        self.assertIn("Inside the cluster, Arjun Mehta, Lena Fischer and Tomas Reyes share Billing Service.", result.answer)
+        self.assertIn("Kofi Mensah and Maya Ortiz.", result.answer)
+        self.assertIn("The org chart splits them: Kofi Mensah is on Data and Maya Ortiz is on Platform.", result.answer)
+        self.assertIn("Inside the cluster, Kofi Mensah and Maya Ortiz share Memory Layer.", result.answer)
+        self.assertIn("Sara Lindqvist is on their own.", result.answer)
+        self.assertIn("Sara Lindqvist knows Billing Service and stays outside that cluster", result.answer)
+        self.assertIn("2 of those clusters cross the org chart.", result.answer)
+        self.assertIn("Lena Fischer -[WORKED_ON]-> Billing Service", _cites(result))
+        self.assertIn("Tomas Reyes -[MEMBER_OF]-> Platform", _cites(result))
+        self.assertIn("Kofi Mensah -[OWNS]-> Memory Layer", _cites(result))
+        self.assertIn("Sara Lindqvist -[KNOWS]-> Billing Service", _cites(result))
+        self.assertEqual(ask_service.route("who actually works together"), ("working_groups", {}))
+        self.assertEqual(catalogue.get_tool("working_groups").run({}, ORG).tool, "working_groups")
+
+    def test_decision_pressure_names_uncited_work_and_hides_private_pull_requests(self):
+        quiet = ask_service.decision_pressure("is the billing retries decision still the last word", ORG)
+        self.assertIn("*Retry renewal webhooks inside the billing service* is the standing decision about Billing Service.", quiet.answer)
+        self.assertIn("It cites Billing runbook and TKT-102.", quiet.answer)
+        self.assertIn("It does not cite app#41 (about Billing Service) and app#42 (about Billing Service).", quiet.answer)
+        self.assertNotIn("app#43", quiet.answer)
+        _, graph = falkordb_client.connect()
+        graph.query(
+            """
+            MATCH (billing:Service {id: 'billing-service'})
+            CREATE (ticket:Ticket {id: 'TKT-109', name: 'TKT-109', title: 'Exports time out', scope: 'org_shared'})-[:ABOUT]->(billing),
+                   (hidden:PullRequest {id: 'pr-hidden', name: 'ledger#9', scope: $private})-[:TOUCHES]->(billing),
+                   (shown:PullRequest {id: 'pr-shown', name: 'app#99', scope: 'org_shared'})-[:TOUCHES]->(billing)
+            """,
+            {"private": PRIVATE},
+        )
+        try:
+            public = ask_service.decision_pressure("billing retries still the last word", ORG)
+            self.assertIn("TKT-109 (about Billing Service)", public.answer)
+            self.assertIn("app#99 (about Billing Service)", public.answer)
+            self.assertNotIn("ledger#9", public.answer)
+            self.assertIn("TKT-109 -[ABOUT]-> Billing Service", _cites(public))
+            self.assertIn("app#99 -[TOUCHES]-> Billing Service", _cites(public))
+            self.assertIn("Retry renewal webhooks inside the billing service -[BASED_ON]-> TKT-102", _cites(public))
+            private = ask_service.decision_pressure("billing retries still the last word", ORG + [PRIVATE])
+            self.assertIn("ledger#9 (about Billing Service)", private.answer)
+            self.assertEqual(ask_service.route("why did we move the memory layer off postgres")[0], "decision_trace")
+        finally:
+            graph.query("MATCH (n) WHERE n.id IN ['TKT-109', 'pr-hidden', 'pr-shown'] DETACH DELETE n")

@@ -115,6 +115,8 @@ Run against the synthetic company, in Slack, in this order:
 5. `ticket: billing exports time out`. Approve. `who should look at it` returns the owner and the top-ranked people who know that system.
 6. `who knows the payments gateway`, a system not in the graph. The agent says the graph doesn't know it, and names the nearest match.
 7. Same question from a DM by someone without access to a private repo, then by a linked collaborator. Only the second sees the repo's pull requests.
+8. `who actually works together`. Label propagation. Arjun, Lena and Tomas share Billing even though Tomas is on Platform; Kofi and Maya share the memory layer across Data and Platform. Sara knows Billing and stays outside that cluster.
+9. `is the billing retries decision still the last word`, after the scripted pull requests are in. It cites the runbook and TKT-102, and names the pull requests that touched Billing and were not cited.
 
 Keep each answer on screen long enough to read the cited path.
 

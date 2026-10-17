@@ -235,12 +235,13 @@ The Slack layer runs entirely on FalkorDB. Where the product stands:
 
 - **Agent.** Built. `src/domain/knowledge/agent.py` makes one structured model call that picks a tool from the fixed catalogue; `src/domain/slack/agent_turn.py` runs it inside the turn and renders the path. Without a model key the keyword router picks the tool, so every path works offline. The plug-in point is still `register_turn_agent()` in `src/domain/slack/compute.py`.
 - **Search.** Full-text over memories, plus recall that follows `MENTIONS` edges from the entity a question names to the memories about it and its neighbours. Semantic (vector) recall was left out on purpose for the hackathon: an embedding model would have added about a gigabyte to the image, and similarity search is not graph work. FalkorDB has the vector index for it when it is added.
-- **MCP.** The same catalogue over MCP, read-only and `org_shared`, is specified in docs/STRATEGY.md and is the next item.
+- **MCP.** Live. The same read-only catalogue is served at `/mcp` behind `MCP_TOKEN`, `org_shared` only. See the README.
+- **Work clusters and decisions under pressure.** `working_groups` runs label propagation over who shares a service and says where that splits from the org chart. `decision_pressure` lists tickets and pull requests about a decision's service that the standing decision does not cite. "Why did we" still goes to `decision_trace`.
 
 ## Differences from company-brain
 
 - **Without a model, raw messages become memories.** company-brain only saves what channel-observe distills. With no model, `turn_service.retain_without_model` keeps human channel messages of three or more words in their scope, so answers still pick up what was said. With a model this is off.
-- **The answer comes from graph tools,** not an agent loop, until an agent is registered.
+- **The answer comes from the agent loop** over the fixed tool catalogue. With no model key the keyword router picks the tool.
 - **Admin routes use a bearer token** instead of a web session.
 - **Unknown full members become people on first contact** when Slack shows their email.
 - **The approval card uses standard blocks** instead of Slack's `container` block, and has no tool icon.
@@ -248,7 +249,7 @@ The Slack layer runs entirely on FalkorDB. Where the product stands:
 
 ## Not built
 
-- MCP tool connectors, connect buttons, and the connected-tool cross-check (serving our own tools over MCP is a separate item, see above).
+- MCP tool connectors, connect buttons, and the connected-tool cross-check. Our own catalogue is already served at `/mcp`.
 - Access leasing between teammates.
 - Post-turn reflection, research and skills.
 - Billing, trials and telemetry.

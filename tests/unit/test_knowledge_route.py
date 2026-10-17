@@ -18,6 +18,11 @@ class RouteTest(unittest.TestCase):
             "what have we said about billing": ("related_memories", {"name": "what have we said about billing"}),
             "who said the retries were flaky": ("recall", {"query": "who said the retries were flaky"}),
             "why did we cut vector recall": ("decision_trace", {"topic": "why did we cut vector recall"}),
+            "is the billing retries decision still the last word": (
+                "decision_pressure",
+                {"topic": "is the billing retries decision still the last word"},
+            ),
+            "who actually works together": ("working_groups", {}),
             "": ("none", {}),
         }
         for question, expected in cases.items():
