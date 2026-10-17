@@ -133,8 +133,10 @@ class FakeSlackWorkspace:
         return self.channels[channel_id]
 
     def next_ts(self) -> str:
+        """Wall-clock based and strictly increasing, so a reply always sorts after the
+        message it answers, even one stamped by a loader in another process."""
         with self._lock:
-            self._clock += 1_000
+            self._clock = max(self._clock + 1_000, int(time.time() * 1_000_000))
             return f"{self._clock // 1_000_000}.{self._clock % 1_000_000:06d}"
 
     def say(self, channel: str, user: str, text: str, thread_ts: str | None = None, ts: str | None = None) -> FakeSlackMessage:
@@ -142,6 +144,8 @@ class FakeSlackWorkspace:
         message = FakeSlackMessage(channel=channel, ts=ts or self.next_ts(), user=user, text=text, thread_ts=thread_ts)
         with self._lock:
             self.messages.append(message)
+            # Replies must sort after what they answer, even when the loader stamped it later than our clock.
+            self._clock = max(self._clock, int(float(message.ts) * 1_000_000))
         return message
 
     def messages_in(self, channel: str, thread_ts: str | None = None) -> list[FakeSlackMessage]:
@@ -181,6 +185,19 @@ class FakeSlackWorkspace:
         with self._lock:
             self.response_url_posts.append(dict(body))
         return {"ok": True}
+
+    # --- control endpoints (not Slack): what a loader in another process needs ------------------
+
+    def handle_control(self, action: str, body: dict) -> dict:
+        """``say`` records a human message as if typed in Slack; ``messages`` reads a channel or
+        thread back, with blocks, so the loader can collect replies and find approval cards."""
+        if action == "say":
+            message = self.say(body["channel"], body["user"], body.get("text") or "", thread_ts=body.get("thread_ts") or None, ts=body.get("ts") or None)
+            return {"ok": True, "ts": message.ts}
+        if action == "messages":
+            rows = self.messages_in(body.get("channel") or "", body.get("thread_ts") or None)
+            return {"ok": True, "messages": [{**m.payload(), "streaming": m.streaming} for m in rows]}
+        return _error("unknown_control_action")
 
     # --- auth and users --------------------------------------------------------------------
 
@@ -444,6 +461,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         if parsed.path.startswith("/response/"):
             data = workspace.handle_response_url(body)
+        elif parsed.path.startswith("/replay/"):
+            data = workspace.handle_control(parsed.path.rsplit("/", 1)[-1], body)
         else:
             data = workspace.handle(parsed.path.rsplit("/", 1)[-1], token, body)
         payload = json.dumps(data).encode("utf-8")

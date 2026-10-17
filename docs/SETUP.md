@@ -98,6 +98,17 @@ python scripts/replay_workspace.py --app-url http://localhost:8000 --team T0123 
 
 The instance verifies the events with `SLACK_SIGNING_SECRET` from `.env`, so the script reads the same file. Replies land in Slack. Add `--steps demo` to fire the seven steps too; Approve clicks happen in Slack by hand.
 
+To rehearse that exact path without a workspace, serve the fake Slack API on its own and point a real instance at it:
+
+```bash
+python scripts/fake_slack.py --port 8899
+SLACK_API_BASE_URL=http://127.0.0.1:8899/api/ SLACK_BOT_TOKEN= LLM_API_KEY= uvicorn src.main:app --port 8010
+python scripts/replay_workspace.py --app-url http://127.0.0.1:8010 --team TQUILLFERN --bot UBRAIN \
+    --fake-slack http://127.0.0.1:8899 --steps all
+```
+
+With `--fake-slack` the loader registers the scripted workspace in the instance's graph, records each message in the fake as if typed, waits for the bot's reply (a running instance answers in the background after the events route returns), clicks Approve on the cards, and prints every reply; the fake prints them too.
+
 ## How the pieces will connect
 
 1. `docker-compose.yml` runs FalkorDB.

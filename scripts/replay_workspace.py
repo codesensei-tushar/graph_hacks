@@ -18,6 +18,11 @@ seven steps are typed live.
     python scripts/replay_workspace.py --app-url http://localhost:8000 --team T0123 --bot U0BOT \\
         --map CENGINEERING=C0ENG --map GPAYMENTS=G0PAY --map UMAYA=U0MAYA ...
 
+To rehearse that path without a workspace, serve the fake Slack API on its own
+(``python scripts/fake_slack.py``), start the instance pointed at it, and add
+``--fake-slack http://127.0.0.1:8899``: messages are recorded there, replies are
+printed here, and Approve is clicked for you.
+
 The signing secret is SLACK_SIGNING_SECRET from .env (a throwaway is generated in-process
 when it is empty), so the instance accepts the events as Slack's. Approve clicks only
 work in-process; against Slack, click Approve on the card.
@@ -48,6 +53,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", choices=["all", "history", "demo"], help="what to play (default: all in-process, history with --app-url)")
     parser.add_argument("--no-seed", action="store_true", help="keep the graph as it is; only play")
     parser.add_argument("--no-github", action="store_true", help="skip the scripted repos")
+    parser.add_argument(
+        "--fake-slack",
+        metavar="URL",
+        help="with --app-url: the standalone fake Slack API (scripts/fake_slack.py) the instance is pointed at; "
+        "registers the scripted workspace, records each message there, prints the replies, and clicks Approve",
+    )
     parser.add_argument(
         "--with-model",
         action="store_true",
@@ -141,7 +152,7 @@ def run_against_instance(args) -> None:
     import httpx
 
     from src.core.config import settings
-    from scripts.replay.driver import WorkspaceReplayer
+    from scripts.replay.driver import FakeSlackRemote, WorkspaceReplayer, register_fake_workspace
 
     if not (args.team and args.bot):
         sys.exit("--app-url needs --team and --bot")
@@ -149,10 +160,24 @@ def run_against_instance(args) -> None:
     print(f"posting signed events to {args.app_url}/slack/events for team {args.team} (bot {args.bot})")
     print("id map: " + (", ".join(f"{k}->{v}" for k, v in ids.items()) or "none; scripted ids are used as they are"))
     _seed_and_repos(args)
+    fake = None
+    if args.fake_slack:
+        register_fake_workspace()
+        fake = FakeSlackRemote(args.fake_slack, bot_user_id=args.bot)
+        print(f"registered the scripted workspace install; messages and replies go through the fake at {args.fake_slack}")
     with httpx.Client(base_url=args.app_url, timeout=30) as http:
-        replayer = WorkspaceReplayer(http, signing_secret=settings.slack_signing_secret, team_id=args.team, bot_user_id=args.bot, ids=ids)
+        replayer = WorkspaceReplayer(
+            http,
+            signing_secret=settings.slack_signing_secret,
+            team_id=args.team,
+            bot_user_id=args.bot,
+            fake=fake,
+            ids=ids,
+            response_url=f"{args.fake_slack.rstrip('/')}/response/replay" if args.fake_slack else "https://example.invalid/response",
+        )
         _play(replayer, args.steps or "history")
-    print("\nreplies are in Slack; approve cards there by hand")
+    if not args.fake_slack:
+        print("\nreplies are in Slack; approve cards there by hand")
 
 
 def main() -> None:
