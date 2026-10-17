@@ -33,6 +33,7 @@ from scripts.replay.driver import (  # noqa: E402
     clear_team_state,
     fake_workspace_from_script,
     register_fake_workspace,
+    use_agent_loop,
 )
 from scripts.replay.github_api import FakeGitHubClient  # noqa: E402
 from scripts.replay.slack_api import FakeSlackServer  # noqa: E402
@@ -70,6 +71,7 @@ class DemoReplayTest(unittest.TestCase):
 
         seed.reset_and_seed(quillfern)
         register_fake_workspace()
+        use_agent_loop()
         cls.http = TestClient(app)
         cls.replayer = WorkspaceReplayer(
             cls.http,
@@ -88,6 +90,7 @@ class DemoReplayTest(unittest.TestCase):
             clear_team_state(cls.replayer)
             falkordb_client.client().select_graph(GRAPH).delete()
         finally:
+            use_agent_loop(False)
             cls.server.stop()
             for patch in cls.patches:
                 patch.stop()
@@ -124,6 +127,13 @@ class DemoReplayTest(unittest.TestCase):
         self.assertEqual(touched["billing-internal#7"], ("github_repo_9002", ["billing-service"]))
         linked = graph.query("MATCH (g:GitHubUser)-[:IS]->(p:Person) RETURN count(p)").result_set[0][0]
         self.assertEqual(linked, len(script.GITHUB_USERS))
+
+    def test_every_answer_came_through_the_agent_loop(self):
+        # Approved writes run after the Approve click, outside the loop, so they carry no footer.
+        answers = [reply for rows in self.steps.values() for row in rows if row.message.kind != "approve" for reply in row.replies]
+        self.assertGreaterEqual(len(answers), 7)
+        for reply in answers:
+            self.assertRegex(reply, r"_Tool `[a-z_]+`, picked by (keywords|the model)\.", reply)
 
     def test_every_slack_call_went_to_the_fake_with_the_stored_token(self):
         self.assertTrue(self.fake.calls_to("chat.postMessage"))
@@ -169,8 +179,12 @@ class DemoReplayTest(unittest.TestCase):
         self.assertEqual(said.status, 200)
         self.assertEqual(said.replies, [], "a plain channel message gets no reply without a model")
         reply = self._only_reply(asked)
-        self.assertIn("billing retries to the invoice worker", reply)
-        self.assertIn("Arjun Mehta", reply)
+        # Until the plan change is recorded as a decision, the loop refuses rather than guessing
+        # from chatter: no decision matches, and no memories are shown under a refusal.
+        self.assertIn("Nothing in the graph matches", reply)
+        self.assertIn("billing retries", reply)
+        self.assertNotIn("*From conversations*", reply)
+        self.assertIn("Tool `decision_trace`, picked by keywords", reply)
 
     def test_3b_the_plan_change_is_a_decision_that_supersedes_the_old_one(self):
         reply = self._only_reply(self._rows("A plan changes in the channel")[1])
