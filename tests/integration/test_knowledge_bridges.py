@@ -46,6 +46,7 @@ class ConnectorsTest(unittest.TestCase):
             CREATE (ines:Person {id: 'ines', name: 'Ines Duarte'}),
                    (ines)-[:MEMBER_OF]->(:Team {id: 'legal', name: 'Legal'}),
                    (ines)-[:MEMBER_OF]->(:Team {id: 'finance', name: 'Finance'}),
+                   (:Team {id: 'customer-success', name: 'Customer Success'}),
                    (priya)-[:WORKED_ON]->(churn:Service {id: 'churn-model', name: 'Churn model', scope: $private}),
                    (data)-[:RUNS]->(churn)
             """,
@@ -84,6 +85,14 @@ class ConnectorsTest(unittest.TestCase):
         # The model fills the two teams separately.
         self.assertEqual(bridges.connectors("sales", "platform", ORG).answer, expected)
         self.assertEqual(bridges.connectors("sales team", "Sales", ORG).answer, "Sales is one team; name two teams, or one team to see who connects it to the rest.")
+
+    def test_the_model_s_arguments_get_the_keyword_answer_and_near_misses_are_refused(self):
+        # The model fills source="Sales", target="Engineering" (scripts/check_model_routing.py).
+        self.assertEqual(bridges.connectors("Sales", "Engineering", ORG).answer, _connect("who connects Sales and Engineering").answer)
+        near = bridges.connectors("Sales", "customer ops", ORG)
+        self.assertFalse(near.found)
+        self.assertEqual(near.answer, "Nothing in the graph matches “customer ops”. Nearest: Customer Success.")
+        self.assertFalse(bridges.connectors("Marketing", "Engineering", ORG).found)
 
     def test_ranked_by_cross_team_work_and_knowing_is_not_a_bridge(self):
         result = _connect("who bridges payments and platform")
