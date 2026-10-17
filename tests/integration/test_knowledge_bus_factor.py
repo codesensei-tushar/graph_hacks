@@ -1,9 +1,9 @@
-"""``if_person_leaves`` on a real FalkorDB: Quillfern engineering, then a Sales team merged onto it.
+"""``if_person_leaves`` on a real FalkorDB: Quillfern engineering, then with its Sales team imported.
 
-The setup adds what Quillfern lacks: a standing decision Sara alone proposed and approved,
-an open and a closed ticket only she worked on, a superseded decision of hers, a person with
-no edges, and a private service Kofi owns. The Sales rows are the kinds-test fixture, in the
-shape the team importer and the Sales seed write.
+The engineering setup adds what Quillfern lacks: a standing decision Sara alone proposed and
+approved, an open and a closed ticket only she worked on, a superseded decision of hers, a
+person with no edges, and a private service Kofi owns. The Sales team is the real one, from
+``examples/teams/quillfern-sales.toml`` through the team importer.
 """
 
 import unittest
@@ -14,8 +14,7 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 from src.db import falkordb_client  # noqa: E402
 from src.domain.knowledge import ask_service, bus_factor, catalogue, resolve  # noqa: E402
 from src.domain.knowledge.resolve import Entity  # noqa: E402
-from src.seed import quillfern, seed  # noqa: E402
-from tests.integration import test_knowledge_kinds as kinds_fixture  # noqa: E402
+from src.seed import quillfern, quillfern_sales, seed  # noqa: E402
 
 GRAPH = f"company_bus_factor_test{tests.TEST_GRAPH_SUFFIX}"
 SALES_GRAPH = f"company_bus_factor_sales_test{tests.TEST_GRAPH_SUFFIX}"
@@ -75,7 +74,7 @@ class IfPersonLeavesTest(_Graph):
                    (sara)-[:WORKED_ON]->(vacuum), (vacuum)-[:ABOUT]->(postgres),
                    (certs:Ticket {id: 'TKT-190', name: 'TKT-190', title: 'Rotate replica certificates', state: 'closed'}),
                    (sara)-[:WORKED_ON]->(certs), (certs)-[:ABOUT]->(postgres),
-                   (:Person {id: 'noor', name: 'Noor Haddad', role: 'New hire'}),
+                   (:Person {id: 'ines', name: 'Ines Duarte', role: 'New hire'}),
                    (kofi)-[:OWNS]->(:Service {id: 'notebook-export', name: 'Notebook Export', scope: $private})
             """,
             {"private": PRIVATE},
@@ -168,7 +167,7 @@ class IfPersonLeavesTest(_Graph):
             _leaves("what if tomas quits").answer,
             "If Tomas Reyes leaves, nothing rests on them alone: everything they own, work on, or decided has someone else on it.",
         )
-        self.assertEqual(_leaves("what if noor leaves").answer, "Noor Haddad is in the graph, and nothing is linked to them yet.")
+        self.assertEqual(_leaves("what if ines leaves").answer, "Ines Duarte is in the graph, and nothing is linked to them yet.")
 
     def test_a_name_not_in_the_graph_is_refused_the_way_the_resolver_words_it(self):
         result = _leaves("what breaks if Zed leaves")
@@ -192,31 +191,52 @@ class IfPersonLeavesSalesTest(_Graph):
 
     @classmethod
     def seed_more(cls):
-        seed.seed_company(kinds_fixture.sales())
+        quillfern_sales.seed_sales()
 
-    def test_a_process_reads_as_run_and_the_next_in_line_comes_from_work(self):
+    def test_a_process_reads_as_run_and_the_next_in_line_crosses_teams(self):
         result = _leaves("what if priya leaves")
         self.assertEqual(
             result.answer,
-            "If Priya Shah leaves, 3 things rest on them alone, ranked by how much depends on each. "
-            "Renewals process: Priya Shah is the only one running it; next in line: Dev Patel; 1 other depends on it. "
-            "Pricing playbook: Priya Shah is its only owner and the only one who knows it. "
-            "Refund policy: Priya Shah is its only owner and the only one who knows it.",
+            "If Priya Shah leaves, 2 things rest on them alone, ranked by how much depends on each. "
+            "Renewals process: Priya Shah is the only one running it; next in line: Dev Patel, then Noor Haddad; 1 other depends on it. "
+            "Pricing playbook: Priya Shah is its only owner; next in line: Noor Haddad, then Tomas Reyes.",
         )
         self.assertEqual(
             _cites(result),
-            ["Priya Shah -[OWNS]-> Renewals", "Dev Patel -[WORKED_ON]-> Renewals", "Priya Shah -[OWNS]-> Pricing playbook", "Priya Shah -[OWNS]-> Refund policy"],
+            [
+                "Priya Shah -[OWNS]-> Renewals",
+                "Dev Patel -[WORKED_ON]-> Renewals",
+                "Noor Haddad -[WORKED_ON]-> Renewals",
+                "Priya Shah -[OWNS]-> Pricing playbook",
+                "Noor Haddad -[WORKED_ON]-> Pricing playbook",
+                # Tomas is on Platform: the engineering manager is next in line for a Sales playbook.
+                "Tomas Reyes -[WORKED_ON]-> Pricing playbook",
+            ],
         )
+        # Priya approved both pricing decisions, but someone else proposed each: neither rests on her alone.
+        self.assertNotIn("decision", result.answer)
 
-    def test_an_account_losing_its_only_owner_is_listed(self):
-        result = _leaves("what breaks if dev leaves")
+    def test_a_system_and_an_account_losing_their_only_owner(self):
         self.assertEqual(
-            result.answer,
-            "If Dev Patel leaves, 2 things rest on them alone, ranked by how much depends on each. "
-            "HubSpot system: Dev Patel is its only owner and the only one who knows it; 2 others depend on it. "
+            _leaves("what if noor leaves").answer,
+            "If Noor Haddad leaves, 1 thing rests on them alone, ranked by how much depends on each. "
+            "HubSpot system: Noor Haddad is its only owner and the only one who knows it; 2 others depend on it.",
+        )
+        dev = _leaves("what breaks if dev leaves")
+        self.assertEqual(
+            dev.answer,
+            "If Dev Patel leaves, 1 thing rests on them alone, ranked by how much depends on each. "
             "Enterprise accounts: Dev Patel is its only owner and the only one who knows it.",
         )
-        self.assertIn("Dev Patel -[OWNS]-> Enterprise accounts", _cites(result))
+        self.assertEqual(_cites(dev), ["Dev Patel -[OWNS]-> Enterprise accounts"])
+
+    def test_engineering_answers_are_unchanged_by_the_sales_team(self):
+        self.assertEqual(
+            _leaves("what breaks if Arjun leaves").answer,
+            "If Arjun Mehta leaves, 1 thing rests on them alone, ranked by how much depends on each. "
+            "Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes; 2 others depend on it.",
+        )
+        self.assertTrue(_leaves("what if tomas quits").answer.startswith("If Tomas Reyes leaves, nothing rests on them alone"))
 
 
 if __name__ == "__main__":
