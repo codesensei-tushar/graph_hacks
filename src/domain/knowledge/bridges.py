@@ -61,9 +61,10 @@ class Bridge:
 def connectors(source: str, target: str, scopes: list[str]) -> ToolResult:
     """Who connects the teams named, most cross-team work first, each with the edges that make the bridge."""
     _, graph = connect()
-    teams = _teams(graph, source, target, scopes)
-    if isinstance(teams, ToolResult):
-        return teams
+    named = _teams(graph, source, target, scopes)
+    if isinstance(named, ToolResult):
+        return named
+    teams, unmatched = named
     people = _people(graph, scopes)
     if len(teams) == 2:
         first, second = teams
@@ -79,9 +80,7 @@ def connectors(source: str, target: str, scopes: list[str]) -> ToolResult:
 
     result = ToolResult(tool=TOOL, answer="")
     # "who connects Sales and Engineering" where no team is called Engineering: say so, then answer for Sales.
-    note = ""
-    if len(teams) == 1 and (unmatched := _unmatched(source, first)):
-        note = f"No team in the graph is called “{unmatched}”. "
+    note = f"No team in the graph is called “{unmatched}”. " if unmatched else ""
     if not bridges:
         result.answer = f"{note}No one connects {between}: no one on one side is on the other or works on what it runs."
         return result
@@ -105,18 +104,25 @@ def _unmatched(question: str, team: Entity) -> str:
 
 
 def _teams(graph, source: str, target: str, scopes: list[str]):
-    """One or two teams, or a refusal. The keyword router passes the whole question as ``source``."""
+    """One or two teams and what else was named that is no team, or a refusal.
+
+    The keyword router passes the whole question as ``source``; the model fills ``source`` and
+    ``target`` apart. Either way, when one team resolves and the other name matches nothing at
+    all, the answer is for that one team and says what it did not find. A name with near misses
+    is refused instead, so the reply can offer them.
+    """
     if target and target.strip().lower() != source.strip().lower():
-        found = []
-        for text in (source, target):
-            resolution = resolve.resolve_name(text, ("Team",), scopes, graph=graph)
-            if not resolution.found:
-                return _miss(resolution)
-            found.append(resolution.entity)
-        return found
+        resolutions = [resolve.resolve_name(text, ("Team",), scopes, graph=graph) for text in (source, target)]
+        found = [resolution.entity for resolution in resolutions if resolution.found]
+        missed = [resolution for resolution in resolutions if not resolution.found]
+        if not found or any(resolution.candidates for resolution in missed):
+            return _miss(next((resolution for resolution in missed if resolution.candidates), missed[0]))
+        return found, " ".join(resolve.core(resolution.query) for resolution in missed)
     named = resolve.resolve_all(source, ("Team",), scopes, graph=graph)
+    if len(named) >= 2:
+        return named[:2], ""
     if named:
-        return named[:2]
+        return named, _unmatched(source, named[0])
     return _miss(resolve.resolve_name(source, ("Team",), scopes, graph=graph))
 
 
