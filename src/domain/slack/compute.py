@@ -299,4 +299,4 @@ def execute_approved_action(tool_name: str, tool_input: dict, container_tag: str
     if spec is None or not spec.needs_approval:
         raise ValueError(f"unknown approved tool {tool_name}")
     result = spec.run({**tool_input, "scope": container_tag}, read_tags)
-    return format.format_answer(result.to_dict(), [], read_tags, channel_names(read_tags))
+    return format.format_answer(result.to_dict(), [], read_tags, channel_names(read_tags), chosen_by="approval")
