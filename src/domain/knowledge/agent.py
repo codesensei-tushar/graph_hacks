@@ -39,6 +39,8 @@ THREAD_LABELS = ("Service", "Document", "Ticket", "Decision")
 
 _TOOL_IN_REPLY = re.compile(r"Tool `(\w+)`")
 _DEPTH_IN_REPLY = re.compile(r"depth (\d+)")
+# An approved write's reply names what it filed: "Filed *TKT-104* about Billing Service."
+_FILED_IN_REPLY = re.compile(r"Filed \*([^*]+)\*")
 _DEEPER = re.compile(r"\b(?:deeper|further out|more hops|next hop|one more hop|keep going)\b", re.IGNORECASE)
 _ALL_THE_WAY = re.compile(r"\b(?:all the way|everything|the whole chain|the full chain|every hop)\b", re.IGNORECASE)
 
@@ -126,14 +128,22 @@ def _is_bot(message: dict, bot_ids: frozenset[str]) -> bool:
 
 
 def thread_entities(thread: list[dict] | None, scopes: list[str], bot_ids: frozenset[str] = frozenset(), skip_text: str = "") -> list[Entity]:
-    """Nodes people named in the thread, most recent first. Bot replies are skipped: they name many things at once."""
+    """Nodes named in the thread, most recent first.
+
+    People's messages are resolved whole. Bot replies name many things at once, so only
+    what an approved write filed ("Filed *TKT-104*") is taken from them.
+    """
     named: list[Entity] = []
     for message in reversed(thread or []):
         text = str(message.get("text") or "")
-        if not text or (skip_text and skip_text in text) or _is_bot(message, bot_ids):
+        if not text or (skip_text and skip_text in text):
             continue
-        found = resolve.resolve_name(text, THREAD_LABELS, scopes)
-        if found.found and found.entity not in named:
+        if _is_bot(message, bot_ids):
+            filed = _FILED_IN_REPLY.search(text)
+            found = resolve.resolve_name(filed.group(1), ("Ticket", "Decision"), scopes) if filed else None
+        else:
+            found = resolve.resolve_name(text, THREAD_LABELS, scopes)
+        if found is not None and found.found and found.entity not in named:
             named.append(found.entity)
         if len(named) == THREAD_NAMED_LIMIT:
             break

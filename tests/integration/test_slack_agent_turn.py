@@ -138,14 +138,16 @@ class KnowledgeAgentTest(unittest.TestCase):
 
     def test_who_should_look_at_it_resolves_the_threads_ticket(self):
         thread = [
-            {"user": "UKOFI", "text": "<@UBOT> ticket: billing exports time out", "ts": "1"},
-            {"user": "UBOT", "bot_id": "B1", "text": "Filed *TKT-104* about Billing Service. Billing Service is owned by Arjun Mehta.", "ts": "2"},
+            {"user": "UKOFI", "text": "<@UBOT> ticket: annual plan renewals charge twice", "ts": "1"},
+            {"user": "UBOT", "bot_id": "B1", "text": "Filed *TKT-102* about Billing Service. Billing Service is owned by Arjun Mehta.\n\n_Tool `ingest_ticket`, run after your approval. Read from: public channels_", "ts": "2"},
             {"user": "UKOFI", "text": "<@UBOT> who should look at it", "ts": "3"},
         ]
         with mock.patch.object(agent, "generate_object", side_effect=ModelUnavailable("no key")):
             outcome = agent_turn.answer_turn(_request("who should look at it", thread=thread))
+        # The subject is the ticket the approval filed, and the tool is who_knows, not the writer again.
+        self.assertIn("• TKT-102 -[ABOUT]-> Billing Service", outcome.reply)
         self.assertIn("• Arjun Mehta -[OWNS]-> Billing Service", outcome.reply)
-        self.assertIn("Subject from this thread", outcome.reply)
+        self.assertIn("Tool `who_knows`, picked by keywords. Subject from this thread.", outcome.reply)
 
     def test_a_refusal_in_a_thread_stays_a_refusal(self):
         thread = [{"user": "USARA", "text": "<@UBOT> what breaks if auth goes down", "ts": "1"}, {"user": "UBOT", "bot_id": "B1", "text": "If Auth Service goes down...", "ts": "2"}]

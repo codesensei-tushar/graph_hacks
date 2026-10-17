@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from src.domain.knowledge import agent, catalogue
-from src.domain.knowledge.dto import ToolResult, ToolSpec
+from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
 from src.integrations.llm.model import ModelUnavailable
 
 DEPTH_SPEC = ToolSpec(
@@ -158,6 +158,39 @@ class ThreadFollowUpTest(unittest.TestCase):
         subject.assert_not_called()
         self.assertIs(result, miss)
         self.assertEqual(choice.via, "keywords")
+
+    def test_the_subject_survives_the_formatter(self):
+        """The tool and depth are read back from a reply rendered by format_answer, so a formatter change cannot break follow-ups silently."""
+        from src.domain.slack import format
+
+        rendered = ToolResult(tool="blast_radius", answer="If Auth Service goes down...", depth=2)
+        rendered.add(PathStep("Billing Service", "DEPENDS_ON", "Auth Service"))
+        reply = format.format_answer(rendered.to_dict(), [], ["org_shared"], {}, chosen_by="keywords")
+        thread = [{"user": "USARA", "text": "<@UBOT> what breaks if auth goes down", "ts": "1"}, {"user": "UBOT", "bot_id": "B1", "text": reply, "ts": "2"}]
+        with mock.patch.object(agent.resolve, "resolve_name", side_effect=self._resolve):
+            subject = agent.thread_subject(thread, ["org_shared"], frozenset({"UBOT"}), skip_text="and two hops out")
+        self.assertEqual(subject, agent.ThreadSubject(self.AUTH, "blast_radius", 2))
+
+    def test_after_an_approved_ticket_the_subject_is_the_ticket_and_who_knows_runs(self):
+        ticket = agent.Entity("TKT-104", "TKT-104", "Ticket")
+
+        def resolve_filed(text, labels, _scopes):
+            found = agent.resolve.Resolution(query=text)
+            if text == "TKT-104" and "Ticket" in labels:
+                found.entity = ticket
+            elif "billing" in text.lower():
+                found.entity = agent.Entity("billing-service", "Billing Service", "Service")
+            return found
+
+        thread = [
+            {"user": "UKOFI", "text": "<@UBOT> ticket: billing exports time out", "ts": "1"},
+            {"user": "UBOT", "bot_id": "B1", "text": "Filed *TKT-104* about Billing Service. Billing Service is owned by Arjun Mehta.\n\n_Tool `ingest_ticket`, run after your approval. Read from: public channels_", "ts": "2"},
+        ]
+        with mock.patch.object(agent.resolve, "resolve_name", side_effect=resolve_filed):
+            subject = agent.thread_subject(thread, ["org_shared"], frozenset({"UBOT"}), skip_text="who should look at it")
+        self.assertEqual(subject, agent.ThreadSubject(ticket, "ingest_ticket", None))
+        who = agent.ToolChoice("who_knows", {"name": "who should look at it"}, "keywords")
+        self.assertEqual(agent.follow_up_choice("who should look at it", who, subject), agent.ToolChoice("who_knows", {"name": "TKT-104"}, "thread"))
 
     def test_the_model_prompt_lists_things_named_so_far(self):
         with (
