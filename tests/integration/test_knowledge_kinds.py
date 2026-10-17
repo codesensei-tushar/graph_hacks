@@ -101,25 +101,47 @@ class KindsTest(unittest.TestCase):
     def test_blast_radius_reads_by_kind_and_crosses_teams(self):
         hubspot = ask_service.ask("what breaks if hubspot goes down", ORG)
         self.assertEqual(hubspot.tool, "blast_radius")
+        # The connector sentence that may follow comes from sampled betweenness, so it is not pinned here.
         self.assertTrue(
-            hubspot.answer.startswith("If the HubSpot system goes down, these stop with it: Renewals process (1 hop), Pricing playbook (2 hops)."),
+            hubspot.answer.startswith(
+                "If the HubSpot system goes down, the Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops). "
+                "Depth 2 reached 2 things that depend on it; nothing new past depth 2."
+            ),
             hubspot.answer,
         )
         self.assertIn("Renewals -[DEPENDS_ON]-> HubSpot", [step.cite() for step in hubspot.path])
+        one_hop = algorithms.blast_radius("hubspot", ORG, depth=1)
+        self.assertTrue(
+            one_hop.answer.startswith(
+                "If the HubSpot system goes down, the Renewals process stalls (1 hop). "
+                "1 more depends on it further out (Pricing playbook at depth 2); ask with more hops."
+            ),
+            one_hop.answer,
+        )
         stalls = ask_service.ask("what stops if renewals is down", ORG)
         self.assertEqual(stalls.tool, "blast_radius")
-        self.assertTrue(stalls.answer.startswith("If the Renewals process stalls, these stop with it: Pricing playbook (1 hop)."), stalls.answer)
-        # A sales process that leans on an engineering service shows up in that service's blast radius.
+        self.assertEqual(
+            stalls.answer,
+            "If the Renewals process stalls, the Pricing playbook no longer applies (1 hop). Depth 1 reached 1 thing that depends on it; nothing new past depth 1.",
+        )
+        # A sales process that leans on an engineering service shows up in that service's blast radius,
+        # after the services, which keep their engineering wording.
         billing = algorithms.blast_radius("billing", ORG)
-        self.assertTrue(billing.answer.startswith("If Billing Service goes down, these stop with it:"), billing.answer)
-        self.assertIn("Renewals process", billing.answer)
+        self.assertTrue(
+            billing.answer.startswith(
+                "If Billing Service goes down, these stop with it: API Gateway and Invoice Worker (1 hop). "
+                "The Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops). "
+                "Depth 2 reached 4 things that depend on it; nothing new past depth 2."
+            ),
+            billing.answer,
+        )
         self.assertEqual(ask_service.route("what depends on hubspot")[0], "blast_radius")
 
     def test_accounts_are_never_in_dependency_answers(self):
         account = algorithms.blast_radius("enterprise accounts", ORG)
         self.assertTrue(account.found)
         self.assertEqual(account.path, [])
-        self.assertEqual(account.answer, "The Enterprise accounts is an account: nothing depends on it. Ask who owns it or who knows it instead.")
+        self.assertEqual(account.answer, "Enterprise accounts is an account: nothing depends on it. Ask who owns it or who knows it instead.")
         ranked = algorithms.load_bearing(10)
         self.assertNotIn("Enterprise accounts", ranked.answer)
         self.assertIn("HubSpot", ranked.answer)

@@ -25,6 +25,9 @@ _DOWN = {
     "policy": "no longer applies",
     "playbook": "no longer applies",
 }
+# Kinds that go down with what they depend on. A blast radius lists them together ("these
+# stop with it"); every other kind gets its own clause with its own verb.
+GOES_DOWN = frozenset(kind for kind, verb in _DOWN.items() if verb == "goes down")
 
 
 def normalize_kind(value) -> str:
