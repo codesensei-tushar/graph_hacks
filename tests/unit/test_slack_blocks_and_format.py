@@ -53,6 +53,13 @@ class FormatTests(unittest.TestCase):
         text = format_answer({"answer": "x", "path": []}, memories, ["org_shared"], {})
         self.assertIn("<#C9>", text)
 
+    def test_path_header_names_tool_depth_and_edge_count(self):
+        path = [{"from": f"n{i}", "rel": "DEPENDS_ON", "to": "auth"} for i in range(7)]
+        text = format_answer({"answer": "x", "path": path, "tool": "blast_radius", "depth": 2}, [], ["org_shared"], {})
+        self.assertIn("*Path* (`blast_radius`, depth 2, 7 edges)", text)
+        one = format_answer({"answer": "x", "path": path[:1], "tool": "who_owns"}, [], ["org_shared"], {})
+        self.assertIn("*Path* (`who_owns`, 1 edge)", one)
+
     def test_answer_fallback_and_long_path(self):
         path = [{"from": f"n{i}", "rel": "DEPENDS_ON", "to": "auth"} for i in range(25)]
         text = format_answer({"answer": "", "path": path}, [], ["org_shared"], {})

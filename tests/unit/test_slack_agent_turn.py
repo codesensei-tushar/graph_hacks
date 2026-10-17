@@ -91,7 +91,7 @@ class AnswerTurnTest(unittest.TestCase):
             outcome = agent_turn.answer_turn(_request("probe billing"))
         self.assertEqual(outcome.status, "done")
         self.assertIn("Probe answer.", outcome.reply)
-        self.assertIn("*Path* (`probe_read`)", outcome.reply)
+        self.assertIn("*Path* (`probe_read`, 1 edge)", outcome.reply)
         self.assertIn("• A -[REL]-> B", outcome.reply)
         self.assertIn("billing retries moved to the invoice worker", outcome.reply)
         self.assertIn("learned 2025-10-09", outcome.reply)

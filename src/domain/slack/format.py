@@ -44,9 +44,12 @@ def format_answer(
     parts = [result.get("answer") or "I couldn't find that in the company graph."]
     path = result.get("path") or []
     if path:
+        # The header says what was walked, how deep, and how many edges, so a reader can judge
+        # the answer before reading the list: "Path (blast_radius, depth 2, 7 edges)".
         header = f"`{result.get('tool', 'graph')}`"
         if result.get("depth") is not None:
             header += f", depth {result['depth']}"
+        header += f", {len(path)} edge{'s' if len(path) != 1 else ''}"
         parts += ["", f"*Path* ({header})", *format_path(path)]
     if result.get("found", True) and result.get("candidates"):
         parts += ["", f"_Also matched: {', '.join(result['candidates'])}. Ask again with that name to switch._"]
