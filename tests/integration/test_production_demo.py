@@ -129,8 +129,15 @@ class ProductionDemoTest(unittest.TestCase):
         _, one = _ask(STEPS[4])
         self.assertEqual(one.depth, 1)
         self.assertEqual(_cites(one), ["LLM gateway -[DEPENDS_ON]-> Claude API"])
-        self.assertIn("4 more break further out", one.answer)
-        self.assertIn("Slack events API at depth 3", one.answer)
+        # The exact opening of the reply, so the recording script and the code cannot drift apart again.
+        self.assertTrue(
+            one.answer.startswith(
+                "If Claude API goes down, these stop with it: LLM gateway (1 hop). "
+                "4 more break further out (Memory layer at depth 2, Slack workspace at depth 2, Turn engine at depth 2 "
+                "and Slack events API at depth 3); ask with more hops."
+            ),
+            one.answer,
+        )
 
         _, three = _ask("what breaks if the claude api goes down", depth=3)
         self.assertEqual(three.depth, 3)
