@@ -122,10 +122,27 @@ The line we kept coming back to: the answer is the path.
 
 *Repo: https://github.com/codesensei-tushar/graph_hacks . Live: https://brain.noobsurd.space . Video: [[link]]. Graph model and queries: the README.*
 
+## Capturing the images
+
+Five images, one sitting, about twenty minutes. Capture everything at 2x on a 1440 px wide window, light theme, Slack in a browser (not the desktop app, so the window width is controllable), no personal names or avatars outside the synthetic company. Crop to the content; no browser chrome. Save under `docs/images/` with the names below and reference them from the post in place of the `[[Image N]]` markers. Every screenshot comes from the Quillfern replay or the dev workspace loaded with it, never from a real workspace.
+
+Setup once: `python scripts/replay_workspace.py --app-url http://localhost:8000 --team <T> --bot <U> --map ...` against the dev instance as docs/SETUP.md describes, so the channel history and the repos are in, then type the questions below yourself so the replies carry real Slack rendering.
+
+| File | Where | Type | Must be visible |
+| --- | --- | --- | --- |
+| `docs/images/01-who-should-look.png` | Slack, #engineering, in the thread of the approved ticket | `ticket: billing exports time out`, click Approve, then in the thread `who should look at it` | The "Ask first: Arjun Mehta (owns it, ...)" sentence, at least four path lines including `TKT-104 -[ABOUT]-> Billing Service` and `Arjun Mehta -[OWNS]-> Billing Service`, and the footer "Tool `who_knows`". Crop from the question to the footer. |
+| `docs/images/02-browser-graph.png` | FalkorDB Browser at http://localhost:3000, graph `company` (or the replay graph) | Run `MATCH (s:Service {id: 'billing-service'})-[r]-(n) RETURN s, r, n LIMIT 25` and switch to the graph view | Billing Service in the centre with `DEPENDS_ON`, `OWNS`, `TOUCHES` and at least one `MENTIONS` edge from a Memory node; edge labels readable. Drag nodes apart if they overlap. |
+| `docs/images/03-refusal.png` | Slack, #engineering | `who knows the payments gateway` | The exact sentence "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." and the footer. No path section should appear; that absence is the point. |
+| `docs/images/04-decision-before-after.png` | Slack, #engineering, two replies side by side (or stacked, crop both) | First `why did we move billing retries to the invoice worker` (before), then `decision: billing retries move to the invoice worker`, Approve on the card that says what it replaces, then the same question again (after) | Left or top: the refusal with the memory line. Right or bottom: the decision with "Decided <date>", "This replaced *...* (decided <date>)" and the `SUPERSEDES` and `DECIDED_IN` path lines. Include the approval card if it fits; its "replacing *...*" text is the strongest frame. |
+| `docs/images/05-blast-radius.png` | Slack, #engineering, one thread | `what breaks if auth goes down, one hop`, then in the thread `and two hops out` | Both replies. First: four services at one hop and "1 more breaks further out (Invoice Worker at depth 2)". Second: "Invoice Worker (2 hops)", the header "*Path* (`blast_radius`, depth 2, 6 edges)" and the two `Invoice Worker -[DEPENDS_ON]-> ...` lines. The depth in the header is what the caption points at. |
+| `docs/images/06-proof-table.png` (optional, for the "take FalkorDB out" section) | Terminal | `curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "http://localhost:8000/api/proof?format=text"` with `BRAIN_ADMIN_TOKEN` set in `.env` | The whole table: six rows, five marked collapsed, the last row refusing both ways. Widen the terminal so no row wraps. |
+
+Captions, one line each, already in the post next to the markers. After capturing, replace each `[[Image N: ...]]` marker with `![caption](images/0N-name.png)` and delete this section.
+
 ## Before publishing
 
 - Every claim about FalkorDB behaviour matches the feature table in docs/STRATEGY.md.
-- Every "verify" note is resolved against main and removed.
+- Every "verify" note is resolved against main and removed, and the six image markers are replaced by the files in `docs/images/`.
 - No private data in any screenshot; the demo workspace is the synthetic company.
 - Repo, deployment and video links open in a private window.
 - The AI assistance paragraph is in, with the team's own sentence.
