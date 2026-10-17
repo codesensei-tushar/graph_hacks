@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-sales",
         action="store_true",
-        help="seed Quillfern without its Sales team, to import examples/teams/quillfern-sales.toml live over POST /ops/import",
+        help="seed Quillfern without its Sales team and skip the Sales steps, to import examples/teams/quillfern-sales.toml live over POST /ops/import",
     )
     parser.add_argument("--no-github", action="store_true", help="skip the scripted repos")
     parser.add_argument(
@@ -87,14 +87,15 @@ def _print_replayed(rows) -> None:
             print(f"    bot:\n{indented}")
 
 
-def _play(replayer, steps: str) -> None:
+def _play(replayer, steps: str, sales: bool = True) -> None:
     from src.seed import quillfern_workspace as script
 
     if steps in ("all", "history"):
         print("\n# History")
         _print_replayed(replayer.play(script.HISTORY))
     if steps in ("all", "demo"):
-        for step, rows in replayer.play_steps(script.DEMO_STEPS):
+        # Without the team, the Sales questions only have Slack provision placeholder people for its members.
+        for step, rows in replayer.play_steps(script.DEMO_STEPS if sales else script.ENGINEERING_STEPS):
             print(f"\n# {step.title}")
             _print_replayed(rows)
 
@@ -151,7 +152,7 @@ def run_in_process(args) -> None:
             fake_base_url=server.base_url,
             response_url=server.response_url("replay"),
         )
-        _play(replayer, args.steps or "all")
+        _play(replayer, args.steps or "all", sales=not args.no_sales)
         # Queued reactions and expiry jobs would wait for a scheduler that never runs here.
         clear_team_state(replayer)
         print(f"\nfake Slack calls={len(fake.calls)} bot messages={sum(1 for m in fake.messages if m.user == fake.bot_user_id and not m.deleted)}")
@@ -184,7 +185,7 @@ def run_against_instance(args) -> None:
             ids=ids,
             response_url=f"{args.fake_slack.rstrip('/')}/response/replay" if args.fake_slack else "https://example.invalid/response",
         )
-        _play(replayer, args.steps or "history")
+        _play(replayer, args.steps or "history", sales=not args.no_sales)
     if not args.fake_slack:
         print("\nreplies are in Slack; approve cards there by hand")
 

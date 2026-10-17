@@ -35,7 +35,8 @@ The answer counts what the file holds and what the import changed:
 
 Importing the same file again is safe. Every write merges by id and nothing is ever
 deleted, so a second import of an unchanged file creates nothing and sets nothing; an edited
-file updates what changed. The team joins the company the instance runs (`SEED_COMPANY`).
+file updates what changed. The other side of that: taking a block out of the file does not
+take it out of Company Brain. The team joins the company the instance runs (`SEED_COMPANY`).
 
 ## The file
 
@@ -56,9 +57,9 @@ typo is an error you see, not a field that quietly disappears.
 | --- | --- | --- |
 | `name` | required | |
 | `role` | | |
-| `email` | | |
+| `email` | | Give it. Once the bot is installed, everyone in the Slack workspace is already in Company Brain, and a member whose email is already there *is* that person: the import fills them in (name, role) instead of adding a second one. |
 | `slack_id` | | Lets the bot know who is asking. In Slack: the person's profile, ⋮, *Copy member ID*. |
-| `id` | | Made from the name if left out. To add someone already in Company Brain, use their id; their name and role are updated to what the file says. |
+| `id` | | Made from the name if left out. To add someone already in Company Brain without an email, use their id; their name and role are updated to what the file says. |
 
 ### `[[runs]]`, everything the team runs
 
@@ -98,7 +99,7 @@ depend on it.
 | `proposer`, `approver` | | Members. |
 | `based_on` | | What it rests on: a playbook or policy in the file, another decision, or a document, ticket or pull request already in Company Brain. |
 | `replaces` | | The earlier decision it replaces, from the file or Company Brain. The bot then answers with the current one first and says "This replaced ...", with both dates. |
-| `decided_on` | | The day, as `"YYYY-MM-DD"`. |
+| `decided_on` | | The day, as `"YYYY-MM-DD"`. Optional, but without it the decision has no date, so answers and the team page cannot say when it was decided. |
 | `aliases`, `id` | | As for `[[runs]]`. |
 
 ### Pointing from one entry to another
@@ -125,7 +126,8 @@ written and the answer lists every problem, one per line:
 
 It also refuses a `[[runs]]` entry whose id is already run by another team (point at it
 with `depends_on` instead, or give the entry its own id), two entries with the same id, a
-`slack_id` that belongs to someone else, and a file over 256 KB.
+`slack_id` already linked to a different person than the member's email, an email two
+people share, and a file over 256 KB.
 
 ## What it writes
 

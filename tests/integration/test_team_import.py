@@ -96,6 +96,21 @@ class TeamImportTest(unittest.TestCase):
         self.assertIn("finds 3 work clusters. Arjun Mehta, Lena Fischer and Tomas Reyes.", groups)
         self.assertIn("Dev Patel, Noor Haddad and Priya Shah. That matches the org chart: Dev Patel, Noor Haddad and Priya Shah are on Sales.", groups)
 
+    def test_a_member_slack_already_provisioned_is_filled_in_not_added_twice(self):
+        # What first contact with the bot leaves behind before the team is onboarded.
+        _, graph = falkordb_client.connect()
+        graph.query(
+            "CREATE (p:Person {id: 'person-5238dd6276da', name: 'Priya Shah', email: 'priya@quillfern.example.com', provisioned_by: 'slack', org_member: true}) "
+            "CREATE (:SlackUser {id: 'UPRIYA'})-[:IS]->(p)"
+        )
+        report = seed_sales().report
+        self.assertEqual(report.nodes_created, 11, "Priya and her Slack user were already there")
+        rows = graph.query("MATCH (p:Person {email: 'priya@quillfern.example.com'}) OPTIONAL MATCH (p)-[:OWNS]->(s:Service) RETURN p.id, p.role, collect(s.id)").result_set
+        self.assertEqual(len(rows), 1, rows)
+        ident, role, owns = rows[0]
+        self.assertEqual((ident, role, sorted(owns)), ("person-5238dd6276da", "Head of sales", ["pricing-playbook", "renewals"]))
+        self.assertIn("Ask first: Priya Shah (owns it)", ask_service.ask("who knows renewals", ["org_shared"]).answer)
+
     def test_a_refused_file_writes_nothing(self):
         before = _counts()
         broken = SALES_FILE.read_text().replace('kind = "system"', 'kind = "crm"')

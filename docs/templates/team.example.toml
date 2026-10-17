@@ -9,6 +9,9 @@
 #   use the other entry's name exactly as written here, or its id. To point at something
 #   already in Company Brain, use its name or id there.
 # - Importing the same file again is safe: it updates what changed and deletes nothing.
+#   That also means taking a block out of the file does not take it out of Company Brain.
+# - Someone already in Company Brain (everyone in your Slack is, once the bot is installed)
+#   is matched by their email, so give each member's email and they are not added twice.
 
 # --- The team ---------------------------------------------------------------------------
 
@@ -39,8 +42,8 @@ email = "sam@example.com"
 # kind says what sort of thing it is, so the bot talks about it the right way:
 #   process  = work done again and again, like ticket triage or renewals ("stalls")
 #   system   = a tool you rely on that can go down, like a help desk or a CRM ("goes down")
-#   product  = something you sell or ship
-#   account  = a customer
+#   product  = something you sell or ship ("is affected")
+#   account  = a customer ("is affected")
 #   policy   = a rule, like a refund policy ("no longer applies")
 #   playbook = a how-to, like an escalation guide ("no longer applies")
 #   service  = an engineering service (the default if kind is left out)
@@ -62,7 +65,7 @@ depends_on = ["Help desk"]
 name = "Help desk"
 kind = "system"
 owner = "Sam Rivera"
-aliases = ["help desk", "ticketing tool"]
+aliases = ["ticketing tool", "support inbox"]
 summary = "Where every customer email and chat becomes a ticket."
 
 [[runs]]
@@ -92,7 +95,8 @@ approver = "Alex Kim"
 about = ["Ticket triage", "Priority customers"]
 # Optional: what it was based on, such as a playbook above or a document already in Company Brain.
 based_on = ["Escalation playbook"]
-# The day it was decided, as "YYYY-MM-DD".
+# Optional: the day it was decided, as "YYYY-MM-DD". Leave it out and the decision has
+# no date, so answers and the team page cannot say when it was decided.
 decided_on = "2026-08-15"
 # Optional: the earlier decision this one replaces, by its name or id.
 # replaces = "Answer every ticket within one day"
