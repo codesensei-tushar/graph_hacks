@@ -18,6 +18,7 @@
     <nav>
       <a href="#ask">Ask</a>
       <a href="#how">How it answers</a>
+      <a href="#proof">Proof</a>
       <a href="#tools">Tools</a>
       <a href="#demo">Demo</a>
       <a href="https://github.com/codesensei-tushar/graph_hacks">GitHub</a>
@@ -59,10 +60,20 @@
       <li><b>Refuse to guess</b><p>The names in a question are resolved against the graph before anything runs. A miss answers "Nothing in the graph matches" and offers the nearest candidates.</p></li>
       <li><b>Decisions stay current</b><p>A decision recorded in a channel, after approval, supersedes the one it replaces and links to the documents, tickets and pull requests it is based on. Asking about the old one answers "no longer current", then the current one, with both dates. Nothing is deleted.</p></li>
       <li><b>Writes wait for a human</b><p>Tools that write the graph never run from the loop. The turn suspends with an Approve card that names the resolved target, and the write lands only after a click.</p></li>
-      <li><b>Algorithms as tools</b><p>PageRank over <code>DEPENDS_ON</code> ranks load-bearing services, betweenness names the connector in a blast radius, and <code>algo.SPpaths</code> explains why two things are connected.</p></li>
+      <li><b>Algorithms as tools</b><p>PageRank over <code>DEPENDS_ON</code> ranks load-bearing services, betweenness names the connector in a blast radius, <code>algo.SPpaths</code> explains why two things are connected, and label propagation finds who actually works together.</p></li>
       <li><b>Scopes per room</b><p>Every node written from Slack or GitHub carries the scope of the public channel, private channel, DM or private repo it came from. Every query ends with the same filter on what the asker may read.</p></li>
       <li><b>Take FalkorDB out and nothing answers</b><p>A proof route runs the same questions with every graph read returning nothing; all but the refusal collapse. FalkorDB is the only store, including the scheduler, approvals and dedupe keys.</p></li>
     </ul>
+  </section>
+
+  <section class="block" id="proof">
+    <h2>Take the graph out</h2>
+    <p class="sub">The same questions, once against FalkorDB and once with every graph read returning nothing. A refusal stays a refusal. This reads what a public channel reads; the admin route at <code>/api/proof</code> is the same report for the terminal.</p>
+    <p id="proof-status" class="note">Running the proof…</p>
+    <table class="tools" id="proof-table" hidden>
+      <thead><tr><th>Question</th><th>Tool</th><th>With the graph</th><th>Without it</th><th>Verdict</th></tr></thead>
+      <tbody id="proof-body"></tbody>
+    </table>
   </section>
 
   <section class="block" id="tools">
@@ -76,8 +87,8 @@
 
   <section class="block" id="demo">
     <h2>The demo, in order</h2>
-    <p class="sub">Seven moves against a synthetic company. Steps that write the graph or depend on who is asking run in Slack; the rest run here too.</p>
-    <ol class="demo-steps">
+    <p class="sub" id="demo-sub">The script for the company in this graph. Steps that write, or that depend on who is asking, run in Slack; the rest run here too.</p>
+    <ol class="demo-steps" id="demo-steps">
       <li><code>who owns billing, and who else has worked on it</code><span class="exp">The owner, then everyone linked by past work, pull requests and reviews, ranked by their edges to the service.</span></li>
       <li><code>why did we move the memory layer off postgres</code><span class="exp">The decision, who proposed and approved it, the RFC and the ticket it is based on, and the decision it superseded.</span></li>
       <li>In Slack: <code>decision: move billing retries to the invoice worker</code>, then Approve<span class="exp">The card names what the write will replace. The new decision supersedes the old one; asking "why" again shows both, with dates.</span></li>
