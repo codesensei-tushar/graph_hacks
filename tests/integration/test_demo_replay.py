@@ -1,7 +1,8 @@
-"""The seven-step demo from docs/STRATEGY.md, end to end through the real routes.
+"""The seven-step demo and the Sales beat from docs/STRATEGY.md, end to end through the real routes.
 
 Boots the app against a fake Slack Web API (``scripts/replay/slack_api.py``) and a fake
-GitHub client, seeds the fictional Quillfern company into a throwaway graph, replays
+GitHub client, seeds the fictional Quillfern company into a throwaway graph, imports its
+Sales team from examples/teams/quillfern-sales.toml through the team importer, replays
 the scripted workspace history and repos, then plays the demo steps in order and
 asserts on what the bot posted back. No model: answers come from the graph tools and
 retained memories, exactly as the no-key deployment behaves.
@@ -28,6 +29,7 @@ from src.integrations.slack import client as slack_client_module  # noqa: E402
 from src.main import app  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
 from src.seed import quillfern_workspace as script  # noqa: E402
+from src.seed.quillfern_sales import seed_sales  # noqa: E402
 from scripts.replay.driver import (  # noqa: E402
     WorkspaceReplayer,
     clear_team_state,
@@ -70,6 +72,7 @@ class DemoReplayTest(unittest.TestCase):
             workspace_module._client_for.cache_clear()
 
         seed.reset_and_seed(quillfern)
+        seed_sales()
         register_fake_workspace()
         use_agent_loop()
         cls.http = TestClient(app)
@@ -265,6 +268,62 @@ class DemoReplayTest(unittest.TestCase):
         self.assertIn(edge("billing-internal#7", "TOUCHES", "Billing Service"), collaborator_reply)
         self.assertIn(edge("Arjun Mehta", "AUTHORED", "billing-internal#7"), collaborator_reply)
         self.assertIn("quillfern/billing-internal", collaborator_reply)
+
+    # --- the Sales beat: the same tools, for a team imported from a team file ------------------------
+
+    def test_s1_who_owns_renewals_and_who_else_worked_on_it(self):
+        reply = self._only_reply(self._rows("S1 Who owns renewals, and who else has worked on it")[0])
+        self.assert_cites_path(reply)
+        self.assertIn("_Tool `who_knows`", reply)
+        self.assertIn("The Renewals process is run by Priya Shah", reply)
+        self.assertIn("Ask first: Priya Shah (owns it), then Dev Patel (worked on it) and Noor Haddad (worked on it).", reply)
+        for line in (
+            edge("Priya Shah", "OWNS", "Renewals"),
+            edge("Dev Patel", "WORKED_ON", "Renewals"),
+            edge("Noor Haddad", "WORKED_ON", "Renewals"),
+        ):
+            self.assertIn(line, reply)
+
+    def test_s2_a_crm_outage_reaches_the_process_and_the_playbook(self):
+        reply = self._only_reply(self._rows("S2 What breaks if HubSpot goes down")[0])
+        self.assert_cites_path(reply)
+        self.assertIn("_Tool `blast_radius`", reply)
+        self.assertIn(
+            "If the HubSpot system goes down, the Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops). "
+            "Depth 2 reached 2 things that depend on it; nothing new past depth 2.",
+            reply,
+        )
+        self.assertIn(edge("Renewals", "DEPENDS_ON", "HubSpot"), reply)
+        self.assertIn(edge("Pricing playbook", "DEPENDS_ON", "Renewals"), reply)
+        self.assertNotIn("Enterprise accounts", reply)
+
+    def test_s3_why_pricing_changed_names_the_current_decision_and_the_one_it_replaced(self):
+        reply = self._only_reply(self._rows("S3 Why did we change pricing")[0])
+        self.assert_cites_path(reply)
+        self.assertIn("_Tool `decision_trace`", reply)
+        new, old = "Sell annual plans only at renewal", "Discount monthly plans at renewal"
+        self.assertTrue(reply.startswith(new), reply)
+        self.assertIn("Decided 1 Sep 2026", reply)
+        self.assertIn(f"This replaced *{old}* (decided 2 Mar 2026)", reply)
+        for line in (
+            edge("Noor Haddad", "PROPOSED", new),
+            edge("Priya Shah", "APPROVED", new),
+            edge(new, "BASED_ON", "Pricing playbook"),
+            edge(new, "SUPERSEDES", old),
+        ):
+            self.assertIn(line, reply)
+
+    def test_the_sales_team_came_through_the_importer(self):
+        _, graph = falkordb_client.connect()
+        runs = dict(graph.query("MATCH (:Team {id: 'sales'})-[:RUNS]->(s:Service) RETURN s.id, s.kind").result_set)
+        self.assertEqual(runs, {"renewals": "process", "hubspot": "system", "pricing-playbook": "playbook", "enterprise-accounts": "account"})
+        linked = graph.query("MATCH (u:SlackUser {id: 'UPRIYA'})-[:IS]->(p:Person) RETURN p.id").result_set
+        self.assertEqual(linked, [["priya"]])
+        # Additive: the Sales graph does not touch an engineering service.
+        crossing = graph.query(
+            "MATCH (:Team {id: 'sales'})-[:RUNS]->(:Service)-[:DEPENDS_ON]-(s:Service)<-[:RUNS]-(t:Team) WHERE t.id <> 'sales' RETURN count(s)"
+        ).result_set[0][0]
+        self.assertEqual(crossing, 0)
 
 
 if __name__ == "__main__":

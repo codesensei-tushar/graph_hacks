@@ -1,0 +1,101 @@
+# Quillfern's Sales team, written as a team file.
+#
+# Quillfern is the made-up company the demo and the tests use. The Quillfern seed imports
+# this file through the same importer as any other team, so the demo graph is the proof
+# that the importer works. Every person, number and decision here is invented.
+#
+# docs/ONBOARDING-TEAMS.md explains each field; docs/templates/team.example.toml is the
+# blank version to copy.
+
+[team]
+id = "sales"
+name = "Sales"
+summary = "Renewals, pricing and the enterprise accounts that pay for Quillfern."
+
+# --- Who is on the team ----------------------------------------------------------------
+
+[[members]]
+id = "priya"
+name = "Priya Shah"
+role = "Head of sales"
+email = "priya@quillfern.example.com"
+slack_id = "UPRIYA"
+
+[[members]]
+id = "dev"
+name = "Dev Patel"
+role = "Account manager"
+email = "dev@quillfern.example.com"
+slack_id = "UDEV"
+
+[[members]]
+id = "noor"
+name = "Noor Haddad"
+role = "Sales operations"
+email = "noor@quillfern.example.com"
+slack_id = "UNOOR"
+
+# --- Everything the team runs ------------------------------------------------------------
+
+[[runs]]
+id = "renewals"
+name = "Renewals"
+kind = "process"
+owner = "Priya Shah"
+worked_on_by = ["Dev Patel", "Noor Haddad"]
+aliases = ["renewals", "renewal process"]
+summary = "Every renewal, from the 60-day reminder to the signed order."
+depends_on = ["HubSpot"]
+
+[[runs]]
+id = "hubspot"
+name = "HubSpot"
+kind = "system"
+owner = "Noor Haddad"
+aliases = ["hubspot", "crm"]
+summary = "The CRM: every account, contact and renewal date lives here."
+
+[[runs]]
+id = "pricing-playbook"
+name = "Pricing playbook"
+kind = "playbook"
+owner = "Priya Shah"
+# Tomas Reyes is not on Sales: he is Quillfern's engineering manager, already in Company
+# Brain, and helped price the platform tier. Naming him links the two teams.
+worked_on_by = ["Noor Haddad", "Tomas Reyes"]
+aliases = ["pricing playbook"]
+summary = "List prices, how far a discount can go, and who approves an exception."
+depends_on = ["Renewals"]
+
+[[runs]]
+id = "enterprise-accounts"
+name = "Enterprise accounts"
+kind = "account"
+owner = "Dev Patel"
+aliases = ["enterprise accounts", "enterprise customers"]
+summary = "The customers on enterprise contracts, each with a named account manager."
+
+# --- What the team decided ----------------------------------------------------------------
+
+[[decisions]]
+id = "decision-monthly-renewal-discount"
+name = "Discount monthly plans at renewal"
+summary = "Monthly customers who renew get 15% off, to keep them from leaving."
+aliases = ["monthly discount", "renewal discount"]
+proposer = "Dev Patel"
+approver = "Priya Shah"
+about = ["Renewals", "Pricing playbook"]
+based_on = ["Pricing playbook"]
+decided_on = "2026-03-02"
+
+[[decisions]]
+id = "decision-annual-plans-only"
+name = "Sell annual plans only at renewal"
+summary = "Renewals move to annual plans only, because the monthly discount cost more than the churn it saved."
+aliases = ["annual plans only", "pricing change", "change pricing", "why change pricing"]
+proposer = "Noor Haddad"
+approver = "Priya Shah"
+about = ["Renewals", "Pricing playbook"]
+based_on = ["Pricing playbook"]
+replaces = "Discount monthly plans at renewal"
+decided_on = "2026-09-01"

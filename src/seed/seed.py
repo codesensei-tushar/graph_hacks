@@ -1,9 +1,22 @@
+import re
 from dataclasses import dataclass
 from types import ModuleType
 
 from src.db.falkordb_client import connect, graph_name
 from src.domain.knowledge.kinds import NOT_DEPENDABLE, normalize_kind
 from src.seed import company_brain
+
+# Labels, relationship types and property names are written into the query text, so each
+# one must be a plain identifier. Seed modules set them in code and the team importer
+# copies only its own field names, so this only ever trips on a bug, never on a file.
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+WORK_RELATIONS = frozenset({"OWNS", "WORKED_ON", "KNOWS"})
+
+
+def _identifier(name: str) -> str:
+    if not _IDENTIFIER.match(name):
+        raise ValueError(f"{name!r} is not a plain identifier")
+    return name
 
 
 @dataclass
@@ -37,15 +50,15 @@ class _Writer:
 
 
 def _merge_node(graph, label: str, row: dict) -> None:
-    props = {key: value for key, value in row.items() if key != "id" and value is not None}
+    props = {_identifier(key): value for key, value in row.items() if key != "id" and value is not None}
     assignments = ", ".join(f"n.{key} = ${key}" for key in props)
     set_clause = f" SET {assignments}" if assignments else ""
-    graph.query(f"MERGE (n:{label} {{id: $id}}){set_clause}", {"id": row["id"], **props})
+    graph.query(f"MERGE (n:{_identifier(label)} {{id: $id}}){set_clause}", {"id": row["id"], **props})
 
 
 def _link(graph, from_label: str, from_id: str, rel: str, to_label: str, to_id: str) -> None:
     graph.query(
-        f"MATCH (a:{from_label} {{id: $a}}), (b:{to_label} {{id: $b}}) MERGE (a)-[:{rel}]->(b)",
+        f"MATCH (a:{_identifier(from_label)} {{id: $a}}), (b:{_identifier(to_label)} {{id: $b}}) MERGE (a)-[:{_identifier(rel)}]->(b)",
         {"a": from_id, "b": to_id},
     )
 
@@ -88,7 +101,7 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         _merge_node(graph, "Person", person)
 
     for team in company.TEAMS:
-        _merge_node(graph, "Team", {"id": team["id"], "name": team["name"]})
+        _merge_node(graph, "Team", {"id": team["id"], "name": team["name"], "summary": team.get("summary")})
         _link(graph, "Team", team["id"], "PART_OF", "Company", company.COMPANY["id"])
         for member in team["members"]:
             _link(graph, "Person", member, "MEMBER_OF", "Team", team["id"])
@@ -110,7 +123,16 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         _link(graph, "Service", child, "DEPENDS_ON", "Service", parent)
 
     for person, rel, service in company.WORK:
+        if rel not in WORK_RELATIONS:
+            raise ValueError(f"{rel!r} is not one of {', '.join(sorted(WORK_RELATIONS))}")
         _link(graph, "Person", person, rel, "Service", service)
+
+    # A team file can name each member's Slack user, so Slack answers and mentions find the person.
+    for slack_user, person in getattr(company, "SLACK_USERS", ()):
+        graph.query(
+            "MERGE (u:SlackUser {id: $u}) WITH u MATCH (p:Person {id: $p}) MERGE (u)-[:IS]->(p)",
+            {"u": slack_user, "p": person},
+        )
 
     for document in company.DOCUMENTS:
         _merge_node(
@@ -134,9 +156,14 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
     for decision in company.DECISIONS:
         _merge_node(graph, "Decision", {key: decision.get(key) for key in ("id", "name", "summary", "aliases", "decided_at")})
     for decision in company.DECISIONS:
-        _link(graph, "Person", decision["proposer"], "PROPOSED", "Decision", decision["id"])
-        _link(graph, "Person", decision["approver"], "APPROVED", "Decision", decision["id"])
-        _link(graph, "Decision", decision["id"], "ABOUT", "Service", decision["about"])
+        if decision.get("proposer"):
+            _link(graph, "Person", decision["proposer"], "PROPOSED", "Decision", decision["id"])
+        if decision.get("approver"):
+            _link(graph, "Person", decision["approver"], "APPROVED", "Decision", decision["id"])
+        # One service id in the seed modules; a list from a team file.
+        about = decision["about"]
+        for service in [about] if isinstance(about, str) else about:
+            _link(graph, "Decision", decision["id"], "ABOUT", "Service", service)
         for source in decision.get("based_on") or []:
             graph.query(
                 "MATCH (d:Decision {id: $d}), (source {id: $s}) MERGE (d)-[:BASED_ON]->(source)",

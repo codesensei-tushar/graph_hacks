@@ -1,10 +1,11 @@
 """Quillfern's scripted Slack workspace and GitHub repos: dummy data for the replay.
 
 Everything here is invented and lines up with ``quillfern.py``: the Slack users are its
-six people, the channels are where they talk, and the repos hold the pull requests that
-changed their services. ``scripts/replay_workspace.py`` plays it into the app through
-the real routes, and ``tests/integration/test_demo_replay.py`` asserts the seven demo
-steps from docs/STRATEGY.md on top of it.
+six people plus the three on the Sales team (examples/teams/quillfern-sales.toml), the
+channels are where they talk, and the repos hold the pull requests that changed their
+services. ``scripts/replay_workspace.py`` plays it into the app through the real routes,
+and ``tests/integration/test_demo_replay.py`` asserts the seven demo steps and the three
+Sales steps from docs/STRATEGY.md on top of it.
 
 The history is what the bot has already seen when the demo starts. The demo steps are
 what gets typed live, in order.
@@ -99,14 +100,20 @@ USERS = (
     WorkspaceUser("UKOFI", "kofi", "kofi", "Kofi Mensah", "kofi@quillfern.example.com"),
     WorkspaceUser("USARA", "sara", "sara", "Sara Lindqvist", "sara@quillfern.example.com"),
     WorkspaceUser("UTOMAS", "tomas", "tomas", "Tomas Reyes", "tomas@quillfern.example.com"),
+    # The Sales team; their slack_id values in the team file are these ids.
+    WorkspaceUser("UPRIYA", "priya", "priya", "Priya Shah", "priya@quillfern.example.com"),
+    WorkspaceUser("UDEV", "dev", "dev", "Dev Patel", "dev@quillfern.example.com"),
+    WorkspaceUser("UNOOR", "noor", "noor", "Noor Haddad", "noor@quillfern.example.com"),
 )
 
 ENGINEERING = "CENGINEERING"
 PAYMENTS = "GPAYMENTS"
+SALES = "CSALES"
 
 CHANNELS = (
     WorkspaceChannel(ENGINEERING, "engineering", members=tuple(u.id for u in USERS) + (BOT_USER_ID,)),
     WorkspaceChannel(PAYMENTS, "payments", is_private=True, members=("UARJUN", "ULENA", "UTOMAS", BOT_USER_ID)),
+    WorkspaceChannel(SALES, "sales", members=("UPRIYA", "UDEV", "UNOOR", BOT_USER_ID)),
 )
 
 # Plain channel talk the bot has already kept as memories (no model: raw messages are retained).
@@ -119,7 +126,7 @@ HISTORY = (
     WorkspaceMessage(PAYMENTS, "ULENA", "invoice worker retries will move to a queue once billing retries land there"),
 )
 
-# The seven demo moves from docs/STRATEGY.md, in order.
+# The seven demo moves from docs/STRATEGY.md, in order, then the three Sales steps.
 DEMO_STEPS = (
     DemoStep(
         "Who owns billing, and who else has worked on it",
@@ -164,6 +171,19 @@ DEMO_STEPS = (
             WorkspaceMessage("", "UKOFI", "who knows billing", "dm"),
             WorkspaceMessage("", "UARJUN", "who knows billing", "dm"),
         ),
+    ),
+    # The Sales beat (round 5 in docs/STRATEGY.md): the same tools, for a team that is not engineering.
+    DemoStep(
+        "S1 Who owns renewals, and who else has worked on it",
+        (WorkspaceMessage(SALES, "UNOOR", "who owns renewals, and who else has worked on it", "ask"),),
+    ),
+    DemoStep(
+        "S2 What breaks if HubSpot goes down",
+        (WorkspaceMessage(SALES, "UPRIYA", "what breaks if hubspot goes down", "ask"),),
+    ),
+    DemoStep(
+        "S3 Why did we change pricing",
+        (WorkspaceMessage(SALES, "UDEV", "why did we change pricing", "ask"),),
     ),
 )
 

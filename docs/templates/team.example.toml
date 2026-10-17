@@ -1,0 +1,98 @@
+# A team file for Company Brain. Copy this file, replace the example Support team with
+# yours, and import it (docs/ONBOARDING-TEAMS.md says how). Lines starting with # are
+# notes and are ignored.
+#
+# Writing tips:
+# - Put every piece of text in "double quotes".
+# - Lists go in square brackets: ["Ticket triage", "Help desk"].
+# - When one entry points at another (an owner, a dependency, what a decision is about),
+#   use the other entry's name exactly as written here, or its id. To point at something
+#   already in Company Brain, use its name or id there.
+# - Importing the same file again is safe: it updates what changed and deletes nothing.
+
+# --- The team ---------------------------------------------------------------------------
+
+[team]
+name = "Support"
+# One sentence on what the team does. It shows at the top of the team's page.
+summary = "Answers customers, fixes what they report, and keeps the help centre current."
+# id is optional. Leave it out and Company Brain makes one from the name ("support").
+# id = "support"
+
+# --- Who is on the team: one [[members]] block per person -------------------------------
+
+[[members]]
+name = "Alex Kim"
+role = "Support lead"
+email = "alex@example.com"
+# Optional. Lets the bot know who is asking in Slack.
+# In Slack: open the person's profile, click ⋮, then "Copy member ID".
+# slack_id = "U012ABCDEF"
+
+[[members]]
+name = "Sam Rivera"
+role = "Support specialist"
+email = "sam@example.com"
+
+# --- Everything your team runs: a process, a tool, a playbook, an account ---------------
+#
+# kind says what sort of thing it is, so the bot talks about it the right way:
+#   process  = work done again and again, like ticket triage or renewals ("stalls")
+#   system   = a tool you rely on that can go down, like a help desk or a CRM ("goes down")
+#   product  = something you sell or ship
+#   account  = a customer
+#   policy   = a rule, like a refund policy ("no longer applies")
+#   playbook = a how-to, like an escalation guide ("no longer applies")
+#   service  = an engineering service (the default if kind is left out)
+
+[[runs]]
+name = "Ticket triage"
+kind = "process"
+# The one person who owns it.
+owner = "Alex Kim"
+# Optional: others who have worked on it. They are suggested after the owner.
+worked_on_by = ["Sam Rivera"]
+# Optional: other names people use for it, so questions find it.
+aliases = ["triage", "ticket queue"]
+summary = "Every new ticket is tagged, given a priority and assigned within an hour."
+# What stops this from working if it fails. Use names from this file or from Company Brain.
+depends_on = ["Help desk"]
+
+[[runs]]
+name = "Help desk"
+kind = "system"
+owner = "Sam Rivera"
+aliases = ["help desk", "ticketing tool"]
+summary = "Where every customer email and chat becomes a ticket."
+
+[[runs]]
+name = "Escalation playbook"
+kind = "playbook"
+owner = "Alex Kim"
+# For a policy or a playbook, the summary is what the bot quotes, so say what it says.
+summary = "A ticket that is still open after two days goes to the support lead, then to engineering."
+depends_on = ["Ticket triage"]
+
+[[runs]]
+name = "Priority customers"
+kind = "account"
+owner = "Alex Kim"
+# An account is a customer: nothing depends on it, so it never takes depends_on.
+summary = "Customers with a support contract, answered first."
+
+# --- What the team decided: one [[decisions]] block per decision -------------------------
+
+[[decisions]]
+name = "Answer priority customers within four hours"
+summary = "Contract customers churned when replies took a day, so their tickets jump the queue."
+# Who suggested it and who said yes. Both optional.
+proposer = "Sam Rivera"
+approver = "Alex Kim"
+# Required: what it is about, from the things your team runs above.
+about = ["Ticket triage", "Priority customers"]
+# Optional: what it was based on, such as a playbook above or a document already in Company Brain.
+based_on = ["Escalation playbook"]
+# The day it was decided, as "YYYY-MM-DD".
+decided_on = "2026-08-15"
+# Optional: the earlier decision this one replaces, by its name or id.
+# replaces = "Answer every ticket within one day"
