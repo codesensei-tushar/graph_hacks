@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
 from src.db.falkordb_client import connect
+from src.domain.knowledge.kinds import kind_or_default
 
 ORG_SHARED = "org_shared"
 SCOPED = "coalesce({var}.scope, 'org_shared') IN $scopes"
@@ -29,6 +30,8 @@ STOPWORDS = frozenset(
         "of", "on", "to", "in", "is", "are", "we", "our", "me", "my", "please", "else", "has", "it", "move",
         "moved", "off", "service", "services", "runs", "run", "do", "can", "you", "tell", "which", "where",
         "connected", "connect", "related", "between", "hops", "hop", "depth", "depends", "depend", "at", "all",
+        "handles", "handle", "responsible", "stops", "stop", "stalls", "happens", "happen", "affected",
+        "policy", "policies", "rules",
     }
 )
 
@@ -41,6 +44,8 @@ class Entity:
     id: str
     name: str
     label: str
+    # For Service nodes: service, system, process, ... (kinds.py). Not part of identity.
+    kind: str | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,7 @@ class EntityRow:
     label: str
     aliases: str = ""
     title: str = ""
+    kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,11 +122,17 @@ def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> list[EntityR
         f"""
         MATCH (n)
         WHERE labels(n)[0] IN $labels AND n.name IS NOT NULL AND {SCOPED.format(var="n")}
-        RETURN n.id, n.name, labels(n)[0], coalesce(n.aliases, ''), coalesce(n.title, '')
+        RETURN n.id, n.name, labels(n)[0], coalesce(n.aliases, ''), coalesce(n.title, ''), n.kind
         """,
         {"labels": list(labels), "scopes": scopes},
     ).result_set
-    return [EntityRow(id=row[0], name=row[1], label=row[2], aliases=row[3] or "", title=row[4] or "") for row in rows]
+    return [
+        EntityRow(
+            id=row[0], name=row[1], label=row[2], aliases=row[3] or "", title=row[4] or "",
+            kind=kind_or_default(row[5]) if row[2] == "Service" else None,
+        )
+        for row in rows
+    ]
 
 
 def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: list[str] | None = None, graph=None) -> Resolution:
@@ -152,7 +164,7 @@ def best_match(text: str, labels: tuple[str, ...], scopes: list[str], graph=None
         score = sum(2 for word in words if word in haystack)
         if score > best_score:
             best, best_score = row, score
-    return Entity(best.id, best.name, best.label) if best is not None and best_score >= 2 else None
+    return Entity(best.id, best.name, best.label, best.kind) if best is not None and best_score >= 2 else None
 
 
 def describe_miss(resolution: Resolution, kind: str = "service, document, or ticket") -> str:
@@ -226,7 +238,7 @@ def _keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int
                 first_names[words[0]] = first_names.get(words[0], 0) + 1
     keys = []
     for row in rows:
-        entity = Entity(row.id, row.name, row.label)
+        entity = Entity(row.id, row.name, row.label, row.kind)
         seen: set[tuple[str, ...]] = set()
         for text, kind in ((row.name, 0), *((alias, 1) for alias in row.aliases.split(",")), (row.title, 3)):
             words = tuple(tokens(text))

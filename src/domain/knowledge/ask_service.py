@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, memories, resolve
+from src.domain.knowledge import algorithms, kinds, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -28,7 +28,8 @@ ANSWER_LABELS = ("Service", "Document", "Ticket")
 EDGE_WEIGHTS = {"OWNS": 5, "AUTHORED": 3, "WORKED_ON": 2, "REVIEWED": 2, "ASSIGNED": 2, "OPENED": 1, "KNOWS": 1}
 DOCUMENT_WEIGHT = 2
 
-_OWNS = re.compile(r"\b(?:owns?|owner|owned|responsible)\b", re.IGNORECASE)
+_OWNS = re.compile(r"\b(?:owns?|owner|owned|responsible|runs|handles|in charge of)\b", re.IGNORECASE)
+_POLICY = re.compile(r"\b(?:policy|policies|playbook|rules?) (?:on|for|about)\b", re.IGNORECASE)
 _WIDER_THAN_OWNER = re.compile(r"\b(?:else|also|worked|works|knows?|reviewed|touched)\b", re.IGNORECASE)
 _LOAD_BEARING = re.compile(
     r"\b(?:load[- ]bearing|most (?:critical|depended|important|central)|single point of failure|pagerank|central services?)\b", re.IGNORECASE
@@ -39,7 +40,9 @@ _RELATED_MEMORIES = re.compile(
     re.IGNORECASE,
 )
 _RECALL = re.compile(r"\b(?:remember|recall|what did .+ say|who said|said|discussed|talked about|mentioned)\b", re.IGNORECASE)
-_BLAST = re.compile(r"\b(?:breaks?|goes down|outage|depends?|dependents?|blast)\b", re.IGNORECASE)
+_BLAST = re.compile(
+    r"\b(?:breaks?|goes down|outage|depends?|dependents?|blast|stops? if|stalls?|is down|happens if|affected if)\b", re.IGNORECASE
+)
 _DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
 _PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
 _GROUPS = re.compile(r"\b(?:working groups?|de facto teams?|who (?:actually )?works together|work clusters?)\b", re.IGNORECASE)
@@ -71,6 +74,9 @@ def route(question: str) -> tuple[str, dict]:
         if depth is not None:
             args["depth"] = depth
         return "blast_radius", args
+    if _POLICY.search(text):
+        # "what is the policy on refunds": the policy node, its owner, and what it says.
+        return "who_owns", {"name": text}
     if _OWNS.search(text) and not _WIDER_THAN_OWNER.search(text):
         return "who_owns", {"name": text}
     return "who_knows", {"name": text}
@@ -125,13 +131,13 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
         rows = graph.ro_query(
             """
             MATCH (node {id: $id})-[rel:ABOUT|DESCRIBES]->(service:Service)
-            RETURN service.id, service.name, type(rel)
+            RETURN service.id, service.name, type(rel), service.kind
             LIMIT 1
             """,
             {"id": target.id},
         ).result_set
         if rows:
-            service = Entity(rows[0][0], rows[0][1], "Service")
+            service = Entity(rows[0][0], rows[0][1], "Service", kinds.kind_or_default(rows[0][3]))
             result.add(_step(target, rows[0][2], service))
 
     owners = graph.ro_query(
@@ -156,16 +162,21 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
         result.add(_step(Entity(team_id, team_name, "Team"), "RUNS", service))
 
     parts = []
+    named = kinds.capitalized(kinds.subject(service.name, service.kind))
     if service != target:
-        parts.append(f"{target.name} is about {service.name}.")
+        parts.append(f"{target.name} is about {kinds.subject(service.name, service.kind)}.")
     if owners:
-        parts.append(f"{service.name} is owned by {join_names([name for _, name in owners])}.")
+        parts.append(f"{named} is {kinds.owned(service.kind)} {join_names([name for _, name in owners])}.")
     elif teams:
-        parts.append(f"{service.name} has no named owner.")
+        parts.append(f"{named} has no named owner.")
     else:
-        parts.append(f"{service.name} is in the graph, and no owner or team is recorded for it.")
+        parts.append(f"{named} is in the graph, and no owner or team is recorded for it.")
     if teams:
         parts.append(f"Run by the {join_names([name for _, name in teams])} team{'s' if len(teams) > 1 else ''}.")
+    if kinds.kind_or_default(service.kind) in ("policy", "playbook"):
+        summary = graph.ro_query("MATCH (s:Service {id: $id}) RETURN coalesce(s.summary, '')", {"id": service.id}).result_set
+        if summary and summary[0][0].strip():
+            parts.append(summary[0][0].strip().rstrip(".") + ".")
     result.answer = " ".join(parts)
     return result
 
@@ -276,7 +287,8 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
     if target.label != "Service":
         parts = [f"{target.name} is about {join_names(_unique(about))}." if about else f"{target.name} is in the graph."]
     else:
-        parts = [f"{target.name} is owned by {join_names(owners)}." if owners else f"{target.name} has no named owner."]
+        named = kinds.capitalized(kinds.subject(target.name, target.kind))
+        parts = [f"{named} is {kinds.owned(target.kind)} {join_names(owners)}." if owners else f"{named} has no named owner."]
     ranked = rank_people(result.path, target)
     if ranked:
         first, *rest = [f"{name} ({reasons})" for name, _score, reasons in ranked]

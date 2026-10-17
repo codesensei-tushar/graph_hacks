@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from types import ModuleType
 
 from src.db.falkordb_client import connect, graph_name
+from src.domain.knowledge.kinds import NOT_DEPENDABLE, normalize_kind
 from src.seed import company_brain
 
 
@@ -92,8 +93,17 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         for member in team["members"]:
             _link(graph, "Person", member, "MEMBER_OF", "Team", team["id"])
 
+    kind_of = {service["id"]: normalize_kind(service.get("kind")) for service in company.SERVICES}
+    for child, parent in company.DEPENDS_ON:
+        # Accounts carry OWNS, WORKED_ON and ABOUT edges only; nothing depends on an account.
+        for end in (child, parent):
+            if kind_of.get(end) in NOT_DEPENDABLE:
+                raise ValueError(f"{end} is an {kind_of[end]}; an {kind_of[end]} cannot take part in DEPENDS_ON")
+
     for service in company.SERVICES:
-        _merge_node(graph, "Service", {key: value for key, value in service.items() if key != "team"})
+        row = {key: value for key, value in service.items() if key != "team"}
+        row["kind"] = kind_of[service["id"]]
+        _merge_node(graph, "Service", row)
         _link(graph, "Team", service["team"], "RUNS", "Service", service["id"])
 
     for child, parent in company.DEPENDS_ON:

@@ -14,7 +14,7 @@ import uuid
 from collections import defaultdict
 
 from src.db.falkordb_client import client, connect, graph_reads_disabled
-from src.domain.knowledge import resolve
+from src.domain.knowledge import kinds, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import Entity, join_names
 
@@ -78,19 +78,30 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
         return ToolResult(tool="blast_radius", answer=resolve.describe_miss(resolution, "service"), found=False, candidates=resolution.candidate_names())
     target = resolution.entity
     wanted = clamp_depth(depth)
+    subject = kinds.subject(target.name, target.kind)
+    if kinds.kind_or_default(target.kind) in kinds.NOT_DEPENDABLE:
+        return ToolResult(
+            tool="blast_radius",
+            answer=f"{kinds.capitalized(subject)} is an {target.kind}: nothing depends on it. Ask who owns it or who knows it instead.",
+            candidates=resolution.candidate_names(),
+        )
 
     # Always walk to the ceiling so the reply can say where the walk stopped finding anything new.
     rows = graph.ro_query(
         f"""
         MATCH path = (dependent:Service)-[:DEPENDS_ON*1..{MAX_DEPTH}]->(service:Service {{id: $id}})
-        RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name]
+        WHERE all(n IN nodes(path) WHERE NOT {kinds.KIND_OF.format(var="n")} IN $excluded)
+        RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name],
+               {kinds.KIND_OF.format(var="dependent")}
         ORDER BY length(path), dependent.name
         """,
-        {"id": target.id},
+        {"id": target.id, "excluded": sorted(kinds.NOT_DEPENDABLE)},
     ).result_set
     # Every shortest route to each dependent: the first row sets the length, equal-length rows add their edges.
     shortest: dict[str, list[tuple[str, int, list[str], list[str]]]] = {}
-    for dependent_id, dependent_name, length, ids, names in rows:
+    kind_of: dict[str, str] = {}
+    for dependent_id, dependent_name, length, ids, names, dependent_kind in rows:
+        kind_of[dependent_id] = dependent_kind
         routes = shortest.setdefault(dependent_id, [])
         if not routes or routes[0][1] == length:
             routes.append((dependent_name, length, ids, names))
@@ -99,7 +110,7 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
     reached = wanted if wanted is not None else saturation
     result = ToolResult(tool="blast_radius", answer="", candidates=resolution.candidate_names(), depth=max(reached, 1))
     if not shortest:
-        result.answer = f"Nothing in the graph depends on {target.name}."
+        result.answer = f"Nothing in the graph depends on {subject}."
         return result
 
     affected = {dep_id: routes for dep_id, routes in shortest.items() if routes[0][1] <= reached}
@@ -109,14 +120,14 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
                 result.add(PathStep(names[index], "DEPENDS_ON", names[index + 1], from_id=ids[index], to_id=ids[index + 1], from_label="Service", to_label="Service"))
 
     by_hop: dict[int, list[str]] = {}
-    for routes in affected.values():
+    for dep_id, routes in affected.items():
         name, length, _ids, _names = routes[0]
-        by_hop.setdefault(length, []).append(name)
+        by_hop.setdefault(length, []).append(kinds.listed(name, kind_of[dep_id]))
     listed = ", ".join(f"{join_names(sorted(names))} ({hop} hop{'s' if hop > 1 else ''})" for hop, names in sorted(by_hop.items()))
-    parts = [f"If {target.name} goes down, these stop with it: {listed}."]
-    beyond = [routes[0] for routes in shortest.values() if routes[0][1] > reached]
+    parts = [f"If {subject} {kinds.down(target.kind)}, these stop with it: {listed}."]
+    beyond = [(kinds.listed(routes[0][0], kind_of[dep_id]), routes[0][1]) for dep_id, routes in shortest.items() if routes[0][1] > reached]
     if beyond:
-        further = join_names([f"{name} at depth {length}" for name, length, _ids, _names in sorted(beyond, key=lambda row: (row[1], row[0]))])
+        further = join_names([f"{name} at depth {length}" for name, length in sorted(beyond, key=lambda row: (row[1], row[0]))])
         parts.append(f"{len(beyond)} more break{'s' if len(beyond) == 1 else ''} further out ({further}); ask with more hops.")
     else:
         parts.append(f"Depth {reached} reached {len(affected)} service{'s' if len(affected) != 1 else ''}; nothing new past depth {saturation}.")
@@ -244,13 +255,15 @@ def load_bearing(limit=DEFAULT_LOAD_BEARING) -> ToolResult:
         count = DEFAULT_LOAD_BEARING
     _, graph = connect()
     ranked = graph.ro_query(
-        """
+        f"""
         CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score
+        WITH node, score
+        WHERE NOT {kinds.KIND_OF.format(var="node")} IN $excluded
         RETURN node.id, node.name, score
         ORDER BY score DESC, node.name
         LIMIT $limit
         """,
-        {"limit": count},
+        {"limit": count, "excluded": sorted(kinds.NOT_DEPENDABLE)},
     ).result_set
     result = ToolResult(tool="load_bearing", answer="")
     if not ranked:
