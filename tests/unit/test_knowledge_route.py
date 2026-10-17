@@ -23,11 +23,31 @@ class RouteTest(unittest.TestCase):
                 {"topic": "is the billing retries decision still the last word"},
             ),
             "who actually works together": ("working_groups", {}),
+            "what breaks if arjun leaves": ("if_person_leaves", {"name": "what breaks if arjun leaves"}),
             "": ("none", {}),
         }
         for question, expected in cases.items():
             with self.subTest(question=question):
                 self.assertEqual(ask_service.route(question), expected)
+
+    def test_a_person_leaving_is_not_a_service_going_down(self):
+        for question in (
+            "what breaks if Arjun leaves",
+            "what happens if arjun leaves",
+            "what if lena quits",
+            "who covers for sara",
+            "who takes over from kofi",
+            "what if maya is on leave",
+            "what is Arjun the only one who knows",
+            "what does tomas know that nobody else does",
+            "what's the bus factor on billing's owner",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], "if_person_leaves")
+        # A service-shaped "only one who knows" question still asks who knows the service.
+        self.assertEqual(ask_service.route("who is the only one who knows billing")[0], "who_knows")
+        self.assertEqual(ask_service.route("what breaks if the claude api goes down, one hop")[0], "blast_radius")
+        self.assertEqual(ask_service.route("what is left uncited after the billing retries decision")[0], "decision_pressure")
 
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)

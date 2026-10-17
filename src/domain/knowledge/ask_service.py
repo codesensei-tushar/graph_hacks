@@ -46,6 +46,14 @@ _BLAST = re.compile(
 _DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
 _PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
 _GROUPS = re.compile(r"\b(?:working groups?|de facto teams?|who (?:actually )?works together|work clusters?)\b", re.IGNORECASE)
+# A person leaving, not a service failing. "who is the only one who knows billing" names a
+# service and stays on who_knows; "what is Arjun the only one who knows" names a person.
+_LEAVES = re.compile(
+    r"\b(?:leaves|leaving|quits?|quitting|resigns?|on leave|hit by a bus|bus factor|covers? for|takes? over (?:from|for))\b"
+    r"|\bwhat\b.*\bthe only (?:one|person) who knows\b"
+    r"|\b(?:nobody|no one) else (?:knows|does)\b",
+    re.IGNORECASE,
+)
 
 
 def route(question: str) -> tuple[str, dict]:
@@ -55,6 +63,9 @@ def route(question: str) -> tuple[str, dict]:
         return "none", {}
     if _GROUPS.search(text):
         return "working_groups", {}
+    if _LEAVES.search(text):
+        # Before blast radius: "what breaks if Arjun leaves" is about a person.
+        return "if_person_leaves", {"name": text}
     if _PRESSURE.search(text):
         return "decision_pressure", {"topic": text}
     if _LOAD_BEARING.search(text):
@@ -191,9 +202,14 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found:
         return _miss("who_knows", resolution)
-    target = resolution.entity
+    result = knowers(graph, resolution.entity, scopes)
+    result.candidates = resolution.candidate_names()
+    return result
 
-    result = ToolResult(tool="who_knows", answer="", candidates=resolution.candidate_names())
+
+def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
+    """``who_knows`` for a node already resolved. ``if_person_leaves`` ranks successors with it, so both agree."""
+    result = ToolResult(tool="who_knows", answer="")
     rows = graph.ro_query(
         """
         MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {id: $id})
@@ -347,6 +363,13 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
     return decisions.decision_pressure(question, scopes)
 
 
+def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``bus_factor.py``, which ranks successors with ``knowers`` here. Kept here for the keyword router."""
+    from src.domain.knowledge import bus_factor
+
+    return bus_factor.if_person_leaves(question, scopes)
+
+
 def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
     return algorithms.blast_radius(question, scopes, depth)
 
@@ -361,6 +384,7 @@ _ROUTED = {
     "decision_trace": lambda args, scopes: decision_trace(args["topic"], scopes),
     "decision_pressure": lambda args, scopes: decision_pressure(args["topic"], scopes),
     "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
+    "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth")),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
     "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
