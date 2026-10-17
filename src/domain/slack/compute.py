@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 from src.domain.github.repos import repo_names
 from src.domain.access.roles import ROLE_OWNER, role_at_least, role_of, set_role
-from src.domain.knowledge import ask_service, catalogue
+from src.domain.knowledge import agent, catalogue
 from src.domain.memory import memory_service
 from src.domain.memory.search_brain import search_brain
 from src.domain.memory.writeback import (
@@ -121,14 +121,15 @@ def _answer_from_graph(request: TurnRequest) -> TurnOutcome:
     if request.passive_investigation:
         # Investigating unprompted needs the agent; without it, stay silent.
         return TurnOutcome(silent_conclusion=True)
-    question = request.question
-    if request.live_updates:
-        question = " ".join([question, *request.live_updates])
-    result = ask_service.ask(question, request.read_tags).to_dict()
+    question = " ".join([request.question, *request.live_updates]).strip()
+    # The same keyword choice and thread fallback the agent uses, minus the model call.
+    bot_ids = frozenset(filter(None, [getattr(request.workspace, "bot_user_id", None)]))
+    choice = agent.choose_with_keywords(question)
+    result, choice = agent.run_choice(choice, question, request.read_tags, request.thread, bot_ids)
     found = search_brain(question, request.memory_scope, trace_id=request.trace_id)
     memories = [_memory_row(row) for row in (found.get("results") or [])[:3]]
     names = channel_names(request.read_tags)
-    return TurnOutcome(reply=format.format_answer(result, memories, request.read_tags, names))
+    return TurnOutcome(reply=format.format_answer(result.to_dict(), memories, request.read_tags, names, chosen_by=choice.via))
 
 
 def _memory_row(row: dict) -> dict:

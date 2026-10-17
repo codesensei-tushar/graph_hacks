@@ -19,7 +19,7 @@ import re
 from src.db.falkordb_client import connect
 from src.domain.knowledge import algorithms, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
-from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution
+from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
 ANSWER_LABELS = ("Service", "Document", "Ticket")
 
@@ -152,13 +152,13 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     if service != target:
         parts.append(f"{target.name} is about {service.name}.")
     if owners:
-        parts.append(f"{service.name} is owned by {', '.join(name for _, name in owners)}.")
+        parts.append(f"{service.name} is owned by {join_names([name for _, name in owners])}.")
     elif teams:
         parts.append(f"{service.name} has no named owner.")
     else:
         parts.append(f"{service.name} is in the graph, and no owner or team is recorded for it.")
     if teams:
-        parts.append(f"Run by the {', '.join(name for _, name in teams)} team.")
+        parts.append(f"Run by the {join_names([name for _, name in teams])} team{'s' if len(teams) > 1 else ''}.")
     result.answer = " ".join(parts)
     return result
 
@@ -243,8 +243,9 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
             {"id": target.id, "scopes": scopes},
         ).result_set
         for who_id, who, who_label, rel, pr_id, pull_request, service in pull_requests:
-            result.add(PathStep(pull_request, "TOUCHES", service, from_id=pr_id, to_id=target.id, from_label="PullRequest", to_label="Service"))
+            # Person to code to service, top to bottom.
             result.add(PathStep(who, rel, pull_request, from_id=who_id, to_id=pr_id, from_label=who_label, to_label="PullRequest"))
+            result.add(PathStep(pull_request, "TOUCHES", service, from_id=pr_id, to_id=target.id, from_label="PullRequest", to_label="Service"))
         documents = graph.ro_query(
             """
             MATCH (person:Person)-[:AUTHORED]->(document:Document)-[:DESCRIBES]->(service:Service {id: $id})
@@ -254,8 +255,8 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
             {"id": target.id},
         ).result_set
         for person_id, person, document_id, document, service in documents:
-            result.add(PathStep(document, "DESCRIBES", service, from_id=document_id, to_id=target.id, from_label="Document", to_label="Service"))
             result.add(PathStep(person, "AUTHORED", document, from_id=person_id, to_id=document_id, from_label="Person", to_label="Document"))
+            result.add(PathStep(document, "DESCRIBES", service, from_id=document_id, to_id=target.id, from_label="Document", to_label="Service"))
 
     if not result.path:
         result.answer = f"{target.name} is in the graph, and no person is linked to it yet."
@@ -269,21 +270,21 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
     open_tickets = [step.from_name for step in path if step.rel == "ABOUT" and step.to_name == target.name]
     parts = []
     if owners:
-        parts.append(f"{target.name} is owned by {', '.join(_unique(owners))}.")
+        parts.append(f"{target.name} is owned by {join_names(_unique(owners))}.")
     else:
         parts.append(f"{target.name} is in the graph.")
     if workers:
-        parts.append(f"Also worked on by {', '.join(_unique(workers))}.")
+        parts.append(f"Also worked on by {join_names(_unique(workers))}.")
     if reviewers:
-        parts.append(f"Reviewed by {', '.join(_unique(reviewers))}.")
+        parts.append(f"Reviewed by {join_names(_unique(reviewers))}.")
     if knowers:
-        parts.append(f"Known by {', '.join(_unique(knowers))}.")
+        parts.append(f"Known by {join_names(_unique(knowers))}.")
     if open_tickets:
-        parts.append(f"Tickets: {', '.join(_unique(open_tickets))}.")
+        parts.append(f"Tickets: {join_names(_unique(open_tickets))}.")
     ranked = rank_people(result.path, target)
     if ranked:
         first, *rest = [f"{name} ({', '.join(why)})" for name, _score, why in ranked]
-        parts.append(f"Ask first: {first}" + (f", then {', '.join(rest)}" if rest else "") + ".")
+        parts.append(f"Ask first: {first}" + (f", then {join_names(rest)}" if rest else "") + ".")
         parts.append("Ranked by weighted edges: owns 5, wrote a pull request 3, worked on, reviewed, or assigned 2, knows or opened 1.")
     result.answer = " ".join(parts)
     return result

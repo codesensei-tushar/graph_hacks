@@ -58,7 +58,7 @@ class MemoryToolsTest(unittest.TestCase):
 
     def test_related_memories_with_nothing_direct_and_with_nothing_at_all(self):
         postgres = memories.related_memories("postgres", ORG)
-        self.assertIn("0 mention it directly, 2 via Auth Service, Billing Service", postgres.answer)
+        self.assertIn("0 mention it directly, 2 via Auth Service and Billing Service", postgres.answer)
         quiet = memories.related_memories("graph store", ORG)
         self.assertEqual(quiet.answer, "No memory you can read mentions Graph Store or anything one hop from it.")
         miss = memories.related_memories("the espresso machine", ORG)

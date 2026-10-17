@@ -2,7 +2,7 @@
 
 import unittest
 
-from src.domain.knowledge.resolve import Entity, EntityRow, core, describe_miss, entities_in_rows, resolve_rows, same_word
+from src.domain.knowledge.resolve import Entity, EntityRow, core, describe_miss, entities_in_rows, join_names, resolve_rows, same_word
 
 ROWS = [
     EntityRow("auth-service", "Auth Service", "Service", "auth, authentication, login, sessions"),
@@ -79,6 +79,22 @@ class ResolveRowsTest(unittest.TestCase):
         self.assertEqual((found.entity, found.reason, found.candidates), (None, "no_match", []))
         self.assertEqual(describe_miss(found), "Nothing in the graph matches “espresso machine”. Name a service, document, or ticket that exists in the graph.")
         self.assertEqual(core("Who owns the espresso machine?"), "espresso machine")
+
+    def test_a_title_word_alone_is_not_a_near_miss(self):
+        # "out" appears in a ticket title; a candidate needs a shared word of four letters or more.
+        found = _resolve("and two hops out")
+        self.assertEqual((found.entity, found.candidates), (None, []))
+        titled = _resolve("renewals charge")
+        self.assertEqual(titled.candidate_names(), ["TKT-102"])
+        self.assertEqual(describe_miss(titled), "Nothing in the graph matches “renewals charge”. Nearest: TKT-102 (titled “Annual plan renewals charge twice on re…”).")
+
+    def test_an_empty_core_is_said_plainly(self):
+        found = _resolve("who should look at it")
+        self.assertIsNone(found.entity)
+        self.assertEqual(describe_miss(found), "I can't tell what that refers to. Name a service, document, or ticket.")
+        self.assertEqual(join_names(["A"]), "A")
+        self.assertEqual(join_names(["A", "B"]), "A and B")
+        self.assertEqual(join_names(["A", "B", "C"]), "A, B and C")
 
     def test_a_typo_offers_the_nearest_name_without_resolving(self):
         found = _resolve("invoce worker")

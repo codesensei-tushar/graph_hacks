@@ -79,8 +79,8 @@ class AlgorithmToolsTest(unittest.TestCase):
     def test_no_depth_follows_everything_and_reports_where_it_saturated(self):
         result = algorithms.blast_radius("postgres", ORG)
         self.assertEqual(result.depth, 2)
-        self.assertIn("Auth Service, Billing Service (1 hop)", result.answer)
-        self.assertIn("API Gateway, Invoice Worker, Notification Service, Search Service (2 hops)", result.answer)
+        self.assertIn("Auth Service and Billing Service (1 hop)", result.answer)
+        self.assertIn("API Gateway, Invoice Worker, Notification Service and Search Service (2 hops)", result.answer)
         self.assertIn("nothing new past depth 2", result.answer)
         self.assertEqual(len({step.from_name for step in result.path}), 6)
 
@@ -149,7 +149,7 @@ class AlgorithmToolsTest(unittest.TestCase):
     def test_load_bearing_ranks_by_pagerank_with_dependent_counts(self):
         result = algorithms.load_bearing(3)
         self.assertRegex(result.answer, r"^Postgres carries the most weight \(PageRank 0\.\d+\): 6 services depend on it directly or through others\.")
-        self.assertRegex(result.answer, r"Then Auth Service \(0\.\d+, 5\), Graph Store \(0\.\d+, 2\)\.")
+        self.assertRegex(result.answer, r"Then Auth Service \(0\.\d+, 5\) and Graph Store \(0\.\d+, 2\)\.")
         self.assertIn("Auth Service -[DEPENDS_ON]-> Postgres", _cites(result))
         self.assertIn("Billing Service -[DEPENDS_ON]-> Postgres", _cites(result))
         self.assertEqual(ask_service.ask("which services are load bearing", ORG).tool, "load_bearing")

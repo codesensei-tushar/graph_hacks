@@ -10,7 +10,7 @@ the arguments the model filled in.
 """
 
 from src.domain.knowledge import catalogue
-from src.domain.knowledge.agent import ToolChoice, choose_tool
+from src.domain.knowledge.agent import ToolChoice, choose_tool, run_choice
 from src.domain.knowledge.dto import MemoryLine, ToolResult, ToolSpec, day_from
 from src.domain.memory.search_brain import search_brain
 from src.domain.memory.writeback import SHARED_TEAM_BRAIN_CONTAINER_TAG, scope_label, slack_memory_container_tag
@@ -25,11 +25,12 @@ def answer_turn(request: TurnRequest) -> TurnOutcome:
         # Investigating unprompted would need a judgement call; the graph tools only answer questions.
         return TurnOutcome(silent_conclusion=True)
     question = " ".join([request.question, *request.live_updates]).strip()
-    choice = choose_tool(question, request.thread)
+    bot_ids = frozenset(filter(None, [getattr(request.workspace, "bot_user_id", None)]))
+    choice = choose_tool(question, request.thread, scopes=request.read_tags, bot_ids=bot_ids)
     spec = catalogue.get_tool(choice.tool)
     if spec.needs_approval:
         return suspend_for_approval(request, spec, choice)
-    result = spec.run(choice.args, request.read_tags)
+    result, choice = run_choice(choice, question, request.read_tags, request.thread, bot_ids)
     # A refusal shows no memories, so it never reads like a guess.
     memories = result.memories or (recall_memories(question, request) if result.found else [])
     return TurnOutcome(reply=render_reply(result, choice, memories, request.read_tags, channel_names(request.read_tags)))

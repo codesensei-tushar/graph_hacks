@@ -46,8 +46,13 @@ class Entity:
 @dataclass(frozen=True)
 class Candidate:
     entity: Entity
-    # The name or alias that brought this candidate up, e.g. "payments".
+    # The name, alias, or title that brought this candidate up, e.g. "payments".
     via: str
+    # True when ``via`` is a title (a ticket's or document's), shown as "titled" rather than "known as".
+    titled: bool = False
+
+
+TITLE_CLIP = 40
 
 
 @dataclass
@@ -83,7 +88,7 @@ class _Match:
     end: int
     entity: Entity
     key: str
-    # 0 for the node's name, 1 for an alias or title, 2 for a person's first name.
+    # 0 for the node's name, 1 for an alias, 2 for a person's first name, 3 for a title.
     kind: int
 
 
@@ -151,17 +156,32 @@ def best_match(text: str, labels: tuple[str, ...], scopes: list[str], graph=None
 
 
 def describe_miss(resolution: Resolution, kind: str = "service, document, or ticket") -> str:
-    named = core(resolution.query) or resolution.query.strip()
+    named = core(resolution.query)
+    if not named:
+        return f"I can't tell what that refers to. Name a {kind}."
     lead = f"Nothing in the graph matches “{named}”"
     if resolution.reason == "ambiguous":
         lead += " as one thing"
     if not resolution.candidates:
         return f"{lead}. Name a {kind} that exists in the graph."
-    nearest = ", ".join(
-        candidate.entity.name if candidate.via.lower() == candidate.entity.name.lower() else f"{candidate.entity.name} (known as “{candidate.via}”)"
-        for candidate in resolution.candidates
-    )
-    return f"{lead}. Nearest: {nearest}."
+    return f"{lead}. Nearest: {', '.join(_describe(candidate) for candidate in resolution.candidates)}."
+
+
+def _describe(candidate: Candidate) -> str:
+    if candidate.via.lower() == candidate.entity.name.lower():
+        return candidate.entity.name
+    if candidate.titled:
+        title = candidate.via if len(candidate.via) <= TITLE_CLIP else candidate.via[: TITLE_CLIP - 1].rstrip() + "…"
+        return f"{candidate.entity.name} (titled “{title}”)"
+    return f"{candidate.entity.name} (known as “{candidate.via}”)"
+
+
+def join_names(names: list[str]) -> str:
+    """A, B and C."""
+    names = list(names)
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 # --- matching, pure --------------------------------------------------------------------
@@ -208,7 +228,7 @@ def _keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int
     for row in rows:
         entity = Entity(row.id, row.name, row.label)
         seen: set[tuple[str, ...]] = set()
-        for text, kind in ((row.name, 0), *((alias, 1) for alias in row.aliases.split(",")), (row.title, 1)):
+        for text, kind in ((row.name, 0), *((alias, 1) for alias in row.aliases.split(",")), (row.title, 3)):
             words = tuple(tokens(text))
             if words and words not in seen:
                 seen.add(words)
@@ -230,7 +250,7 @@ def _kept_matches(text: str, rows: list[EntityRow], labels: tuple[str, ...]) -> 
             if all(same_word(words[start + offset], key_words[offset]) for offset in range(size)):
                 found.append(_Match(start, start + size, entity, key, kind))
     # Longest phrase wins; among equals, the caller's label order, then a name over an alias.
-    found.sort(key=lambda match: (-(match.end - match.start), rank.get(match.entity.label, len(rank)), match.kind, match.start))
+    found.sort(key=lambda match: (-(match.end - match.start), rank.get(match.entity.label, len(rank)), min(match.kind, 1), match.start))
     kept: list[_Match] = []
     for match in found:
         if all(match.end <= other.start or match.start >= other.end for other in kept):
@@ -245,22 +265,25 @@ def _candidates_from(matches: list[_Match]) -> list[Candidate]:
     for match in matches:
         if match.entity.id not in seen:
             seen.add(match.entity.id)
-            candidates.append(Candidate(match.entity, match.key))
+            candidates.append(Candidate(match.entity, match.key, titled=match.kind == 3))
     return candidates
 
 
 def _fuzzy_candidates(text: str, rows: list[EntityRow]) -> list[Candidate]:
+    """Near misses: a key that shares a real word (four letters or more, not a stopword) with what was named."""
     named = core(text)
     if not named:
         return []
-    named_words = named.split()
+    named_words = [word for word in named.split() if len(word) >= 4]
+    if not named_words:
+        return []
     scored: list[tuple[float, Candidate]] = []
-    for entity, key, key_words, _kind in _keys(rows):
-        score = SequenceMatcher(None, named, " ".join(key_words)).ratio()
-        if any(same_word(word, key_word) for word in named_words for key_word in key_words):
-            score = max(score, FUZZY_FLOOR)
-        if score >= FUZZY_FLOOR:
-            scored.append((score, Candidate(entity, key)))
+    for entity, key, key_words, kind in _keys(rows):
+        real_words = [word for word in key_words if len(word) >= 4 and word not in STOPWORDS]
+        if not any(same_word(word, key_word) for word in named_words for key_word in real_words):
+            continue
+        score = max(SequenceMatcher(None, named, " ".join(key_words)).ratio(), FUZZY_FLOOR)
+        scored.append((score, Candidate(entity, key, titled=kind == 3)))
     scored.sort(key=lambda item: -item[0])
     candidates: list[Candidate] = []
     seen: set[str] = set()

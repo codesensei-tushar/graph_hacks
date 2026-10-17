@@ -108,3 +108,60 @@ class ChooseToolTest(ProbeTools):
         self.assertTrue(agent.write_intent("ticket: billing exports time out"))
         self.assertTrue(agent.write_intent("we decided to move billing retries to the invoice worker"))
         self.assertFalse(agent.write_intent("what breaks if auth goes down"))
+
+
+class ThreadFollowUpTest(unittest.TestCase):
+    AUTH = agent.Entity("auth-service", "Auth Service", "Service")
+    THREAD = [
+        {"user": "USARA", "text": "<@UBOT> what breaks if auth goes down", "ts": "1"},
+        {"user": "UBOT", "bot_id": "B1", "text": "If Auth Service goes down...\n\n*Path* (`blast_radius`, depth 2)\n• ...\n\n_Tool `blast_radius`, picked by keywords. Read from: public channels_", "ts": "2"},
+        {"user": "USARA", "text": "<@UBOT> and two hops out", "ts": "3"},
+    ]
+
+    def _resolve(self, text, _labels, _scopes):
+        found = agent.resolve.Resolution(query=text)
+        if "auth" in text.lower():
+            found.entity = self.AUTH
+        return found
+
+    def test_the_subject_is_the_last_node_a_person_named_with_the_last_replys_tool_and_depth(self):
+        with mock.patch.object(agent.resolve, "resolve_name", side_effect=self._resolve):
+            subject = agent.thread_subject(self.THREAD, ["org_shared"], frozenset({"UBOT"}), skip_text="and two hops out")
+            named = agent.thread_entities(self.THREAD, ["org_shared"], frozenset({"UBOT"}), skip_text="and two hops out")
+        self.assertEqual(subject, agent.ThreadSubject(self.AUTH, "blast_radius", 2))
+        self.assertEqual(named, [self.AUTH])
+
+    def test_follow_up_choices(self):
+        who = agent.ToolChoice("who_knows", {"name": "and two hops out"}, "keywords")
+        subject = agent.ThreadSubject(self.AUTH, "blast_radius", 1)
+        self.assertEqual(agent.follow_up_choice("and two hops out", who, subject), agent.ToolChoice("blast_radius", {"name": "Auth Service", "depth": 2}, "thread"))
+        self.assertEqual(agent.follow_up_choice("go deeper", who, subject), agent.ToolChoice("blast_radius", {"name": "Auth Service", "depth": 2}, "thread"))
+        self.assertEqual(agent.follow_up_choice("who should look at it", who, subject).tool, "blast_radius")
+        ticket_thread = agent.ThreadSubject(agent.Entity("TKT-104", "TKT-104", "Ticket"), None, None)
+        self.assertEqual(agent.follow_up_choice("who should look at it", who, ticket_thread), agent.ToolChoice("who_knows", {"name": "TKT-104"}, "thread"))
+        why = agent.ToolChoice("decision_trace", {"topic": "why though"}, "keywords")
+        self.assertEqual(agent.follow_up_choice("why though", why, ticket_thread), agent.ToolChoice("decision_trace", {"topic": "TKT-104"}, "thread"))
+        between = agent.ToolChoice("path_between", {"source": "x", "target": ""}, "keywords")
+        self.assertIsNone(agent.follow_up_choice("how are they connected", between, ticket_thread))
+
+    def test_a_refusal_with_candidates_is_never_overridden_by_the_thread(self):
+        miss = ToolResult(tool="who_knows", answer="Nothing in the graph matches “payments gateway” as one thing.", found=False, candidates=["Billing Service"])
+        spec = ToolSpec(name="probe_refuse", description="probe", args_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}, run=lambda a, s: miss)
+        catalogue.register(spec)
+        try:
+            with mock.patch.object(agent, "thread_subject") as subject:
+                result, choice = agent.run_choice(agent.ToolChoice("probe_refuse", {"name": "payments gateway"}, "keywords"), "who knows the payments gateway", ["org_shared"], self.THREAD)
+        finally:
+            catalogue._TOOLS.pop("probe_refuse", None)
+        subject.assert_not_called()
+        self.assertIs(result, miss)
+        self.assertEqual(choice.via, "keywords")
+
+    def test_the_model_prompt_lists_things_named_so_far(self):
+        with (
+            mock.patch.object(agent.resolve, "resolve_name", side_effect=self._resolve),
+            mock.patch.object(agent, "generate_object", return_value={"tool": "blast_radius", "args": {"name": "Auth Service", "depth": 2}}) as model,
+        ):
+            choice = agent.choose_tool("and two hops out", self.THREAD, scopes=["org_shared"], bot_ids=frozenset({"UBOT"}))
+        self.assertIn("Things named so far in this thread: Auth Service (Service)", model.call_args.args[0].prompt)
+        self.assertEqual(choice.args, {"name": "Auth Service", "depth": 2})
