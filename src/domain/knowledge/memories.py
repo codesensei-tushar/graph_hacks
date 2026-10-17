@@ -9,6 +9,7 @@ every branch and return each memory with the day it was learned.
 from src.db.falkordb_client import connect
 from src.domain.knowledge import resolve
 from src.domain.knowledge.dto import MemoryLine, PathStep, ToolResult, day_from
+from src.domain.knowledge.resolve import join_names
 from src.domain.memory.search_brain import search_brain
 
 MENTIONABLE = ("Service", "Document", "Ticket", "Decision")
@@ -81,7 +82,7 @@ def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResul
         return result
     parts = [f"{total} memor{'y' if total == 1 else 'ies'} you can read touch {target.name}: {direct} mention{'s' if direct == 1 else ''} it directly"]
     if via_names:
-        parts.append(f", {total - direct} via {', '.join(via_names)}")
+        parts.append(f", {total - direct} via {join_names(via_names)}")
     latest = max((memory.learned_at for memory in result.memories if memory.learned_at), default="")
     result.answer = "".join(parts) + "." + (f" Most recent: {latest}." if latest else "")
     return result

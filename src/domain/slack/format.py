@@ -66,6 +66,8 @@ def format_answer(
     if chosen_by:
         picker = "the model" if chosen_by == "model" else "keywords"
         footer = f"Tool `{result.get('tool', 'graph')}`, picked by {picker}. {footer}"
+        if chosen_by == "thread":
+            footer = footer.replace(". Read from:", ". Subject from this thread. Read from:", 1)
     parts += ["", f"_{footer}_"]
     return "\n".join(parts)
 

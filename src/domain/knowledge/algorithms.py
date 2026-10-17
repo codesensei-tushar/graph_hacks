@@ -8,12 +8,15 @@ ranked by PageRank anywhere: with almost no incoming edges their scores come out
 so ``who_knows`` weighs edges instead.
 """
 
+import logging
 import re
 
 from src.db.falkordb_client import connect
 from src.domain.knowledge import resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
-from src.domain.knowledge.resolve import Entity
+from src.domain.knowledge.resolve import Entity, join_names
+
+log = logging.getLogger(__name__)
 
 MAX_DEPTH = 6
 MAX_PATH_LENGTH = 6
@@ -107,24 +110,34 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
     for routes in affected.values():
         name, length, _ids, _names = routes[0]
         by_hop.setdefault(length, []).append(name)
-    listed = ", ".join(f"{', '.join(sorted(names))} ({hop} hop{'s' if hop > 1 else ''})" for hop, names in sorted(by_hop.items()))
+    listed = ", ".join(f"{join_names(sorted(names))} ({hop} hop{'s' if hop > 1 else ''})" for hop, names in sorted(by_hop.items()))
     parts = [f"If {target.name} goes down, these stop with it: {listed}."]
     beyond = [routes[0] for routes in shortest.values() if routes[0][1] > reached]
     if beyond:
-        further = ", ".join(f"{name} at depth {length}" for name, length, _ids, _names in sorted(beyond, key=lambda row: (row[1], row[0])))
+        further = join_names([f"{name} at depth {length}" for name, length, _ids, _names in sorted(beyond, key=lambda row: (row[1], row[0]))])
         parts.append(f"{len(beyond)} more break{'s' if len(beyond) == 1 else ''} further out ({further}); ask with more hops.")
     else:
         parts.append(f"Depth {reached} reached {len(affected)} service{'s' if len(affected) != 1 else ''}; nothing new past depth {saturation}.")
-    connector = _main_connector(graph, [target.id, *affected])
+    connector = _main_connector(graph, list(affected))
     if connector is not None:
         name, score = connector
-        parts.append(f"{name} is the main connector: {score:g} of the shortest dependency paths run through it.")
+        parts.append(f"Among them, {name} is the connector: {score:g} shortest dependency paths run through it.")
     result.answer = " ".join(parts)
     return result
 
 
 def _main_connector(graph, service_ids: list[str]) -> tuple[str, float] | None:
-    rows = graph.ro_query(
+    """The top connector by betweenness, or None. Runs over the whole service graph; a timeout drops the sentence, not the answer."""
+    try:
+        rows = _betweenness(graph, service_ids)
+    except Exception as error:  # noqa: BLE001  the sentence is optional; the traversal above is the answer
+        log.warning("[blast_radius] betweenness skipped: %s", error)
+        return None
+    return (rows[0][0], float(rows[0][1])) if rows else None
+
+
+def _betweenness(graph, service_ids: list[str]) -> list:
+    return graph.ro_query(
         """
         CALL algo.betweenness({nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON']}) YIELD node, score
         WHERE node.id IN $ids AND score > 0
@@ -134,7 +147,6 @@ def _main_connector(graph, service_ids: list[str]) -> tuple[str, float] | None:
         """,
         {"ids": service_ids},
     ).result_set
-    return (rows[0][0], float(rows[0][1])) if rows else None
 
 
 # --- shortest paths -----------------------------------------------------------------------
@@ -271,6 +283,6 @@ def load_bearing(limit=DEFAULT_LOAD_BEARING) -> ToolResult:
             sentences.append(f"{name} ({score:.2f}, {dependents})")
     answer = sentences[0]
     if len(sentences) > 1:
-        answer += " Then " + ", ".join(sentences[1:]) + "."
+        answer += " Then " + join_names(sentences[1:]) + "."
     result.answer = answer
     return result

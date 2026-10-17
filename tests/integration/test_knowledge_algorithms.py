@@ -79,16 +79,17 @@ class AlgorithmToolsTest(unittest.TestCase):
     def test_no_depth_follows_everything_and_reports_where_it_saturated(self):
         result = algorithms.blast_radius("postgres", ORG)
         self.assertEqual(result.depth, 2)
-        self.assertIn("Auth Service, Billing Service (1 hop)", result.answer)
-        self.assertIn("API Gateway, Invoice Worker, Notification Service, Search Service (2 hops)", result.answer)
+        self.assertIn("Auth Service and Billing Service (1 hop)", result.answer)
+        self.assertIn("API Gateway, Invoice Worker, Notification Service and Search Service (2 hops)", result.answer)
         self.assertIn("nothing new past depth 2", result.answer)
         self.assertEqual(len({step.from_name for step in result.path}), 6)
 
     def test_the_main_connector_comes_from_betweenness(self):
         result = algorithms.blast_radius("auth", ORG)
-        # Whichever of the target and its dependents tops betweenness over DEPENDS_ON is named, with its score.
-        self.assertRegex(result.answer, r"(Auth Service|Billing Service) is the main connector: [\d.]+ of the shortest dependency paths run through it\.")
-        self.assertIsNotNone(algorithms._main_connector(falkordb_client.connect()[1], ["auth-service"]))
+        # The connector is one of the affected services, never the one that went down.
+        self.assertRegex(result.answer, r"Among them, Billing Service is the connector: [\d.]+ shortest dependency paths run through it\.")
+        self.assertNotIn("Auth Service is the connector", result.answer)
+        self.assertIsNotNone(algorithms._main_connector(falkordb_client.connect()[1], ["billing-service"]))
         self.assertIsNone(algorithms._main_connector(falkordb_client.connect()[1], ["legacy-ftp"]))
 
     def test_a_leaf_has_no_dependents_and_an_unknown_service_is_refused(self):
@@ -149,7 +150,7 @@ class AlgorithmToolsTest(unittest.TestCase):
     def test_load_bearing_ranks_by_pagerank_with_dependent_counts(self):
         result = algorithms.load_bearing(3)
         self.assertRegex(result.answer, r"^Postgres carries the most weight \(PageRank 0\.\d+\): 6 services depend on it directly or through others\.")
-        self.assertRegex(result.answer, r"Then Auth Service \(0\.\d+, 5\), Graph Store \(0\.\d+, 2\)\.")
+        self.assertRegex(result.answer, r"Then Auth Service \(0\.\d+, 5\) and Graph Store \(0\.\d+, 2\)\.")
         self.assertIn("Auth Service -[DEPENDS_ON]-> Postgres", _cites(result))
         self.assertIn("Billing Service -[DEPENDS_ON]-> Postgres", _cites(result))
         self.assertEqual(ask_service.ask("which services are load bearing", ORG).tool, "load_bearing")
@@ -163,8 +164,10 @@ class AlgorithmToolsTest(unittest.TestCase):
         names = [name for name, _score, _why in ranked]
         self.assertEqual(names[:2], ["Arjun Mehta", "Lena Fischer"])
         self.assertEqual(names[-1], "Sara Lindqvist")
-        self.assertIn("Ask first: Arjun Mehta (owns it, wrote app#41, reviewed app#42, wrote Billing runbook)", public.answer)
-        self.assertIn("Ranked by weighted edges", public.answer)
+        self.assertIn("Ask first: Arjun Mehta (owns it, wrote app#41 and the Billing runbook, reviewed app#42), then Lena Fischer (worked on it and TKT-102, reviewed app#41, wrote app#42)", public.answer)
+        self.assertIn("Open tickets: TKT-102.", public.answer)
+        self.assertNotIn("Ranked by weighted edges", public.answer)
+        self.assertTrue(public.answer.startswith("Billing Service is owned by Arjun Mehta. Ask first:"))
         self.assertIn("Billing runbook -[DESCRIBES]-> Billing Service", _cites(public))
         self.assertNotIn("ext-contrib", public.answer)
 

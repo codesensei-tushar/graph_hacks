@@ -19,7 +19,7 @@ import re
 from src.db.falkordb_client import connect
 from src.domain.knowledge import algorithms, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
-from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution
+from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
 ANSWER_LABELS = ("Service", "Document", "Ticket")
 
@@ -152,13 +152,13 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     if service != target:
         parts.append(f"{target.name} is about {service.name}.")
     if owners:
-        parts.append(f"{service.name} is owned by {', '.join(name for _, name in owners)}.")
+        parts.append(f"{service.name} is owned by {join_names([name for _, name in owners])}.")
     elif teams:
         parts.append(f"{service.name} has no named owner.")
     else:
         parts.append(f"{service.name} is in the graph, and no owner or team is recorded for it.")
     if teams:
-        parts.append(f"Run by the {', '.join(name for _, name in teams)} team.")
+        parts.append(f"Run by the {join_names([name for _, name in teams])} team{'s' if len(teams) > 1 else ''}.")
     result.answer = " ".join(parts)
     return result
 
@@ -243,8 +243,9 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
             {"id": target.id, "scopes": scopes},
         ).result_set
         for who_id, who, who_label, rel, pr_id, pull_request, service in pull_requests:
-            result.add(PathStep(pull_request, "TOUCHES", service, from_id=pr_id, to_id=target.id, from_label="PullRequest", to_label="Service"))
+            # Person to code to service, top to bottom.
             result.add(PathStep(who, rel, pull_request, from_id=who_id, to_id=pr_id, from_label=who_label, to_label="PullRequest"))
+            result.add(PathStep(pull_request, "TOUCHES", service, from_id=pr_id, to_id=target.id, from_label="PullRequest", to_label="Service"))
         documents = graph.ro_query(
             """
             MATCH (person:Person)-[:AUTHORED]->(document:Document)-[:DESCRIBES]->(service:Service {id: $id})
@@ -254,63 +255,53 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
             {"id": target.id},
         ).result_set
         for person_id, person, document_id, document, service in documents:
-            result.add(PathStep(document, "DESCRIBES", service, from_id=document_id, to_id=target.id, from_label="Document", to_label="Service"))
             result.add(PathStep(person, "AUTHORED", document, from_id=person_id, to_id=document_id, from_label="Person", to_label="Document"))
+            result.add(PathStep(document, "DESCRIBES", service, from_id=document_id, to_id=target.id, from_label="Document", to_label="Service"))
 
     if not result.path:
         result.answer = f"{target.name} is in the graph, and no person is linked to it yet."
         return result
 
-    path = result.path
-    owners = [step.from_name for step in path if step.rel == "OWNS"]
-    workers = [step.from_name for step in path if step.rel in {"WORKED_ON", "AUTHORED", "ASSIGNED", "OPENED"} and step.from_name not in owners]
-    reviewers = [step.from_name for step in path if step.rel == "REVIEWED" and step.from_name not in owners + workers]
-    knowers = [step.from_name for step in path if step.rel == "KNOWS"]
-    open_tickets = [step.from_name for step in path if step.rel == "ABOUT" and step.to_name == target.name]
-    parts = []
-    if owners:
-        parts.append(f"{target.name} is owned by {', '.join(_unique(owners))}.")
-    else:
-        parts.append(f"{target.name} is in the graph.")
-    if workers:
-        parts.append(f"Also worked on by {', '.join(_unique(workers))}.")
-    if reviewers:
-        parts.append(f"Reviewed by {', '.join(_unique(reviewers))}.")
-    if knowers:
-        parts.append(f"Known by {', '.join(_unique(knowers))}.")
-    if open_tickets:
-        parts.append(f"Tickets: {', '.join(_unique(open_tickets))}.")
+    owners = _unique(step.from_name for step in result.path if step.rel == "OWNS" and step.to_name == target.name)
+    open_tickets = _unique(step.from_name for step in result.path if step.rel == "ABOUT" and step.to_name == target.name)
+    parts = [f"{target.name} is owned by {join_names(owners)}." if owners else f"{target.name} has no named owner."]
     ranked = rank_people(result.path, target)
     if ranked:
-        first, *rest = [f"{name} ({', '.join(why)})" for name, _score, why in ranked]
-        parts.append(f"Ask first: {first}" + (f", then {', '.join(rest)}" if rest else "") + ".")
-        parts.append("Ranked by weighted edges: owns 5, wrote a pull request 3, worked on, reviewed, or assigned 2, knows or opened 1.")
+        first, *rest = [f"{name} ({reasons})" for name, _score, reasons in ranked]
+        parts.append(f"Ask first: {first}" + (f", then {join_names(rest)}" if rest else "") + ".")
+    if open_tickets:
+        parts.append(f"Open tickets: {join_names(open_tickets)}.")
     result.answer = " ".join(parts)
     return result
 
 
-def rank_people(path: list[PathStep], target: Entity) -> list[tuple[str, int, list[str]]]:
+def rank_people(path: list[PathStep], target: Entity) -> list[tuple[str, int, str]]:
     """People in a path, heaviest edges first, each with the reasons in plain words. The path lines are the proof."""
     scores: dict[str, int] = {}
-    reasons: dict[str, list[str]] = {}
+    reasons: dict[str, dict[str, list[str]]] = {}
     for step in path:
         if step.from_label not in ("Person", "GitHubUser"):
             continue
         weight = DOCUMENT_WEIGHT if step.rel == "AUTHORED" and step.to_label == "Document" else EDGE_WEIGHTS.get(step.rel, 1)
         scores[step.from_name] = scores.get(step.from_name, 0) + weight
-        reason = _reason(step, target)
-        if reason not in reasons.setdefault(step.from_name, []):
-            reasons[step.from_name].append(reason)
-    return sorted(((name, scores[name], reasons[name]) for name in scores), key=lambda row: (-row[1], row[0]))
+        verb, what = _reason(step, target)
+        objects = reasons.setdefault(step.from_name, {}).setdefault(verb, [])
+        if what not in objects:
+            objects.append(what)
+    ranked = []
+    for name in sorted(scores, key=lambda name: (-scores[name], name)):
+        # "worked on it and TKT-102, wrote notebook#52": one clause per verb, "it" first.
+        clauses = [f"{verb} {join_names(sorted(objects, key=lambda what: what != 'it'))}" for verb, objects in reasons[name].items()]
+        ranked.append((name, scores[name], ", ".join(clauses)))
+    return ranked
 
 
-def _reason(step: PathStep, target: Entity) -> str:
-    it = step.to_name == target.name
+def _reason(step: PathStep, target: Entity) -> tuple[str, str]:
     verbs = {"OWNS": "owns", "WORKED_ON": "worked on", "KNOWS": "knows", "AUTHORED": "wrote", "REVIEWED": "reviewed", "OPENED": "opened", "ASSIGNED": "is assigned"}
     verb = verbs.get(step.rel, step.rel.lower().replace("_", " "))
-    if it and step.rel in ("OWNS", "WORKED_ON", "KNOWS"):
-        return f"{verb} it"
-    return f"{verb} {step.to_name}"
+    if step.to_name == target.name and step.rel in ("OWNS", "WORKED_ON", "KNOWS"):
+        return verb, "it"
+    return verb, f"the {step.to_name}" if step.to_label == "Document" else step.to_name
 
 
 def decision_trace(question: str, scopes: list[str]) -> ToolResult:

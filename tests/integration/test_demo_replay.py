@@ -220,9 +220,10 @@ class DemoReplayTest(unittest.TestCase):
 
     def test_4b_two_hops_out_reaches_a_service_the_first_answer_missed(self):
         reply = self._only_reply(self._rows("Blast radius, then two hops out")[1])
-        if "Invoice Worker" not in reply:
-            self.skipTest("pending item 1: a thread follow-up reuses the thread's subject and depth")
         self.assertIn(edge("Invoice Worker", "DEPENDS_ON", "Billing Service"), reply)
+        self.assertIn("If Auth Service goes down", reply)
+        self.assertIn("depth 2", reply)
+        self.assertIn("Subject from this thread", reply)
 
     def test_5_a_ticket_is_filed_after_approval(self):
         asked, approved, follow_up = self._rows("A new ticket, approved, then who should look at it")
@@ -241,9 +242,8 @@ class DemoReplayTest(unittest.TestCase):
 
     def test_5b_who_should_look_at_it_resolves_the_threads_ticket(self):
         reply = self._only_reply(self._rows("A new ticket, approved, then who should look at it")[2])
-        if "Arjun Mehta" not in reply:
-            self.skipTest("pending item 1: 'who should look at it' resolves the thread's ticket")
         self.assertIn(edge("Arjun Mehta", "OWNS", "Billing Service"), reply)
+        self.assertIn("Subject from this thread", reply)
 
     def test_6_something_not_in_the_graph(self):
         reply = self._only_reply(self._rows("Something the graph does not know")[0])
@@ -252,8 +252,7 @@ class DemoReplayTest(unittest.TestCase):
 
     def test_6b_the_reply_says_the_graph_does_not_know_it(self):
         reply = self._only_reply(self._rows("Something the graph does not know")[0])
-        if "payments gateway" not in reply.lower():
-            self.skipTest("pending item 1: the reply says the graph does not know the named system and offers the nearest match")
+        self.assertIn("payments gateway", reply.lower())
         self.assertRegex(reply, r"(?i)(nothing|no|not|don't|doesn't).*(match|know)")
 
     def test_7_a_private_repo_is_seen_only_by_its_collaborator(self):

@@ -5,6 +5,7 @@ the choice is real: resolution, the traversal, the cited path, the approval flow
 """
 
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import tests  # noqa: F401  pins the test graph and owner before src loads
@@ -23,11 +24,14 @@ GRAPH = f"company_agent_test{tests.TEST_GRAPH_SUFFIX}"
 CHANNEL = "CAGENT"
 
 
+BOT = SimpleNamespace(team_id="T1", bot_user_id="UBOT")
+
+
 def _request(question: str, thread: list[dict] | None = None) -> TurnRequest:
     scope = SlackMemoryScope(kind="shared", channel_id=CHANNEL, channel_type="channel")
     event = SlackEventInner(type="app_mention", user="UALICE", channel=CHANNEL, channel_type="channel", text=question, ts="1700000000.000100")
     return TurnRequest(
-        workspace=None,
+        workspace=BOT,
         event=event,
         question=question,
         raw_text=question,
@@ -115,6 +119,40 @@ class KnowledgeAgentTest(unittest.TestCase):
         self.assertIn("Filed *TKT-104* about Billing Service", text)
         self.assertIn("• TKT-104 -[ABOUT]-> Billing Service", text)
         self.assertIn("Arjun Mehta", text)
+
+    def test_a_follow_up_takes_its_subject_and_depth_from_the_thread(self):
+        with mock.patch.object(agent, "generate_object", side_effect=ModelUnavailable("no key")):
+            first = agent_turn.answer_turn(_request("what breaks if auth goes down, directly"))
+            thread = [
+                {"user": "USARA", "text": "<@UBOT> what breaks if auth goes down, directly", "ts": "1"},
+                {"user": "UBOT", "bot_id": "B1", "text": first.reply, "ts": "2"},
+                {"user": "USARA", "text": "<@UBOT> and two hops out", "ts": "3"},
+            ]
+            deeper = agent_turn.answer_turn(_request("and two hops out", thread=thread))
+        self.assertIn("depth 1", first.reply)
+        self.assertNotIn("• Invoice Worker -[DEPENDS_ON]-> Billing Service", first.reply)
+        self.assertIn("If Auth Service goes down", deeper.reply)
+        self.assertIn("depth 2", deeper.reply)
+        self.assertIn("• Invoice Worker -[DEPENDS_ON]-> Billing Service", deeper.reply)
+        self.assertIn("Tool `blast_radius`, picked by keywords. Subject from this thread.", deeper.reply)
+
+    def test_who_should_look_at_it_resolves_the_threads_ticket(self):
+        thread = [
+            {"user": "UKOFI", "text": "<@UBOT> ticket: billing exports time out", "ts": "1"},
+            {"user": "UBOT", "bot_id": "B1", "text": "Filed *TKT-104* about Billing Service. Billing Service is owned by Arjun Mehta.", "ts": "2"},
+            {"user": "UKOFI", "text": "<@UBOT> who should look at it", "ts": "3"},
+        ]
+        with mock.patch.object(agent, "generate_object", side_effect=ModelUnavailable("no key")):
+            outcome = agent_turn.answer_turn(_request("who should look at it", thread=thread))
+        self.assertIn("• Arjun Mehta -[OWNS]-> Billing Service", outcome.reply)
+        self.assertIn("Subject from this thread", outcome.reply)
+
+    def test_a_refusal_in_a_thread_stays_a_refusal(self):
+        thread = [{"user": "USARA", "text": "<@UBOT> what breaks if auth goes down", "ts": "1"}, {"user": "UBOT", "bot_id": "B1", "text": "If Auth Service goes down...", "ts": "2"}]
+        with mock.patch.object(agent, "generate_object", side_effect=ModelUnavailable("no key")):
+            outcome = agent_turn.answer_turn(_request("who knows the payments gateway", thread=thread))
+        self.assertIn("Nothing in the graph matches “payments gateway” as one thing", outcome.reply)
+        self.assertNotIn("Auth Service goes down", outcome.reply)
 
     def test_the_turn_seam_routes_to_the_agent_once_registered(self):
         compute.register_turn_agent(agent_turn.answer_turn)
