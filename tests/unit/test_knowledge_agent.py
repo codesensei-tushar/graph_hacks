@@ -145,6 +145,29 @@ class AnswerTurnTest(ProbeTools):
         self.assertIn("learned 2025-10-09", outcome.reply)
         self.assertIn("Tool `probe_read`, picked by the model. Read from: public channels", outcome.reply)
 
+    def test_a_refusal_shows_no_memories_so_it_never_reads_like_a_guess(self):
+        miss = ToolSpec(
+            name="probe_miss",
+            description="Probe tool that never finds its subject.",
+            args_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+            run=lambda args, scopes: ToolResult(tool="probe_miss", answer="Nothing in the graph matches that.", found=False, candidates=["Billing Service"]),
+        )
+        catalogue.register(miss)
+        memory = {"memory": "TKT-101 timing note", "updated_at": 1_760_000_000_000, "container_tag": "org_shared", "author": "Bo"}
+        try:
+            with (
+                mock.patch.object(agent, "generate_object", return_value={"tool": "probe_miss", "args": {"name": "payments gateway"}}),
+                mock.patch.object(agent, "search_brain", return_value={"results": [memory]}) as recall,
+                mock.patch.object(agent, "channel_names", return_value={}),
+            ):
+                outcome = agent.answer_turn(_request("who should look at the payments gateway"))
+        finally:
+            catalogue._TOOLS.pop("probe_miss", None)
+        self.assertIn("Nothing in the graph matches that.", outcome.reply)
+        self.assertNotIn("From conversations", outcome.reply)
+        self.assertNotIn("TKT-101", outcome.reply)
+        recall.assert_not_called()
+
     def test_depth_shows_in_the_path_header_and_keywords_in_the_footer(self):
         with (
             mock.patch.object(agent, "generate_object", return_value={"tool": "probe_depth", "args": {"name": "auth", "depth": 4}}),

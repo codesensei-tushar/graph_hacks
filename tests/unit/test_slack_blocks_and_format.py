@@ -54,7 +54,7 @@ class FormatTests(unittest.TestCase):
         self.assertIn("<#C9>", text)
 
     def test_answer_fallback_and_long_path(self):
-        path = [{"from": f"n{i}", "rel": "DEPENDS_ON", "to": "auth"} for i in range(15)]
+        path = [{"from": f"n{i}", "rel": "DEPENDS_ON", "to": "auth"} for i in range(25)]
         text = format_answer({"answer": "", "path": path}, [], ["org_shared"], {})
         self.assertIn("couldn't find", text)
         self.assertIn("5 more edges", text)
