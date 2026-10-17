@@ -73,7 +73,23 @@ A memory is written to exactly one scope, the narrowest room it was said in. Wha
 
 The last one is a single pattern: `(:SlackUser)-[:IS]->(:Person)<-[:IS]-(:GitHubUser)-[:CAN_READ]->(:Repo)`. Collaborator lists are re-synced every hour, so when someone loses access to a repo their DMs stop showing that repo's pull requests. If a channel's privacy cannot be confirmed, it is treated as private. If an account is not linked, the answer is no. Everything fails closed.
 
-## Algorithms as tools, and three things that bit us
+## Every team, not only engineering
+
+We started with engineering because the data was ours. Nothing in the model is about code, and we wanted to show that with a second team rather than claim it.
+
+**One property, not a second schema.** A `Service` node has a `kind`: a service, a system, a process, a product, an account, a policy or a playbook. Every tool walks the same edges for all of them. The kind changes the words ("the Renewals process stalls", "the Pricing playbook no longer applies") and one rule: nothing depends on an account, so an account never shows up in a blast radius.
+
+**A file anyone can fill in, which only merges.** A team arrives as one TOML file: its people, what it runs, who owns each thing, and the decisions it stands by. Each kind comes with a one-line explanation in plain words. The importer copies only the fields each section allows and refuses an unknown one by name ("unknown field 'ownr' in [[runs]] 'Renewals'; did you mean 'owner'?"). Importing the same file twice creates nothing, and taking a block out deletes nothing. The file supplies values, never a label or a property name, so the rule that no user text reaches a query holds for it too.
+
+**The bug the rehearsal caught.** Rehearsing the demo, we asked the Sales questions in Slack before importing Sales. Slack had already turned the people asking into graph nodes, matched by their email, so the import refused them as people who already existed. Now a member whose email is already in the graph is that person, and the import fills in what the file adds.
+
+The moment that sold it to us was the bus-factor question. Asked "what if priya shah leaves", the graph answers:
+
+> If Priya Shah leaves, 2 things rest on them alone, ranked by how much depends on each. Renewals process: Priya Shah is the only one running it; next in line: Dev Patel, then Noor Haddad; 1 other depends on it. Pricing playbook: Priya Shah is its only owner; next in line: Noor Haddad, then Tomas Reyes.
+
+Tomas Reyes is an engineer on the Platform team. The org chart files that name under engineering; the edges say Tomas worked on the pricing playbook. A directory cannot give that answer. A graph gives it as a path.
+
+## Algorithms as tools, and four things that bit us
 
 FalkorDB ships graph algorithms as procedures, which means ranking and routing are a `CALL` rather than code we had to write.
 
@@ -119,7 +135,7 @@ Claude Code wrote a large share of the code and the docs, in several sessions th
 
 ## What's next
 
-The same catalogue is already live over MCP, read-only, so another agent can walk the graph with the same cited results. Two reads landed after that. Label propagation groups people by the services they share and says where that splits from the org chart. A decision can be asked whether it is still the last word: the reply lists tickets and pull requests on the same service that it does not cite. Semantic recall is still the first thing we would add next, beside the full-text pass. More sources should arrive as more edges, not as another store.
+The same catalogue is already live over MCP, read-only, so another agent can walk the graph with the same cited results; every read-only tool is served there, including the bus-factor one. Two reads landed after that. Label propagation groups people by the services they share and says where that splits from the org chart. A decision can be asked whether it is still the last word: the reply lists tickets and pull requests on the same service that it does not cite. Semantic recall is still the first thing we would add next, beside the full-text pass. More sources should arrive as more edges, not as another store.
 
 The line we kept coming back to: the answer is the path.
 

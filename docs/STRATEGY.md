@@ -189,13 +189,13 @@ The submit page renders only in a browser, so the exact fields are unknown until
 
 **Tagline.** A Slack agent that answers from one FalkorDB graph and shows the path behind every answer.
 
-**Description** (about 120 words):
+**Description** (about 140 words; rewritten in round 6 for every team):
 
-> Company Brain is a Slack bot over a single FalkorDB graph. People, teams, services, documents, tickets, decisions and chat are nodes and edges; Slack and GitHub feed it live. Ask who owns billing, why a decision was made, or what breaks if auth goes down, and it answers by walking the graph, then prints the edges it used as `A -[REL]-> B` lines. The agent never writes Cypher: it picks from a fixed catalogue of hand-written queries, resolves names against the graph first, and refuses to guess. Decisions that change are superseded, not overwritten, so "why did we" stays current. Permissions are a graph query too: every answer is filtered by the rooms and repos the asker can read. FalkorDB is the only store.
+> Company Brain is a Slack bot over a single FalkorDB graph. People, teams, what they run, documents, tickets, decisions and chat are nodes and edges. Slack and GitHub feed it live, and any team, not only engineering, joins from one TOML file. Ask who owns billing, why a decision was made, what breaks if auth goes down, or what rests on one person alone if they leave. It answers by walking the graph, then prints the edges it used as `A -[REL]-> B` lines. The agent never writes Cypher: it picks from a fixed catalogue of hand-written queries, resolves names against the graph first, and refuses to guess. Decisions are superseded, not overwritten, so "why did we" stays current. Every answer is filtered by the rooms and repos the asker can read. Every read-only tool is also served over MCP and cites its path. FalkorDB is the only store.
 
 **How FalkorDB is central** (one paragraph, in case the form asks):
 
-> Every answer is a traversal. Ownership, expertise, decision lineage and blast radius are edges, not search results, and the reply cites the exact path. PageRank over `DEPENDS_ON` and over authored and reviewed pull requests ranks services and people; `algo.SPpaths` explains why two things are connected. Memories, tags, channel membership and repo access live in the same graph, and the scheduler, approvals and dedupe keys live as Redis keys in the same instance. Remove FalkorDB and nothing answers.
+> Every answer is a traversal. Ownership, expertise, decision lineage, blast radius and what rests on one person are edges, not search results, and the reply cites the exact path. PageRank over `DEPENDS_ON` ranks the services the company leans on, label propagation finds who actually works together, and `algo.SPpaths` explains why two things are connected. People are ranked by their own edges (owning, writing, reviewing), so the ranking is the path. A team's processes, tools and playbooks are the same `Service` nodes with a `kind`, so every tool answers for every team. Memories, tags, channel membership and repo access live in the same graph, and the scheduler, approvals and dedupe keys live as Redis keys in the same instance. Remove FalkorDB and nothing answers.
 
 **Tracks.** 03 Company Brain (primary), 01 Agents That Act on Connected Data, 02 Agent Memory and Coordination.
 

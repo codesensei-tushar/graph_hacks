@@ -111,19 +111,22 @@ The same questions, run again with every graph read returning nothing. The sixth
 
 A Service node has a **kind**: `service`, `system`, `process`, `product`, `account`, `policy`, `playbook`. A renewals process, a CRM, a pricing playbook and an account sit in the same graph as the billing service, and every tool answers for them in the right words: a process stalls, a policy no longer applies.
 
-Each team gets a page: its people, what it runs grouped by kind, the decisions that stand and what was said. A new team joins with one Slack line behind an Approve card:
+Each team gets a page: its people, what it runs grouped by kind, the decisions that stand and what was said. A new team joins from one TOML file that people who do not write code can fill in. The import only merges, and people Slack already knows are matched by email:
 
 ```
-onboard team: Sales | members: @priya @dev | owns: Renewals (process), HubSpot (system), Pricing playbook (playbook)
+POST /ops/import  sales.toml   →   13 nodes, 32 edges created.  Again: 0.
 ```
 
-**The Sales beat** (replies pending until the Sales seed and the `onboard team:` command land; replace the targets below with the replies the replay tests pin):
+(If the `onboard team:` Slack command ships before the deck is exported, swap this block for its exact syntax from that PR; until then the slide shows only what is on main.)
 
-| Question | Target reply |
+**Sales, onboarded on the synthetic company.** Final: these are the replies the replay and import tests pin.
+
+| Question | Reply |
 | --- | --- |
-| `who owns renewals, and who else has worked on it` | The process's owner, then the people linked by work. |
-| `what breaks if hubspot goes down` | Renewals stalls; the pricing playbook no longer applies, one hop further out. |
-| `why did we change pricing` | The pricing decision that stands, and the one it replaced, with both dates. |
+| `who owns renewals, and who else has worked on it` | "The Renewals process is run by Priya Shah. Ask first: Priya Shah (owns it), then Dev Patel (worked on it) and Noor Haddad (worked on it)." |
+| `what breaks if hubspot goes down` | "If the HubSpot system goes down, the Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops)." |
+| `why did we change pricing` | "Sell annual plans only at renewal. … Decided 1 Sep 2026. … This replaced *Discount monthly plans at renewal* (decided 2 Mar 2026)." |
+| `what if priya shah leaves` | "If Priya Shah leaves, 2 things rest on them alone … Pricing playbook: Priya Shah is its only owner; next in line: Noor Haddad, then Tomas Reyes." Tomas works on Platform: the next in line comes from another team. |
 
 ## 12. One build, three tracks
 
