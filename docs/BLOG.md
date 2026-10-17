@@ -104,7 +104,7 @@ So recall follows edges. From the entity a question resolved to, through `MENTIO
 
 FalkorDB holds the graph. It also holds, as Redis keys in the same instance, the scheduler queue, pending approvals, running turns, and the dedupe keys for Slack events and GitHub deliveries. The app talks to one process. Production runs the same compose file behind nginx, with a password on the database and its port closed to the internet, and the deploy pipeline ships by git SHA and rolls back by SHA. The details are in docs/DEPLOY.md.
 
-Take FalkorDB out and nothing answers. Not "answers worse". Nothing.
+Take FalkorDB out and nothing answers. Not "answers worse". Nothing. We made that checkable: `GET /api/proof` runs the same six questions through the same catalogue twice, once with the graph and once with every read returning no rows, and prints the table. Five of six collapse. The sixth is the question about something the graph does not know, and it is refused both ways. That is deliberate: an ablation where every question collapses would mean the system had answered a question it should have refused.
 
 ## How we used AI assistants
 

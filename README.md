@@ -341,7 +341,7 @@ MATCH (u:GitHubUser {id: $user}), (r:Repo {id: $repo}) MERGE (u)-[c:CAN_READ]->(
 
 ### Proof that the graph does the work
 
-`GET /api/proof` runs six demo questions twice, once against FalkorDB and once with every graph read returning nothing, and reports per question the tool, both answers, and whether the capability collapsed. The question about something not in the graph refuses both ways, which is the point: the refusal does not depend on the graph being up.
+`GET /api/proof` runs six demo questions twice, once against FalkorDB and once with every graph read returning nothing, and reports per question the tool, both answers, and whether the capability collapsed. The question about something not in the graph refuses both ways, which is the point: the refusal does not depend on the graph being up. On the synthetic company five of the six questions collapse without the graph; the sixth, about something the graph does not know, is refused both ways, which is the behaviour the refusal rule promises.
 
 ```bash
 curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "https://brain.noobsurd.space/api/proof?format=text"

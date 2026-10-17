@@ -55,6 +55,7 @@ Visible Track 03 competitors on GitHub as of 17 Oct:
 | Entry | What it does | Threat |
 | --- | --- | --- |
 | [MERIDIAN](https://github.com/aniruddhaadak80/meridian-graphhacks) | Four agents on one graph, graph per tenant, MCP with eight tools, an ablation endpoint that shows which capabilities collapse without the graph, live on Vercel, enters all three tracks | High |
+| [Cairn](https://dev.to/bikash_kh_/i-built-a-company-brain-that-remembers-why-decisions-were-made-on-falkordb-c7) | Decision, premise and quoted source as a graph with a "still true?" check, web app deployed, blog published (see Round 4) | High for Track 03 and the blog prize |
 | [Axon](https://github.com/volfiros/axon-brain) | "Remembers why your team decided things, and flags when new work goes against it" | Medium. Best decision-tracing pitch; still in design when indexed |
 | [Minutes](https://github.com/Hydra-Of-Malice/FalkorDB) | Time-aware shared memory from meetings and email, Tracks 02 and 03 | Medium |
 | [dealership-brain](https://github.com/rossycoder/dealership-brain) | Multi-agent brain for one vertical | Low |
@@ -259,6 +260,28 @@ Type these exactly, in this order, in the dev Slack workspace connected to produ
 | 9 | README in the browser: the Mermaid diagram, then the deploy URL and the three tracks | | Close. |
 
 Ticket numbers (`TKT-106`, `graph_hacks#N`) depend on the day's graph; read whatever the reply shows. The ticket in step 5 is new each take; delete it between takes with `MATCH (t:Ticket {title: 'scheduler jobs run twice after a restart'}) DETACH DELETE t` in the Browser, or use a new title.
+
+## Round 4: 17 Oct, late morning
+
+### Rules and schedule
+
+Re-read both pages: unchanged. Eighteen rules, no scoring rubric, no video length, submissions close 18 Oct 23:59 IST. Rule 10 still requires a public repository; ours is private until the user flips it.
+
+### Competitors, three new
+
+| Entry | What it is | What it means for us |
+| --- | --- | --- |
+| [Cairn](https://dev.to/bikash_kh_/i-built-a-company-brain-that-remembers-why-decisions-were-made-on-falkordb-c7) | A "why was this decided" brain: Decision `BECAUSE` Premise `EVIDENCED_BY` Source, every reason tied to a quote checked word for word, a "still true?" check that links later postmortems back to decisions, betweenness and label propagation, a graph per company, a deployed web app, a published blog with a self-built 40-question benchmark against vector and keyword RAG | The strongest Track 03 story so far and the blog to beat for the side prize. Web app only, data from exports, no live Slack or Jira, no approval flow, no per-room permissions. Our edge: live Slack and GitHub, the permission graph, writes behind approval, a decision that supersedes instead of a flag. Our blog must carry the proof numbers and the honest refusal, which their post has no equivalent of |
+| [Atlas](https://github.com/ikrishg/atlas) | A Slack company brain that shows the path for every answer ("kill test": multi-hop routes with labelled edges). Slack app, ingestion and deployment not built; hand-written seed | Same pitch sentence as ours, far behind on delivery. Watch for a last-day Slack app |
+| [TeamTrail](https://github.com/kollisathwikkumar/TeamTrail) | Track 03 onboarding brain built on top of an upstream extraction project, with notes saying work began before the event | Likely conflicts with rule 8; not a reference point |
+
+MERIDIAN, re-checked: video still a placeholder, live console on Vercel, eight MCP tools, an `/api/proof` ablation that reports 8 of 8 capabilities collapsing, MIT licence. Two things to say plainly in our README and blog, without naming anyone: our proof reports 5 of 6 because the sixth question is a refusal that stays a refusal without the graph, and that is the behaviour judges were told to look for; an ablation where every question collapses includes the questions the system should have refused. And we have no LICENSE file where the others do; the user decides.
+
+### Carry into the copy
+
+- Blog: one sentence under "What we cut" with the proof numbers ("five of six questions collapse without FalkorDB; the sixth is a refusal either way, and that is the point").
+- README: already states the refusal behaviour; add the proof sentence next to the curl.
+- Submission description: unchanged; the "how FalkorDB is central" paragraph already names the proof route.
 
 ## Specs for items 6 and 7
 
