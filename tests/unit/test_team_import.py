@@ -36,14 +36,18 @@ owner = "Priya Shah"
 class FakeLookup:
     """Stands in for the graph: what a reference outside the file finds there."""
 
-    def __init__(self, things=(), run_by=None, slack=None, companies=("quillfern",)):
+    def __init__(self, things=(), run_by=None, slack=None, companies=("quillfern",), emails=None):
         self.things = list(things)
         self.runs = run_by or {}
         self.slack = slack or {}
         self.companies = companies
+        self.emails = emails or {}
 
     def has_company(self, company_id):
         return company_id in self.companies
+
+    def people_with_email(self, email):
+        return list(self.emails.get(email.lower(), []))
 
     def find(self, labels, text):
         return [item for item in self.things if item.label in labels and (item.id == slug(text) or item.name.lower() == text.strip().lower())]
@@ -202,7 +206,27 @@ class GraphReferenceTest(unittest.TestCase):
             "[[runs]] 'Renewals': 'renewals' is already run by Payments. To lean on it, list it under depends_on; to add a separate one, give this entry its own id",
             found,
         )
-        self.assertIn("slack_id in [[members]] 'Priya Shah' already belongs to 'maya' in Company Brain", found)
+        self.assertIn("slack_id in [[members]] 'Priya Shah' already belongs to 'maya' in Company Brain; if that is this member, add their email or set id = \"maya\"", found)
+
+    def test_a_member_whose_email_is_already_here_is_that_person(self):
+        # Slack provisions a placeholder Person per member; the file fills it in instead of adding a second one.
+        text = MINIMAL.replace('name = "Priya Shah"', 'name = "Priya Shah"\nemail = "Priya@Example.com"\nslack_id = "UPRIYA"')
+        lookup = FakeLookup(emails={"priya@example.com": ["person-5238dd"]}, slack={"UPRIYA": "person-5238dd"})
+        team = parse_team(text, "quillfern", lookup)
+        self.assertEqual(team.PEOPLE, [{"id": "person-5238dd", "name": "Priya Shah", "email": "Priya@Example.com"}])
+        self.assertEqual(team.TEAMS[0]["members"], ["person-5238dd"])
+        self.assertEqual(team.WORK, [("person-5238dd", "OWNS", "renewals")])
+        self.assertEqual(team.SLACK_USERS, [("UPRIYA", "person-5238dd")])
+
+    def test_an_email_and_a_slack_id_that_disagree_or_an_email_two_people_share_are_refused(self):
+        text = MINIMAL.replace('name = "Priya Shah"', 'name = "Priya Shah"\nemail = "priya@example.com"\nslack_id = "UPRIYA"')
+        found = problems(text, FakeLookup(emails={"priya@example.com": ["priya"]}, slack={"UPRIYA": "maya"}))
+        self.assertTrue(any(p.startswith("slack_id in [[members]] 'Priya Shah' already belongs to 'maya'") for p in found), found)
+        shared = FakeLookup(emails={"priya@example.com": ["priya-a", "priya-b"]})
+        found = problems(text.replace('slack_id = "UPRIYA"\n', ""), shared)
+        self.assertEqual(found, ["email in [[members]] 'Priya Shah' belongs to more than one person in Company Brain (priya-a, priya-b); set id to the right one"])
+        chosen = parse_team(text.replace('slack_id = "UPRIYA"\n', 'id = "priya-b"\n'), "quillfern", shared)
+        self.assertEqual(chosen.PEOPLE[0]["id"], "priya-b")
 
     def test_a_company_the_graph_lacks_is_refused(self):
         self.assertEqual(

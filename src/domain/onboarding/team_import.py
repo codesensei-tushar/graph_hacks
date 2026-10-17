@@ -95,6 +95,12 @@ class GraphLookup:
         rows = self.graph.ro_query("MATCH (t:Team)-[:RUNS]->(:Service {id: $id}) RETURN t.id, t.name", {"id": service_id}).result_set
         return [(ident, name or ident) for ident, name in rows]
 
+    def people_with_email(self, email: str) -> list[str]:
+        """Who already has this email. Slack provisions a Person per member on install and on
+        first contact, so most members of a team being onboarded are already here."""
+        rows = self.graph.ro_query("MATCH (p:Person) WHERE toLower(p.email) = $email RETURN p.id", {"email": email.strip().lower()}).result_set
+        return [ident for (ident,) in rows]
+
     def slack_person(self, slack_user: str) -> str | None:
         """The person a Slack user is already linked to, if any."""
         rows = self.graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.id LIMIT 1", {"id": slack_user}).result_set
@@ -329,11 +335,24 @@ class _Reader:
         name, ident = self._text(row, "name", where, required=True), self._id(row, where)
         if not (name and ident):
             return None, None
-        if not self._claim(self.people, ident, name, "member", where):
-            return None, None
         email = self._text(row, "email", where)
         if email and "@" not in email:
             self.problems.append(f"email in {where} does not look like an email address")
+            email = None
+        # Someone already in the graph with this email is this member: keep their id, so
+        # the import fills in that person instead of adding a second one.
+        written_as = ident
+        if email and self.lookup is not None:
+            existing = self.lookup.people_with_email(email)
+            if ident in existing:
+                pass
+            elif len(existing) > 1:
+                self.problems.append(f"email in {where} belongs to more than one person in Company Brain ({', '.join(existing)}); set id to the right one")
+            elif existing:
+                ident = existing[0]
+        if not self._claim(self.people, ident, name, "member", where):
+            return None, None
+        self.people.setdefault(written_as, ident)
         slack_user = self._text(row, "slack_id", where)
         if slack_user and not _SLACK_USER.match(slack_user):
             self.problems.append(f"slack_id in {where} should look like U012ABCDEF (Slack profile, ⋮, Copy member ID)")
@@ -373,7 +392,10 @@ class _Reader:
             seen[slack_user] = person["id"]
             linked = self.lookup.slack_person(slack_user) if self.lookup is not None else None
             if linked and linked != person["id"]:
-                self.problems.append(f"slack_id in {where} already belongs to '{linked}' in Company Brain")
+                self.problems.append(
+                    f"slack_id in {where} already belongs to '{linked}' in Company Brain; if that is this member, "
+                    f'add their email or set id = "{linked}"'
+                )
 
     def _not_run_by_another_team(self, thing: dict, team: dict, where: str) -> None:
         others = [name for ident, name in self.lookup.run_by(thing["id"]) if ident != team["id"]]

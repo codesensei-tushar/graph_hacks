@@ -126,8 +126,8 @@ HISTORY = (
     WorkspaceMessage(PAYMENTS, "ULENA", "invoice worker retries will move to a queue once billing retries land there"),
 )
 
-# The seven demo moves from docs/STRATEGY.md, in order, then the three Sales steps.
-DEMO_STEPS = (
+# The seven demo moves from docs/STRATEGY.md, in order.
+ENGINEERING_STEPS = (
     DemoStep(
         "Who owns billing, and who else has worked on it",
         (WorkspaceMessage(ENGINEERING, "UTOMAS", "who owns billing, and who else has worked on it", "ask"),),
@@ -172,7 +172,11 @@ DEMO_STEPS = (
             WorkspaceMessage("", "UARJUN", "who knows billing", "dm"),
         ),
     ),
-    # The Sales beat (round 5 in docs/STRATEGY.md): the same tools, for a team that is not engineering.
+)
+
+# The Sales beat (round 5 in docs/STRATEGY.md): the same tools, for a team that is not
+# engineering. ``replay_workspace.py --no-sales`` leaves these out along with the team.
+SALES_STEPS = (
     DemoStep(
         "S1 Who owns renewals, and who else has worked on it",
         (WorkspaceMessage(SALES, "UNOOR", "who owns renewals, and who else has worked on it", "ask"),),
@@ -186,6 +190,8 @@ DEMO_STEPS = (
         (WorkspaceMessage(SALES, "UDEV", "why did we change pricing", "ask"),),
     ),
 )
+
+DEMO_STEPS = ENGINEERING_STEPS + SALES_STEPS
 
 
 # --- GitHub --------------------------------------------------------------------------------

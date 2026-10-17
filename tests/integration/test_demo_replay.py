@@ -275,8 +275,10 @@ class DemoReplayTest(unittest.TestCase):
         reply = self._only_reply(self._rows("S1 Who owns renewals, and who else has worked on it")[0])
         self.assert_cites_path(reply)
         self.assertIn("_Tool `who_knows`", reply)
-        self.assertIn("The Renewals process is run by Priya Shah", reply)
-        self.assertIn("Ask first: Priya Shah (owns it), then Dev Patel (worked on it) and Noor Haddad (worked on it).", reply)
+        self.assertTrue(
+            reply.startswith("The Renewals process is run by Priya Shah. Ask first: Priya Shah (owns it), then Dev Patel (worked on it) and Noor Haddad (worked on it)."),
+            reply,
+        )
         for line in (
             edge("Priya Shah", "OWNS", "Renewals"),
             edge("Dev Patel", "WORKED_ON", "Renewals"),

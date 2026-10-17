@@ -14,7 +14,7 @@ WORK_RELATIONS = frozenset({"OWNS", "WORKED_ON", "KNOWS"})
 
 
 def _identifier(name: str) -> str:
-    if not _IDENTIFIER.match(name):
+    if not _IDENTIFIER.fullmatch(name):
         raise ValueError(f"{name!r} is not a plain identifier")
     return name
 
