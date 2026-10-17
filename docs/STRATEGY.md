@@ -205,7 +205,7 @@ The submit page renders only in a browser, so the exact fields are unknown until
 | When (IST) | What | Owner |
 | --- | --- | --- |
 | Morning | Last code PRs merge: agent loop, decisions, replay. Seed Quillfern and replay the history on the dev instance | coders, coordinator |
-| Morning, before recording | Production's graph predates the new decisions and the app only seeds an empty graph. Run the seed **upsert** against production (`POST /ops/seed` behind the admin token, or `scripts/seed_graph.py --merge`), never the reset, and confirm `why did we cut vector recall` answers with both dates | user |
+| Morning, before recording | Production's graph predates the new decisions and the app only seeds an empty graph. Refresh the seed in place, never the reset: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. Expect `{"company": "company_brain", "mode": "merge", ...}` with `nodes_created` 3 (the two decisions and the strategy document) and a handful of `edges_created`; a second call returns 0/0/0. Then confirm in Slack that `why did we cut vector recall` answers with both dates | user |
 | Late morning | Record the video to the storyboard above. Redo once if a step stumbles | team |
 | Early afternoon | Publish the blog from docs/BLOG.md; link it from the README | coder B |
 | Afternoon | Final merge. CI deploys main. Run the seven steps against production once | coordinator |
@@ -238,7 +238,7 @@ Type these exactly, in this order, in the dev Slack workspace connected to produ
 - `/healthz` on production reports the git SHA of the final merge.
 - The GitHub App is installed on production for this repository, so pull requests that touched `src/domain/memory` are in the graph. Check in the FalkorDB Browser with `MATCH (p:PullRequest) RETURN count(p)`; if it is zero, step 1 shows only the `OWNS` edge and the private-repo step cannot be shown.
 - One private test repository is installed on the same App with one pull request by the recorder's GitHub account. The recorder has done `link github` in a DM; a second teammate has not.
-- Coder B's seeded decision pair (hybrid vector recall, superseded by recall over edges) is on main **and has been upserted into production** with the seed merge, never the reset, which would wipe the real workspace data.
+- The seeded decision pair (hybrid vector recall, superseded by recall over edges) has been merged into production with `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed` (never `scripts/seed_graph.py` without `--merge`, which deletes the graph and the real workspace data with it). The response shows `nodes_created` 3 the first time and 0 after.
 - `LLM_API_KEY` is set on production, so the footer says "picked by the model". Without it the footer says "picked by keywords"; both are honest, say which one is on screen.
 - The seeded chat and document summaries name the hosted product this layer was modelled on. Decide before recording whether that is acceptable on screen; renaming them in `src/seed/company_brain.py` is a one-line seed change per entry.
 
