@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
-from src.api import ops
+from src.api import ops, web
 from src.api.v1 import github, health, proof, slack, slack_install
 from src.core import scheduler
 from src.core.config import settings
@@ -88,4 +88,5 @@ app.include_router(github.router)
 app.include_router(health.router)
 app.include_router(proof.router)
 ops.install(app)
+web.install(app)
 mcp_api.install(app)

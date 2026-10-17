@@ -1,0 +1,183 @@
+/* Company Brain: the judge-facing page. Plain CSS, no build step.
+   Colors are tokens on :root; dark mode re-states them under the OS setting (unless the
+   page is stamped light) and under an explicit data-theme="dark". */
+
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --surface-2: #f3f2ee;
+  --surface-3: #e9e7e1;
+  --line: #d9d7cf;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #807e77;
+  --accent: #2a78d6;
+  --accent-ink: #ffffff;
+  --person: #2a78d6;
+  --service: #eb6834;
+  --knowledge: #1baf7a;
+  --other: #807e77;
+  --danger: #b3261e;
+  --radius: 10px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --surface-3: #2d2d2b;
+    --line: #3a3a37;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --ink-3: #8f8e86;
+    --accent: #3987e5;
+    --accent-ink: #0b0b0b;
+    --person: #3987e5;
+    --service: #d95926;
+    --knowledge: #199e70;
+    --other: #8f8e86;
+    --danger: #f2b8b5;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #1a1a19;
+  --surface-2: #232322;
+  --surface-3: #2d2d2b;
+  --line: #3a3a37;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --ink-3: #8f8e86;
+  --accent: #3987e5;
+  --accent-ink: #0b0b0b;
+  --person: #3987e5;
+  --service: #d95926;
+  --knowledge: #199e70;
+  --other: #8f8e86;
+  --danger: #f2b8b5;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 16px/1.5 var(--font);
+}
+
+a { color: var(--accent); }
+
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+/* Header */
+.top {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 0; border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; text-decoration: none; color: var(--ink); }
+.brand svg { width: 26px; height: 26px; }
+.top nav { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.95rem; }
+.top nav a { color: var(--ink-2); text-decoration: none; }
+.top nav a:hover { color: var(--ink); text-decoration: underline; }
+
+/* Hero */
+.hero { padding: 44px 0 20px; }
+.hero h1 { font-size: clamp(1.9rem, 4.5vw, 2.8rem); line-height: 1.12; margin: 0 0 12px; letter-spacing: -0.01em; }
+.hero p.lede { font-size: 1.15rem; color: var(--ink-2); max-width: 44em; margin: 0 0 18px; }
+.hero .claims { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 20px 0 0; padding: 0; list-style: none; }
+.hero .claims li { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; font-size: 0.95rem; }
+.hero .claims b { display: block; margin-bottom: 2px; }
+
+/* Ask panel */
+.ask { margin-top: 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); padding: 18px 16px; }
+.ask h2 { margin: 0 0 4px; font-size: 1.25rem; }
+.ask .sub { margin: 0 0 14px; color: var(--ink-2); font-size: 0.95rem; }
+.ask form { display: flex; gap: 8px; }
+.ask input[type="text"] {
+  flex: 1; min-width: 0; font: inherit; padding: 11px 13px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.ask input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.btn {
+  font: inherit; font-weight: 600; padding: 11px 16px; border-radius: 8px; border: 1px solid transparent;
+  background: var(--accent); color: var(--accent-ink); cursor: pointer; white-space: nowrap;
+}
+.btn[disabled] { opacity: 0.6; cursor: progress; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.chip {
+  font: inherit; font-size: 0.9rem; padding: 6px 11px; border-radius: 999px; cursor: pointer;
+  background: var(--surface); color: var(--ink-2); border: 1px solid var(--line);
+}
+.chip:hover { color: var(--ink); border-color: var(--ink-3); }
+
+/* Answer */
+.answer { margin-top: 18px; display: none; }
+.answer.show { display: block; }
+.answer .status { color: var(--ink-3); font-size: 0.9rem; min-height: 1.4em; }
+.answer .error { color: var(--danger); }
+.answer .text { font-size: 1.05rem; white-space: pre-wrap; margin: 6px 0 14px; }
+.answer h3 { font-size: 1rem; margin: 18px 0 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.answer h3 .meta { color: var(--ink-3); font-weight: 500; font-size: 0.9rem; }
+.answer .meta code { background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
+
+.canvas { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.canvas svg { display: block; font-family: var(--font); }
+.canvas .node rect { stroke-width: 1.5px; }
+.canvas .node .name { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.canvas .node .kind { fill: var(--ink-2); font-size: 11px; }
+.canvas .edge path { fill: none; stroke: var(--ink-3); stroke-width: 1.5px; }
+.canvas .edge text { fill: var(--ink-2); font-size: 10.5px; font-family: var(--mono); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.canvas .edge.hot path { stroke: var(--accent); stroke-width: 2.5px; }
+.canvas .edge.hot text { fill: var(--ink); }
+.canvas .node.hot rect { stroke-width: 3px; }
+.canvas .arrow { fill: var(--ink-3); }
+.canvas .edge.hot .arrow { fill: var(--accent); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 12px 18px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 0.85rem; color: var(--ink-2); }
+.legend .sw { display: inline-block; width: 14px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; border: 1.5px solid var(--c); background: color-mix(in oklab, var(--c) 16%, var(--surface)); }
+
+.steps { margin: 8px 0 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 0.9rem; }
+.steps li { padding: 4px 8px; border-radius: 6px; cursor: default; }
+.steps li.hot { background: var(--surface-3); }
+.steps li::before { content: "• "; color: var(--ink-3); }
+.note { color: var(--ink-2); font-size: 0.95rem; margin: 10px 0 0; }
+.memories { margin: 6px 0 0; padding: 0 0 0 18px; }
+.memories li { margin: 4px 0; }
+.footer-line { color: var(--ink-3); font-size: 0.9rem; margin-top: 14px; font-style: italic; }
+
+/* Sections */
+section.block { padding: 34px 0 6px; }
+section.block h2 { font-size: 1.35rem; margin: 0 0 6px; }
+section.block p.sub { color: var(--ink-2); margin: 0 0 16px; max-width: 48em; }
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.how li { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; background: var(--surface-2); }
+.how b { display: block; margin-bottom: 4px; }
+.how p { margin: 0; color: var(--ink-2); font-size: 0.95rem; }
+
+table.tools { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+table.tools th, table.tools td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.tools th { color: var(--ink-2); font-weight: 600; font-size: 0.85rem; }
+table.tools td.name { white-space: nowrap; }
+
+.demo-steps { counter-reset: step; margin: 0; padding: 0; list-style: none; }
+.demo-steps li { position: relative; padding: 8px 0 8px 40px; border-bottom: 1px solid var(--line); }
+.demo-steps li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 9px; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-3); color: var(--ink-2); font-size: 0.85rem; display: grid; place-items: center; }
+.demo-steps code { background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
+.demo-steps .exp { display: block; color: var(--ink-2); font-size: 0.92rem; }
+
+footer { margin: 40px 0 30px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 0.9rem; }
+footer p { margin: 4px 0; }
+
+@media (max-width: 560px) {
+  .ask form { flex-direction: column; }
+  .top nav { display: none; }
+}
