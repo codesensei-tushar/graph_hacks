@@ -57,7 +57,7 @@ Without a model key, a keyword router picks the tool instead, and every path sti
 
 Most company-knowledge demos show a decision log. Few show what happens when a decision changes.
 
-In our graph a Decision has a date, points at the Service it is about, and cites the documents and tickets behind it. When a message in a channel changes the plan ("we're moving billing retries to the invoice worker, decided in today's sync"), the bot writes a new Decision that `SUPERSEDES` the old one, `DECIDED_IN` that channel, `BASED_ON` whatever it cites. Ask "why did we" and you get the current decision, the one it replaced, both dates, and the message it came from. Nothing is deleted. The history is a chain of edges. [[Verify after the decision PR merges; adjust edge names if they changed.]]
+In our graph a Decision has a date and a scope, points at the services it is about, and is `BASED_ON` the documents, tickets and pull requests behind it. When someone records a change of plan in a channel (`decision: billing retries move to the invoice worker`), the card names what the write will replace before anyone clicks Approve, and the new Decision then `SUPERSEDES` the old one and is `DECIDED_IN` that channel. Ask "why did we" and you get the decision that stands today, the one it replaced with both dates, and where it was decided. Ask about the old one and the first sentence is "*that* is no longer current". Nothing is deleted. The history is a chain of edges.
 
 [[Image 4: the same "why did we" question before and after the message.]]
 
