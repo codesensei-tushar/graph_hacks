@@ -48,6 +48,7 @@ class AskApiTest(unittest.TestCase):
     SPECS = (READ_SPEC, PAIR_SPEC, WRITE_SPEC)
 
     def setUp(self):
+        ask_api.ANSWERS.clear()
         for spec in self.SPECS:
             catalogue.register(spec)
 

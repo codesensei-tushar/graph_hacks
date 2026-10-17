@@ -31,6 +31,10 @@ class WebAskTest(unittest.TestCase):
         seed.reset_and_seed(quillfern)
         cls.http = TestClient(app)
 
+    def setUp(self):
+        ask_api.ANSWERS.clear()
+        ask_api.LIMITER.reset()
+
     @classmethod
     def tearDownClass(cls):
         try:
@@ -154,3 +158,28 @@ class WebAskTest(unittest.TestCase):
         missing = self.http.get("/no-such-page")
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(missing.json(), {"detail": "Not Found"})
+
+    def test_a_long_question_is_a_400_and_the_public_routes_are_rate_limited_per_address(self):
+        too_long = self.http.get("/api/ask", params={"q": "who owns billing " + "x" * ask_api.MAX_QUESTION_CHARS})
+        self.assertEqual(too_long.status_code, 400)
+        self.assertIn("limited to 300 characters", too_long.json()["error"])
+        with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=3, window=60)):
+            for path in ("/api/ask?q=who+owns+billing", "/api/ask/tools", "/api/ask/proof"):
+                self.assertEqual(self.http.get(path, headers={"X-Real-IP": "203.0.113.7"}).status_code, 200, path)
+            throttled = self.http.get("/api/ask?q=who+owns+billing", headers={"X-Real-IP": "203.0.113.7"})
+            self.assertEqual(throttled.status_code, 429)
+            self.assertTrue(1 <= int(throttled.headers["Retry-After"]) <= 60)
+            self.assertIn("too many questions", throttled.json()["error"])
+            self.assertEqual(self.http.get("/api/ask/proof", headers={"X-Real-IP": "203.0.113.7"}).status_code, 429)
+            # Another address has its own budget.
+            self.assertEqual(self.http.get("/api/ask?q=who+owns+billing", headers={"X-Real-IP": "198.51.100.9"}).status_code, 200)
+
+    def test_a_repeated_question_walks_the_graph_once(self):
+        with mock.patch.object(ask_api.agent, "run_choice", wraps=ask_api.agent.run_choice) as run:
+            first = self.ask("who owns billing")
+            second = self.ask("who owns billing")
+        self.assertEqual(first, second)
+        self.assertEqual(run.call_count, 1)
+        with mock.patch.object(ask_api, "run_proof", wraps=ask_api.run_proof) as proof:
+            self.assertEqual(self.http.get("/api/ask/proof").json(), self.http.get("/api/ask/proof").json())
+        self.assertEqual(proof.call_count, 1)

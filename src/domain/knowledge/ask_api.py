@@ -8,13 +8,25 @@ question is refused with ``ToolRefused`` and nothing is written.
 
 The result carries the same ``A -[REL]-> B`` steps the Slack reply cites, plus the nodes
 and edges of that path keyed by id, so the page can draw the traversal it is reading.
+
+The surface is public, so it is protected here rather than in the route: a question longer
+than ``MAX_QUESTION_CHARS`` is refused with ``QuestionTooLong``; keyword answers and the
+proof report are kept for ``CACHE_TTL_SECONDS`` per graph, so a chip clicked twice walks the
+graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``.
 """
 
+import math
+import threading
+import time
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from src.db import falkordb_client
 from src.db.falkordb_client import connect
 from src.domain.knowledge import agent, ask_service, catalogue
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
+from src.domain.knowledge.proof import ProofReport, run_proof
 
 DEFAULT_SCOPES = ("org_shared",)
 
@@ -70,6 +82,100 @@ _QUESTION_KEYS = ("name", "topic", "query", "source")
 
 class ToolRefused(ValueError):
     """The question named a tool this surface will not run: one that writes, or one that does not exist."""
+
+
+# Limits for the public surface. One uvicorn worker serves the app, so in-process state is
+# shared by every request.
+MAX_QUESTION_CHARS = 300
+CACHE_TTL_SECONDS = 60.0
+CACHE_MAX_ENTRIES = 256
+RATE_LIMIT = 30
+RATE_WINDOW_SECONDS = 60.0
+
+
+class QuestionTooLong(ValueError):
+    """The question is longer than this surface answers."""
+
+
+class TtlCache:
+    """Values kept for ``ttl`` seconds, at most ``max_entries`` of them, the oldest dropped first.
+
+    A failed computation is not cached. Cached values are shared, so callers treat them as read-only.
+    """
+
+    def __init__(self, ttl: float, max_entries: int, clock: Callable[[], float] = time.monotonic) -> None:
+        self.ttl = ttl
+        self.max_entries = max_entries
+        self.clock = clock
+        self._items: OrderedDict = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get_or_compute(self, key, compute: Callable[[], object]):
+        with self._lock:
+            hit = self._items.get(key)
+            if hit is not None and hit[0] > self.clock():
+                return hit[1]
+        value = compute()
+        with self._lock:
+            self._items[key] = (self.clock() + self.ttl, value)
+            self._items.move_to_end(key)
+            while len(self._items) > self.max_entries:
+                self._items.popitem(last=False)
+        return value
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items.clear()
+
+
+@dataclass(frozen=True)
+class RateDecision:
+    allowed: bool
+    # Whole seconds until the client's window resets; 0 when the call is allowed.
+    retry_after: int = 0
+
+
+class RateLimiter:
+    """At most ``limit`` calls per client in each fixed window of ``window`` seconds."""
+
+    def __init__(self, limit: int, window: float, clock: Callable[[], float] = time.monotonic, max_clients: int = 4096) -> None:
+        self.limit = limit
+        self.window = window
+        self.clock = clock
+        self.max_clients = max_clients
+        self._windows: dict[str, tuple[float, int]] = {}
+        self._lock = threading.Lock()
+
+    def check(self, client: str) -> RateDecision:
+        now = self.clock()
+        with self._lock:
+            start, count = self._windows.get(client, (now, 0))
+            if now - start >= self.window:
+                start, count = now, 0
+            if count >= self.limit:
+                return RateDecision(False, max(1, math.ceil(start + self.window - now)))
+            self._windows[client] = (start, count + 1)
+            if len(self._windows) > self.max_clients:
+                self._windows = {key: value for key, value in self._windows.items() if now - value[0] < self.window}
+            return RateDecision(True)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._windows.clear()
+
+
+ANSWERS = TtlCache(CACHE_TTL_SECONDS, CACHE_MAX_ENTRIES)
+LIMITER = RateLimiter(RATE_LIMIT, RATE_WINDOW_SECONDS)
+
+
+def admit(client: str | None) -> RateDecision:
+    """Whether this client may make another public call now. Clients without an address share one budget."""
+    return LIMITER.check(client or "unknown")
+
+
+def public_proof() -> ProofReport:
+    """The proof report for the graph in use, computed at most once per cache period."""
+    return ANSWERS.get_or_compute(("proof", falkordb_client.graph_name()), run_proof)
 
 
 @dataclass(frozen=True)
@@ -172,8 +278,18 @@ def answer_question(question: str, tool: str | None = None, use_model: bool = Fa
     """
     question = " ".join(question.split())
     read_scopes = list(scopes)
+    if len(question) > MAX_QUESTION_CHARS:
+        raise QuestionTooLong(f"questions are limited to {MAX_QUESTION_CHARS} characters; this one has {len(question)}")
     if not question:
         return AskAnswer(question, "none", "keywords", "Ask a question about the company graph.", found=False, scopes=read_scopes)
+    if use_model:
+        # Admin only, and a model's choice can differ between calls: never cached.
+        return _answer(question, tool, True, read_scopes)
+    key = (falkordb_client.graph_name(), question, tool, tuple(read_scopes))
+    return ANSWERS.get_or_compute(key, lambda: _answer(question, tool, False, read_scopes))
+
+
+def _answer(question: str, tool: str | None, use_model: bool, read_scopes: list[str]) -> AskAnswer:
     if tool is not None:
         spec = _read_spec(tool)
         choice = agent.ToolChoice(spec.name, _args_for(spec, question), "caller")
