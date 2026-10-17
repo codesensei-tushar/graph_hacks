@@ -11,6 +11,7 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from src.db import falkordb_client
 from src.domain.knowledge import catalogue, decisions
+from src.domain.memory import memory_service
 from src.domain.slack import compute
 from src.seed import quillfern, seed
 
@@ -134,6 +135,34 @@ class DecisionsTest(unittest.TestCase):
         self.assertTrue(result.answer.startswith("Not recorded:"), result.answer)
         _, graph = falkordb_client.connect()
         self.assertEqual(graph.query("MATCH (d:Decision) WHERE d.name STARTS WITH 'Move billing' RETURN count(d)").result_set[0][0], 0)
+
+    def test_a_decision_quotes_the_message_it_was_recorded_from(self):
+        said = "we're moving billing retries to the invoice worker, decided in today's sync"
+        memory_service.write(said, "org_shared", "UARJUN", "CENG", f"{WHEN / 1000 - 20:.6f}")
+        _, graph = falkordb_client.connect()
+        graph.query("MERGE (c:Channel {id: 'CENG'}) SET c.name = 'engineering'")
+        result = self._record()
+        self.assertIn(f"Decided in #engineering on 17 Oct 2026 by Arjun Mehta: “{said}”.", result.answer)
+        self.assertNotIn("Decided 17 Oct 2026.", result.answer, "the quote sentence carries the date")
+        steps = {(step.from_name, step.rel, step.to_name) for step in result.path}
+        self.assertIn((NEW, "RECORDED_FROM", f"“{said}”"), steps)
+        trace = decisions.decision_trace("why did we move billing retries to the invoice worker", ORG)
+        self.assertIn(f"Decided in #engineering on 17 Oct 2026 by Arjun Mehta: “{said}”.", trace.answer)
+        self.assertIn((NEW, "RECORDED_FROM", f"“{said}”"), {(s.from_name, s.rel, s.to_name) for s in trace.path})
+
+    def test_the_source_is_found_when_it_is_seconds_older_than_the_decision(self):
+        said = "moving billing retries to the invoice worker"
+        memory_service.write(said, "org_shared", "UARJUN", "CENG", f"{WHEN / 1000 - 0.03:.6f}")
+        result = self._record(decided_at=WHEN + 1)
+        self.assertIn("RECORDED_FROM", {step.rel for step in result.path}, result.answer)
+        self.assertIn(f"“{said}”", result.answer)
+
+    def test_an_old_or_someone_elses_message_is_not_the_source(self):
+        memory_service.write("billing alerts are noisy again", "org_shared", "UARJUN", "CENG", f"{WHEN / 1000 - 3600:.6f}")
+        memory_service.write("lunch is at one today", "org_shared", "ULENA", "CENG", f"{WHEN / 1000 - 5:.6f}")
+        result = self._record()
+        self.assertNotIn("RECORDED_FROM", {step.rel for step in result.path})
+        self.assertIn("Decided 17 Oct 2026. Proposed by Arjun Mehta.", result.answer)
 
     def test_a_decision_recorded_in_a_private_room_stays_there(self):
         self._record(scope=ROOM, channel_id="GPAYMENTS")

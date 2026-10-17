@@ -192,14 +192,15 @@ class DemoReplayTest(unittest.TestCase):
         self.assert_cites_path(reply)
         new, old = "Move billing retries to the invoice worker", "Retry renewal webhooks inside the billing service"
         self.assertTrue(reply.startswith(new), reply)
-        self.assertRegex(reply, r"Decided \d{1,2} \w{3} 20\d\d\.")
-        self.assertIn("Proposed by Arjun Mehta", reply)
+        said = "we're moving billing retries to the invoice worker, decided in today's sync"
+        self.assertRegex(reply, rf"Decided in #engineering on \d{{1,2}} \w{{3}} 20\d\d by Arjun Mehta: “{said}”\.")
         self.assertIn(f"This replaced *{old}* (decided 20 Sep 2026)", reply)
         for line in (
             edge("Arjun Mehta", "PROPOSED", new),
             edge(new, "ABOUT", "Billing Service"),
             edge(new, "SUPERSEDES", old),
             edge(new, "DECIDED_IN", "#engineering"),
+            edge(new, "RECORDED_FROM", f"“{said}”"),
             edge("Tomas Reyes", "APPROVED", old),
         ):
             self.assertIn(line, reply)

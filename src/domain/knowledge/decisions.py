@@ -17,6 +17,7 @@ Graph shape, also what ``src/seed/seed.py`` writes::
     (:Decision)-[:SUPERSEDES]->(:Decision)
     (:Decision)-[:DECIDED_IN]->(:Channel|:Document)
     (:Decision)-[:BASED_ON]->(:Document|:Ticket|:PullRequest)
+    (:Decision)-[:RECORDED_FROM]->(:Memory)   the Slack message it was recorded from, quoted in the trace
 
 ``decided_at`` is milliseconds since the epoch. Graphs seeded before this module carry
 ``CITES`` where ``BASED_ON`` now goes; the trace reads both.
@@ -165,6 +166,7 @@ def _describe(graph, decision: DecisionRow, scopes: list[str], result: ToolResul
         """,
         {"id": decision.id},
     ).result_set
+    came_from = _recorded_from(graph, decision.id)
 
     for person_id, person, rel in people:
         result.add(PathStep(person, rel, decision.name, from_id=person_id, to_id=decision.id, from_label="Person", to_label="Decision"))
@@ -176,21 +178,105 @@ def _describe(graph, decision: DecisionRow, scopes: list[str], result: ToolResul
     for place_id, place, label in where:
         shown = f"#{place}" if label == "Channel" and not place.startswith("#") else place
         result.add(PathStep(decision.name, "DECIDED_IN", shown, from_id=decision.id, to_id=place_id, from_label="Decision", to_label=label))
+    if came_from is not None:
+        result.add(PathStep(decision.name, "RECORDED_FROM", f"“{_clip(came_from.text)}”", from_id=decision.id, to_id=came_from.memory_id, from_label="Decision", to_label="Memory"))
 
     sentences = []
-    if decision.decided_at is not None:
-        sentences.append(f"Decided {format_date(decision.decided_at)}.")
     proposed = [person for _id, person, rel in people if rel == "PROPOSED"]
     approved = [person for _id, person, rel in people if rel == "APPROVED"]
-    if proposed:
-        sentences.append(f"Proposed by {', '.join(proposed)}.")
+    if came_from is not None:
+        # The reason, quoted from the message it was recorded from: where, when, who, and what was said.
+        who = came_from.author or ", ".join(proposed) or "someone"
+        sentences.append(f"Decided in #{came_from.channel} on {format_date(decision.decided_at)} by {who}: “{came_from.text}”.")
+        if proposed and came_from.author and came_from.author not in proposed:
+            sentences.append(f"Proposed by {', '.join(proposed)}.")
+    else:
+        if decision.decided_at is not None:
+            sentences.append(f"Decided {format_date(decision.decided_at)}.")
+        if proposed:
+            sentences.append(f"Proposed by {', '.join(proposed)}.")
     if approved:
         sentences.append(f"Approved by {', '.join(approved)}.")
     if sources_too and sources:
-        sentences.append(f"Based on: {', '.join(source for _id, source, _label, _rel in sources)}.")
-    for _id, place, label in where:
-        sentences.append(f"Decided in {'#' + place if label == 'Channel' else place}.")
+        sentences.append(f"Based on: {', '.join(source_name for _id, source_name, _label, _rel in sources)}.")
+    if came_from is None:
+        for _id, place, label in where:
+            sentences.append(f"Decided in {'#' + place if label == 'Channel' else place}.")
     return sentences
+
+
+@dataclass(frozen=True)
+class SourceMessage:
+    """The Slack message a decision was recorded from, as kept by the memory layer."""
+
+    memory_id: str
+    text: str
+    channel: str
+    ts: str | None
+    author: str | None
+
+
+def _clip(text: str, size: int = 140) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= size else text[: size - 1].rstrip() + "…"
+
+
+def _recorded_from(graph, decision_id: str) -> SourceMessage | None:
+    rows = graph.ro_query(
+        """
+        MATCH (:Decision {id: $id})-[:RECORDED_FROM]->(m:Memory)
+        OPTIONAL MATCH (u:SlackUser)-[:SAID]->(m)
+        OPTIONAL MATCH (u)-[:IS]->(p:Person)
+        OPTIONAL MATCH (c:Channel {id: m.channel_id})
+        RETURN m.id, coalesce(m.text, m.content, ''), coalesce(c.name, m.channel_id, ''), m.ts, coalesce(p.name, u.name, u.id)
+        LIMIT 1
+        """,
+        {"id": decision_id},
+    ).result_set
+    if not rows:
+        return None
+    memory_id, text, channel, ts, author = rows[0]
+    return SourceMessage(memory_id, text, channel, ts, author)
+
+
+def _slack_ts(seconds: float) -> str:
+    return f"{seconds:.6f}"
+
+
+# A decision recorded a little after the message that announced it still comes from that message.
+SOURCE_WINDOW_SECONDS = 15 * 60
+
+
+def source_message(graph, channel_id: str | None, slack_user_id: str | None, decided_at: int, source_ts: str | None = None) -> SourceMessage | None:
+    """The kept message this decision came from: the one at ``source_ts`` when the caller
+    names it, else the asker's latest message in the channel within the window before the
+    decision. Seeded decisions have none."""
+    if not channel_id:
+        return None
+    if source_ts:
+        rows = graph.ro_query(
+            "MATCH (m:Memory {channel_id: $channel, ts: $ts}) RETURN m.id, coalesce(m.text, m.content, ''), m.ts LIMIT 1",
+            {"channel": channel_id, "ts": str(source_ts)},
+        ).result_set
+    elif slack_user_id:
+        # Compare Slack ts as strings ("1792229885.974270", ten-digit seconds): FalkorDB's toFloat
+        # is single precision and rounds a timestamp this size to the nearest 128 seconds.
+        rows = graph.ro_query(
+            """
+            MATCH (:SlackUser {id: $user})-[:SAID]->(m:Memory {channel_id: $channel})
+            WHERE m.ts IS NOT NULL AND m.ts <= $upper AND m.ts >= $lower
+            RETURN m.id, coalesce(m.text, m.content, ''), m.ts
+            ORDER BY m.ts DESC
+            LIMIT 1
+            """,
+            {"user": slack_user_id, "channel": channel_id, "upper": _slack_ts(decided_at / 1000 + 1), "lower": _slack_ts(decided_at / 1000 - SOURCE_WINDOW_SECONDS)},
+        ).result_set
+    else:
+        return None
+    if not rows:
+        return None
+    memory_id, text, ts = rows[0]
+    return SourceMessage(memory_id, text, channel_id, ts, None)
 
 
 def _has_summary(decision: DecisionRow) -> bool:
@@ -484,6 +570,9 @@ def record_decision(args: dict, scopes: list[str]) -> ToolResult:
         )
     for source in sources:
         graph.query("MATCH (d:Decision {id: $d}), (s {id: $s}) MERGE (d)-[:BASED_ON]->(s)", {"d": decision_id, "s": source.id})
+    came_from = source_message(graph, channel_id, args.get("asker_slack_user_id"), decided_at, args.get("source_ts"))
+    if came_from is not None:
+        graph.query("MATCH (d:Decision {id: $d}), (m:Memory {id: $m}) MERGE (d)-[:RECORDED_FROM]->(m)", {"d": decision_id, "m": came_from.memory_id})
 
     recorded = _decision(graph, decision_id)
     result = ToolResult(tool="record_decision", answer="")
