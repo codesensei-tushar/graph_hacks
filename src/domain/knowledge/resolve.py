@@ -4,8 +4,11 @@ The agent never guesses. A name resolves only when the graph has a node whose na
 alias, or title appears in the text as a whole phrase. When the words name two
 different nodes side by side ("payments gateway" when the graph has a Billing Service
 known as "payments" and an API Gateway known as "gateway"), nothing resolves and both
-come back as candidates, so the reply can say what the graph does know. Ingestion
-code that only needs a best guess for classification uses ``best_match`` instead.
+come back as candidates, so the reply can say what the graph does know. Nor does a
+name resolve when it is only the end of what was named: in "if the claude api goes
+down", where the graph knows API Gateway as "api" and nothing as "claude", "api" is not
+the thing asked about, so it comes back as the nearest candidate. Ingestion code that only
+needs a best guess for classification uses ``best_match`` instead.
 """
 
 import re
@@ -36,8 +39,11 @@ STOPWORDS = frozenset(
         "over", "only", "one", "nobody", "bus", "factor",
         "i", "m", "im", "am", "joined", "join", "brief", "briefing", "onboard", "onboarding", "team", "teams", "get", "up", "speed",
         "connects", "bridges", "bridge", "links", "rest", "other", "others", "company", "everyone", "anyone",
+        "your", "their",
     }
 )
+# Words that open a noun phrase. The words between one and a match describe the thing named.
+DETERMINERS = frozenset({"the", "a", "an", "our", "my", "your", "their", "this"})
 
 FUZZY_FLOOR = 0.6
 MAX_CANDIDATES = 3
@@ -143,7 +149,20 @@ def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: li
     """The one node ``text`` names, within the asker's scopes, or the nearest candidates."""
     if graph is None:
         _, graph = connect()
-    return resolve_rows(text, load_rows(graph, labels, scopes or [ORG_SHARED]), labels)
+    scopes = scopes or [ORG_SHARED]
+    return resolve_rows(text, load_rows(graph, labels, scopes), labels, known=_graph_words(graph, scopes))
+
+
+def _graph_words(graph, scopes: list[str]):
+    """Whether a word is in any visible node's name, alias, or title. Loaded on first use only."""
+    words: set[str] = set()
+
+    def known(word: str) -> bool:
+        if not words:
+            words.update(token for row in load_rows(graph, DEFAULT_LABELS, scopes) for text in (row.name, row.aliases, row.title) for token in tokens(text))
+        return any(same_word(word, token) for token in words)
+
+    return known
 
 
 def resolve_all(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: list[str] | None = None, graph=None) -> list[Entity]:
@@ -207,7 +226,9 @@ def entities_in_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] =
     return list(dict.fromkeys(match.entity for match in _kept_matches(text, rows, labels)))
 
 
-def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEFAULT_LABELS) -> Resolution:
+def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEFAULT_LABELS, known=None) -> Resolution:
+    """``known(word)``, when given, says whether a word names anything in the graph; it lets a
+    match that is only the end of a noun phrase ("the claude api") be refused."""
     resolution = Resolution(query=text)
     kept = _kept_matches(text, rows, labels)
     if not kept:
@@ -216,21 +237,40 @@ def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEF
         return resolution
 
     entities = list(dict.fromkeys(match.entity for match in kept))
-    if len(entities) == 1:
-        resolution.entity = entities[0]
-        return resolution
-
-    # Two different nodes named side by side is one unknown thing, not two answers.
-    for previous, current in zip(kept, kept[1:]):
-        if previous.end == current.start and previous.entity != current.entity:
-            resolution.reason = "ambiguous"
-            resolution.candidates = _candidates_from(kept)[:MAX_CANDIDATES]
-            return resolution
+    if len(entities) > 1:
+        # Two different nodes named side by side is one unknown thing, not two answers.
+        for previous, current in zip(kept, kept[1:]):
+            if previous.end == current.start and previous.entity != current.entity:
+                resolution.reason = "ambiguous"
+                resolution.candidates = _candidates_from(kept)[:MAX_CANDIDATES]
+                return resolution
 
     best = min(kept, key=lambda match: (-(match.end - match.start), match.kind, match.start))
+    words = tokens(text)
+    modifiers = _modifiers(words, best)
+    if known is not None and modifiers and not any(known(word) for word in modifiers):
+        # "the claude api": the graph knows "api" and nothing called "claude". Name what was asked, offer the match.
+        resolution.query = " ".join(words[best.start - len(modifiers) : best.end])
+        resolution.reason = "partial"
+        resolution.candidates = [Candidate(best.entity, best.key, titled=best.kind == 3)]
+        return resolution
     resolution.entity = best.entity
     resolution.candidates = [candidate for candidate in _candidates_from(kept) if candidate.entity != best.entity][:MAX_CANDIDATES]
     return resolution
+
+
+def _modifiers(words: list[str], match: _Match) -> list[str]:
+    """The words between a determiner and the match ("claude" in "the claude api"), or none.
+
+    Only a determiner opens the phrase: in "who maintains billing" or "why did we cut vector
+    recall" the word before the match is a verb, not part of the name.
+    """
+    start = match.start
+    while start > 0 and words[start - 1] not in STOPWORDS:
+        start -= 1
+    if start == match.start or start == 0 or words[start - 1] not in DETERMINERS:
+        return []
+    return words[start : match.start]
 
 
 def _keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int]]:

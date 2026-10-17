@@ -58,6 +58,27 @@ class ResolveRowsTest(unittest.TestCase):
         self.assertFalse(same_word("auth", "authentication"))
         self.assertIsNone(_resolve("what did the author decide last week").entity)
 
+    def test_a_match_at_the_end_of_an_unknown_noun_phrase_is_a_candidate_not_an_answer(self):
+        nothing = lambda _word: False  # noqa: E731  the graph knows no other word
+        found = resolve_rows("what breaks if the claude api goes down, one hop", ROWS, SERVICES, known=nothing)
+        self.assertIsNone(found.entity)
+        self.assertEqual(found.reason, "partial")
+        self.assertEqual([(c.entity.name, c.via) for c in found.candidates], [("API Gateway", "api")])
+        self.assertEqual(describe_miss(found, "service"), "Nothing in the graph matches “claude api”. Nearest: API Gateway (known as “api”).")
+        # Two words before the match are both the name.
+        self.assertEqual(describe_miss(resolve_rows("who owns our old ledger billing", ROWS, SERVICES, known=nothing)), "Nothing in the graph matches “old ledger billing”. Nearest: Billing Service (known as “billing”).")
+
+    def test_a_verb_before_the_match_or_a_word_the_graph_knows_is_not_a_missing_name(self):
+        nothing = lambda _word: False  # noqa: E731
+        # Only a determiner opens a noun phrase: "maintains" and "cut" are verbs.
+        self.assertEqual(resolve_rows("who maintains billing", ROWS, SERVICES, known=nothing).entity.id, "billing-service")
+        self.assertEqual(resolve_rows("why did we cut the memory layer", ROWS, SERVICES, known=nothing).entity.id, "memory-layer")
+        self.assertEqual(resolve_rows("what breaks if the api goes down", ROWS, SERVICES, known=nothing).entity.id, "api-gateway")
+        # A modifier that names something in the graph keeps the match.
+        self.assertEqual(resolve_rows("what breaks if the public api goes down", ROWS, SERVICES, known=lambda word: word == "public").entity.id, "api-gateway")
+        # Without a vocabulary (classification by best_match), the match stands as before.
+        self.assertEqual(resolve_rows("what breaks if the claude api goes down", ROWS, SERVICES).entity.id, "api-gateway")
+
     def test_names_apart_in_the_sentence_pick_the_strongest_and_keep_the_rest(self):
         found = _resolve("the invoice worker and billing")
         self.assertEqual(found.entity.name, "Invoice Worker")
