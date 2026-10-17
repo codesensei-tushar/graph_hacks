@@ -288,6 +288,42 @@ MERIDIAN, re-checked: video still a placeholder, live console on Vercel, eight M
 - README: already states the refusal behaviour; add the proof sentence next to the curl.
 - Submission description: unchanged; the "how FalkorDB is central" paragraph already names the proof route.
 
+## Round 5: every team, not only engineering (17 Oct, afternoon)
+
+### Does it help or dilute?
+
+It helps, with one condition. The Track 03 brief says "connect people, teams, projects, documents, and decisions" and "how a company works"; an engineering-only graph answers half of that. Showing one non-engineering team with the same seven moves proves the graph model is the company's, not the codebase's. The condition: it is the same tools, the same path citations, the same refusal and the same approval card, on new nodes. A second product would dilute the demo; a second team strengthens it.
+
+What the design must not do, sent to the coders directly:
+
+- No new store, no new label family. `Service` gains `kind` (service, system, process, product, account, policy, playbook); every tool keeps working and the data model changes by one property.
+- Accounts are not dependencies. `account` nodes carry ownership and work edges only and are excluded from blast radius and load-bearing, or the bot will say "Acme stops working".
+- Wording follows `kind`: a service or system goes down, a process stalls, a product or account is affected, a policy or playbook no longer applies.
+- The importer and `onboard team:` are merge-only, parameter-only (labels, kinds and relationship types from an allowlist in code), behind the admin token or an Approve card that previews what will be created. The README's injection audit must stay true.
+- The seven engineering replies are pinned by the replay and production demo tests and by the recording script; the Sales seed is additive.
+
+### The Sales beat
+
+Added after step 4 in both scripts; the recording runs it on the synthetic company, since production holds this project's own graph. Expected replies are targets until coder B's tests pin them; the recording script follows the tests, not the other way round.
+
+| Step | Type | Tool | Read aloud |
+| --- | --- | --- | --- |
+| S1 | `who owns renewals, and who else has worked on it` | `who_knows` | The renewals process's owner first, then the people linked by work, and the "Ask first" sentence. "The same question, for Sales." |
+| S2 | `what breaks if hubspot goes down` | `blast_radius` | The renewals process and the pricing playbook grouped by hop, with "stalls" and "no longer applies" in the sentence. "A CRM outage, traced through the process it feeds." |
+| S3 | `why did we change pricing` | `decision_trace` | The current pricing decision with its date, then "This replaced *...* (decided ...)". "Decisions stay current for every team." |
+
+Storyboard: one 25-second beat between step 4 and step 5 ("Not only engineering. The same graph, Sales onboarded with one command."), showing `onboard team: sales` and its card, then S2. Trim step 2's hold to stay under three and a half minutes.
+
+### Copy for every team
+
+README, under the pitch table: "Any team can be added the same way: people, the processes and systems they run, their playbooks and decisions become nodes, and the same tools answer for them. `docs/ONBOARDING-TEAMS.md` shows Sales, onboarded with one command."
+
+Landing page, a section titled "For every team": "Engineering was first. Sales, support and operations fit the same graph: a renewals process depends on the CRM, a pricing decision supersedes the last one, and the bot answers who owns what and why, with the path, for them too."
+
+Blog, one paragraph in "What we built": "We started with engineering because the data was ours. The model is not about code: a `Service` node has a `kind`, so a renewals process, a CRM, a pricing playbook and an account sit in the same graph as the billing service. Onboarding Sales took one command and one Approve; the tools did not change."
+
+Submission description, one added sentence: "Any team onboards the same way; the demo adds Sales with one command."
+
 ## Specs for items 6 and 7
 
 Written for coder A to build straight after the D slice. Domain logic stays in `src/domain/`, routes stay thin, nothing here needs a model key.
