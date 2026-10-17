@@ -64,15 +64,24 @@ def reset_and_seed(company: ModuleType = company_brain) -> int:
         _link(graph, "Ticket", ticket["id"], "ABOUT", "Service", ticket["service"])
         _link(graph, "Person", ticket["owner"], "WORKED_ON", "Ticket", ticket["id"])
 
+    # Nodes first: a decision may supersede one listed after it.
     for decision in company.DECISIONS:
-        _merge_node(graph, "Decision", {key: decision[key] for key in ("id", "name", "summary", "aliases")})
+        _merge_node(graph, "Decision", {key: decision.get(key) for key in ("id", "name", "summary", "aliases", "decided_at")})
+    for decision in company.DECISIONS:
         _link(graph, "Person", decision["proposer"], "PROPOSED", "Decision", decision["id"])
         _link(graph, "Person", decision["approver"], "APPROVED", "Decision", decision["id"])
         _link(graph, "Decision", decision["id"], "ABOUT", "Service", decision["about"])
-        for cited in decision["cites"]:
+        for source in decision.get("based_on") or []:
             graph.query(
-                "MATCH (d:Decision {id: $d}), (source {id: $s}) MERGE (d)-[:CITES]->(source)",
-                {"d": decision["id"], "s": cited},
+                "MATCH (d:Decision {id: $d}), (source {id: $s}) MERGE (d)-[:BASED_ON]->(source)",
+                {"d": decision["id"], "s": source},
+            )
+        if decision.get("supersedes"):
+            _link(graph, "Decision", decision["id"], "SUPERSEDES", "Decision", decision["supersedes"])
+        if decision.get("decided_in"):
+            graph.query(
+                "MATCH (d:Decision {id: $d}), (place {id: $p}) MERGE (d)-[:DECIDED_IN]->(place)",
+                {"d": decision["id"], "p": decision["decided_in"]},
             )
 
     for chat in company.CHATS:

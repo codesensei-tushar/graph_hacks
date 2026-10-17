@@ -15,8 +15,9 @@ from dataclasses import dataclass
 TEAM_ID = "TQUILLFERN"
 TEAM_NAME = "Quillfern"
 BOT_USER_ID = "UBRAIN"
-# Only the fake Slack API accepts this token; it opens nothing real.
-BOT_TOKEN = "xoxb-quillfern-replay"
+# Only the fake Slack API accepts this token; it opens nothing real, and it does not look
+# like a Slack token on purpose, so secret scanners stay quiet.
+BOT_TOKEN = "replay-quillfern-bot-token"
 INSTALLATION_ID = 7001
 
 
@@ -132,6 +133,9 @@ DEMO_STEPS = (
         "A plan changes in the channel",
         (
             WorkspaceMessage(ENGINEERING, "UARJUN", "we're moving billing retries to the invoice worker, decided in today's sync"),
+            # Without a model the bot only remembers that; `decision:` records it, after approval.
+            WorkspaceMessage(ENGINEERING, "UARJUN", "decision: move billing retries to the invoice worker", "ask"),
+            WorkspaceMessage(ENGINEERING, "UARJUN", "", "approve"),
             WorkspaceMessage(ENGINEERING, "UTOMAS", "why did we move billing retries to the invoice worker", "ask"),
         ),
     ),

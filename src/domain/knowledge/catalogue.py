@@ -45,7 +45,8 @@ def _run_who_knows(args: dict, scopes: list[str]) -> ToolResult:
 
 
 def _run_decision_trace(args: dict, scopes: list[str]) -> ToolResult:
-    return ask_service.decision_trace(args["topic"], scopes)
+
+    return decisions.decision_trace(args["topic"], scopes)
 
 
 def _run_blast_radius(args: dict, scopes: list[str]) -> ToolResult:
@@ -221,3 +222,6 @@ register(
         preview=_preview_ingest_ticket,
     )
 )
+
+# Registers record_decision and owns decision_trace; imported last so the catalogue above exists.
+from src.domain.knowledge import decisions  # noqa: E402, F401
