@@ -85,7 +85,7 @@ class IfPersonLeavesTest(_Graph):
         self.assertTrue(result.found)
         self.assertEqual(
             result.answer,
-            "If Arjun Mehta leaves, 1 thing rests on them alone, ranked by how much depends on each. "
+            "If Arjun Mehta leaves, 1 thing rests on them alone. "
             "Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes; 2 others depend on it.",
         )
         self.assertEqual(
@@ -219,13 +219,13 @@ class IfPersonLeavesSalesTest(_Graph):
     def test_a_system_and_an_account_losing_their_only_owner(self):
         self.assertEqual(
             _leaves("what if noor leaves").answer,
-            "If Noor Haddad leaves, 1 thing rests on them alone, ranked by how much depends on each. "
+            "If Noor Haddad leaves, 1 thing rests on them alone. "
             "HubSpot system: Noor Haddad is its only owner and the only one who knows it; 2 others depend on it.",
         )
         dev = _leaves("what breaks if dev leaves")
         self.assertEqual(
             dev.answer,
-            "If Dev Patel leaves, 1 thing rests on them alone, ranked by how much depends on each. "
+            "If Dev Patel leaves, 1 thing rests on them alone. "
             "Enterprise accounts: Dev Patel is its only owner and the only one who knows it.",
         )
         self.assertEqual(_cites(dev), ["Dev Patel -[OWNS]-> Enterprise accounts"])
@@ -233,7 +233,7 @@ class IfPersonLeavesSalesTest(_Graph):
     def test_engineering_answers_are_unchanged_by_the_sales_team(self):
         self.assertEqual(
             _leaves("what breaks if Arjun leaves").answer,
-            "If Arjun Mehta leaves, 1 thing rests on them alone, ranked by how much depends on each. "
+            "If Arjun Mehta leaves, 1 thing rests on them alone. "
             "Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes; 2 others depend on it.",
         )
         self.assertTrue(_leaves("what if tomas quits").answer.startswith("If Tomas Reyes leaves, nothing rests on them alone"))

@@ -49,6 +49,22 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("what breaks if the claude api goes down, one hop")[0], "blast_radius")
         self.assertEqual(ask_service.route("what is left uncited after the billing retries decision")[0], "decision_pressure")
 
+    def test_joining_a_team_asks_for_its_brief(self):
+        for question in (
+            "I just joined Sales, what should I know",
+            "brief me on the payments team",
+            "I'm new to the data team",
+            "i am new on platform",
+            "onboard me to sales",
+            "get me up to speed on payments",
+            "what should I know about the payments team",
+            "what should a new hire know about the sales team",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("onboarding_brief", {"name": question}))
+        # Naming no team, it is still a who_knows question.
+        self.assertEqual(ask_service.route("what should I know about billing")[0], "who_knows")
+
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)
         self.assertEqual(algorithms.depth_in("and 3 hops out"), 3)

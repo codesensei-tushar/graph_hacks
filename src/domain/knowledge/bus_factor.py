@@ -76,8 +76,10 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
         result.extend(item.steps)
     for item in rest:
         result.add(item.steps[0])
-    count = len(items)
-    parts = [f"If {person.name} leaves, {count} {'thing rests' if count == 1 else 'things rest'} on them alone, ranked by how much depends on each."]
+    if len(items) == 1:
+        parts = [f"If {person.name} leaves, 1 thing rests on them alone."]
+    else:
+        parts = [f"If {person.name} leaves, {len(items)} things rest on them alone, ranked by how much depends on each."]
     parts.extend(item.sentence for item in listed)
     if rest:
         parts.append(f"And {len(rest)} more: {join_names([item.name for item in rest])}.")
@@ -119,19 +121,9 @@ def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple
             sentence += f"; next in line: {successors[0]}" + (f", then {join_names(successors[1:])}" if successors[1:] else "")
         dependents = _dependents(graph, service_id, params, reach)
         own = PathStep(person.name, min(mine, key=_HELD_BY.get), name, from_id=person.id, to_id=service_id, from_label="Person", to_label="Service")
-        steps = (own, *_successor_steps(known.path, successors))
+        steps = (own, *ask_service.edges_of(known.path, successors))
         items.append(AtRisk(kinds.listed(name, kind), sentence + _reach_clause(dependents, "it") + ".", dependents, 0, steps))
     return items, len(rows)
-
-
-def _successor_steps(path: list[PathStep], successors: list[str]) -> list[PathStep]:
-    """Each successor's edges from the who_knows path, each followed by the edge that ties it to the thing."""
-    steps: list[PathStep] = []
-    for step in path:
-        if step.from_name in successors:
-            steps.append(step)
-            steps.extend(bridge for bridge in path if bridge.from_name == step.to_name)
-    return steps
 
 
 def _decisions(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple[list[AtRisk], int]:
