@@ -144,7 +144,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a small schema: `tool`, an enum of the catalogue's names, and `args`, the chosen tool's arguments as JSON text (each tool's argument names, types and bounds are in the prompt, because the structured-output API rejects integer bounds and refuses the union of every tool's arguments as too complex). The choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
 
-**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event or a webhook travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (44 of them on 17 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH` and `MAX_PATH_LENGTH` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed and the container settings, labels, relationship types and property names that come from code. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (45 of them on 17 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH` and `MAX_PATH_LENGTH` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |
@@ -386,6 +386,30 @@ MATCH (u:GitHubUser {id: $user}), (r:Repo {id: $repo}) MERGE (u)-[c:CAN_READ]->(
 
 ```bash
 curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "https://brain.noobsurd.space/api/proof?format=text"
+```
+
+### Onboarding a team
+
+Any team joins the same graph from one TOML file: the team, its members, what it runs (each a `Service` with a `kind`), and its decisions. The [template](docs/templates/team.example.toml) is written for people who do not write code, and [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md) walks through it. `POST /ops/import` takes the file behind the admin token and returns what it created. The import is merge-only: importing the same file again creates nothing and deletes nothing.
+
+The file supplies values only. Each section maps to a label in code. Only the fields listed for that section are copied, and an unknown field is refused by name ("unknown field 'ownr' in [[runs]] 'Renewals'; did you mean 'owner'?"). `kind` must be one of the seven, and an account may not take `depends_on`. Every owner, dependency or source must name an entry in the file or a node already in the graph, looked up with:
+
+```cypher
+MATCH (n:Service)
+WHERE (n.id = $id OR toLower(n.name) = $name) AND coalesce(n.scope, 'org_shared') IN $scopes
+RETURN n.id, n.name, coalesce(n.kind, 'service')
+LIMIT 3
+```
+
+The rows are then written by the seed's merge, one node or edge at a time, with the label, relationship type and property names from code and only the fields a row has, for example:
+
+```cypher
+MERGE (n:Service {id: $id}) SET n.name = $name, n.kind = $kind, n.summary = $summary
+MATCH (a:Team {id: $a}), (b:Service {id: $b}) MERGE (a)-[:RUNS]->(b)
+```
+
+```bash
+curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" --data-binary @your-team.toml https://brain.noobsurd.space/ops/import
 ```
 
 ## The same tools over MCP
