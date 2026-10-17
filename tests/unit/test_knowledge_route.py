@@ -17,6 +17,7 @@ class RouteTest(unittest.TestCase):
             "how is maya connected to the invoice worker": ("path_between", {"source": "how is maya connected to the invoice worker", "target": ""}),
             "what have we said about billing": ("related_memories", {"name": "what have we said about billing"}),
             "who said the retries were flaky": ("recall", {"query": "who said the retries were flaky"}),
+            "why did we cut vector recall": ("decision_trace", {"topic": "why did we cut vector recall"}),
             "": ("none", {}),
         }
         for question, expected in cases.items():

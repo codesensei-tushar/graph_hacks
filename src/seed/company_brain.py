@@ -72,7 +72,7 @@ SERVICES = [
         "paths": ["src/domain/knowledge"],
         "name": "Knowledge tools",
         "team": "core",
-        "aliases": "who knows, who owns, decision trace, blast radius, cypher tools, ask service",
+        "aliases": "knowledge tools, tool catalogue, cypher tools, graph tools, ask service, resolver",
         "summary": "src/domain/knowledge: fixed Cypher tools that answer from the graph and return the path they walked.",
     },
     {
@@ -96,7 +96,7 @@ SERVICES = [
         "paths": ["src/api/v1/github.py", "src/domain/github", "src/integrations/github"],
         "name": "GitHub ingest",
         "team": "core",
-        "aliases": "github, github app, webhooks, pull requests, prs, issues, link github",
+        "aliases": "github, github app, github integration, webhooks, pull requests, prs, issues, link github",
         "summary": "Writes pull requests, reviews, and issues from the GitHub App into the graph, scoped per repo.",
     },
     {
@@ -262,6 +262,7 @@ TICKETS = [
         "id": "TKT-105",
         "name": "TKT-105",
         "title": "MCP and tool connectors",
+        "aliases": "tool integrations, linear connector, jira connector, mcp connectors",
         "service": "turn-engine",
         "owner": "tushar",
         "summary": "GitHub, Linear, and other connectors with personal and org-shared scopes. Not ported yet.",

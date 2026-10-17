@@ -52,12 +52,13 @@ def route(question: str) -> tuple[str, dict]:
         return "load_bearing", {"limit": algorithms.DEFAULT_LOAD_BEARING}
     if _PATH.search(text):
         return "path_between", {"source": text, "target": ""}
+    if _DECISION.search(text):
+        # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
+        return "decision_trace", {"topic": text}
     if _RELATED_MEMORIES.search(text):
         return "related_memories", {"name": text}
     if _RECALL.search(text):
         return "recall", {"query": text}
-    if _DECISION.search(text):
-        return "decision_trace", {"topic": text}
     if _BLAST.search(text):
         args = {"name": text}
         depth = algorithms.depth_in(text)
@@ -195,6 +196,7 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
     for who_id, who, who_label, rel, node in github_rows:
         result.add(PathStep(who, rel, node, from_id=who_id, to_id=target.id, from_label=who_label, to_label=target.label))
 
+    about: list[str] = []
     if target.label != "Service":
         links = graph.ro_query(
             """
@@ -204,6 +206,7 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
             {"id": target.id},
         ).result_set
         for source, rel, service_id, service in links:
+            about.append(service)
             result.add(PathStep(source, rel, service, from_id=target.id, to_id=service_id, from_label=target.label, to_label="Service"))
         via = graph.ro_query(
             """
@@ -264,7 +267,10 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
 
     owners = _unique(step.from_name for step in result.path if step.rel == "OWNS" and step.to_name == target.name)
     open_tickets = _unique(step.from_name for step in result.path if step.rel == "ABOUT" and step.to_name == target.name)
-    parts = [f"{target.name} is owned by {join_names(owners)}." if owners else f"{target.name} has no named owner."]
+    if target.label != "Service":
+        parts = [f"{target.name} is about {join_names(_unique(about))}." if about else f"{target.name} is in the graph."]
+    else:
+        parts = [f"{target.name} is owned by {join_names(owners)}." if owners else f"{target.name} has no named owner."]
     ranked = rank_people(result.path, target)
     if ranked:
         first, *rest = [f"{name} ({reasons})" for name, _score, reasons in ranked]
