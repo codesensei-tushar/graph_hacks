@@ -326,3 +326,6 @@ register(
 
 # Registers record_decision and owns decision_trace; imported last so the catalogue above exists.
 from src.domain.knowledge import decisions  # noqa: E402, F401
+
+# Registers onboard_team, the write behind `onboard team:` in Slack.
+from src.domain.onboarding import onboard_command  # noqa: E402, F401

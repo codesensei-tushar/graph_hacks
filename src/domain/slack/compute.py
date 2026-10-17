@@ -30,6 +30,8 @@ from src.domain.memory.writeback import (
     scope_label,
     slack_memory_container_tag,
 )
+from src.domain.onboarding import onboard_command
+from src.domain.onboarding.team_import import TeamFileError
 from src.domain.slack import channel_membership, format
 from src.integrations.slack.events import SlackEventInner, mentioned_user_ids
 
@@ -201,6 +203,9 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
             ),
         )
 
+    if onboard_command.COMMAND.match(text):
+        return _onboard(request, write_tag, names)
+
     if _PROMOTE.match(text):
         # Mentions are stripped from the question; read targets from the raw message.
         return TurnOutcome(reply=_change_role(asker, text, request.raw_text, request.workspace.bot_user_id))
@@ -247,6 +252,46 @@ def _split_ticket(text: str) -> tuple[str, str]:
     if separator and title.strip() and about.strip():
         return title.strip(), about.strip()
     return text, ""
+
+
+def _onboard(request: TurnRequest, write_tag: str | None, names: dict[str, str]) -> TurnOutcome:
+    """``onboard team:``: check the line against the graph, then wait for Approve on a card that lists it all."""
+    if request.is_dm:
+        return TurnOutcome(reply="Onboard a team from a channel, so the people in it can see it.")
+    # Members are mentions, which the question has lost; read the raw message without the bot's own.
+    bot = getattr(request.workspace, "bot_user_id", None) or ""
+    raw = re.sub(rf"<@{re.escape(bot)}(?:\|[^>]*)?>", "", request.raw_text or "").strip() if bot else (request.raw_text or "").strip()
+    match = onboard_command.COMMAND.match(raw)
+    container = write_tag or SHARED_TEAM_BRAIN_CONTAINER_TAG
+    try:
+        args = onboard_command.command_args(match.group(1) if match else "")
+        args["profiles"] = {user: name for user in onboard_command.unlinked_mentions(args, request.read_tags) if (name := _profile_name(request.workspace, user))}
+        args["asker_slack_user_id"] = request.asker_slack_user_id
+        args["channel_id"] = request.channel
+        if decided_at := _epoch_millis(request.event.ts):
+            args["decided_at"] = decided_at
+        team = onboard_command.check(args, container, request.read_tags)
+    except TeamFileError as error:
+        return TurnOutcome(reply=f"I can't onboard that yet: {onboard_command.for_slack(error.problems)}.")
+    return TurnOutcome(
+        status="suspended",
+        approval=TurnApproval(
+            tool_name=onboard_command.TOOL_NAME,
+            tool_input=args,
+            summary=f"{onboard_command.card(team)}. Visible to {scope_label(container, names)}.",
+            container_tag=container,
+        ),
+    )
+
+
+def _profile_name(workspace, slack_user_id: str) -> str | None:
+    """The name Slack shows for a full member; None for a bot, a guest, or a failed lookup."""
+    from src.domain.slack.workspace import is_workspace_member
+
+    info = workspace.client.user_info(slack_user_id)
+    if info is None or not is_workspace_member(info):
+        return None
+    return info.real_name or info.display_name or info.name or None
 
 
 def _change_role(asker: str, text: str, raw_text: str, bot_user_id: str | None) -> str:

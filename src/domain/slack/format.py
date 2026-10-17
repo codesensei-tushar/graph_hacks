@@ -12,6 +12,7 @@ HELP_TEXT = "\n".join(
         "• `remember: <note>` saves a note to this conversation's memory",
         "• `ticket: <title>` files a ticket in the company graph after you approve it",
         "• `decision: <what was decided>` records a decision, and what it replaces, after you approve it",
+        "• `onboard team: <name> | members: @a @b | owns: Renewals (process)` adds a team, its people and what it runs, after you approve it",
         "• `what can you see` lists the memory I can read from here",
         "• `link github` (in a DM) connects your GitHub account so I can use private repos you work on",
         "• Admins: `promote @user`, `demote @user`, `forget this channel`, `backfill public channels`",

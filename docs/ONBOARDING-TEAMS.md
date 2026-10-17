@@ -5,10 +5,42 @@ can write down who is on it, what it runs and what it decided, and the same tool
 for it: who owns the renewals process, what breaks if the CRM goes down, why pricing
 changed. Every answer cites the path it walked.
 
-A team writes itself down as one TOML file. Start from the blank template,
+A small team can onboard from Slack with one line. A larger one writes itself down as one
+TOML file: start from the blank template,
 [`docs/templates/team.example.toml`](templates/team.example.toml); the worked example,
 [`examples/teams/quillfern-sales.toml`](../examples/teams/quillfern-sales.toml), is the
-Sales team of the made-up demo company.
+Sales team of the made-up demo company. Both go through the same importer and write the
+same nodes and edges.
+
+## From Slack
+
+Mention the bot in a channel:
+
+```
+onboard team: Sales | members: @priya @dev | owns: Renewals (process), HubSpot (system, @dev), Pricing playbook (playbook) | decision: annual plans only, decided 2026-09-01
+```
+
+- After the team's name, each part is `members:`, `owns:` (or `runs:`), `decision:` (one
+  per decision) or `summary:`, separated by `|`.
+- Members are @mentions, so Slack says exactly who they are.
+- Each thing is `Name (kind)`. Add `@someone` inside the brackets to name its owner;
+  otherwise the first member owns it. Someone named as an owner joins the team.
+- A decision is about everything the line lists. `decided YYYY-MM-DD` dates it; without
+  that, it is dated the day of the message, and whoever sent the line proposed it.
+
+Nothing is written yet. The bot answers with an Approve card that lists everything it will
+create:
+
+> Onboard *Sales*: 2 people (Priya Shah and Dev Patel), 1 system (HubSpot), 1 process
+> (Renewals), 1 playbook (Pricing playbook), the decision *Annual plans only*, 1 Sep 2026.
+> Owners: Priya Shah (Renewals and Pricing playbook); Dev Patel (HubSpot). Visible to
+> public channels.
+
+After Approve, the reply counts what was written and cites every edge. In a public channel
+the team is visible to everyone; in a private channel the team, what it runs and its
+decisions stay in that channel (people are never scoped: they belong to the whole company).
+A line that cannot be onboarded is answered with what to fix, and nothing is written. The
+command does not work in a DM.
 
 ## Import a file
 
@@ -58,7 +90,7 @@ typo is an error you see, not a field that quietly disappears.
 | `name` | required | |
 | `role` | | |
 | `email` | | Give it. Once the bot is installed, everyone in the Slack workspace is already in Company Brain, and a member whose email is already there *is* that person: the import fills them in (name, role) instead of adding a second one. |
-| `slack_id` | | Lets the bot know who is asking. In Slack: the person's profile, ⋮, *Copy member ID*. |
+| `slack_id` | | Lets the bot know who is asking. In Slack: the person's profile, ⋮, *Copy member ID*. Only for someone new to Company Brain, or the Slack account already linked to them (see below). |
 | `id` | | Made from the name if left out. To add someone already in Company Brain without an email, use their id; their name and role are updated to what the file says. |
 
 ### `[[runs]]`, everything the team runs
@@ -125,9 +157,18 @@ written and the answer lists every problem, one per line:
 ```
 
 It also refuses a `[[runs]]` entry whose id is already run by another team (point at it
-with `depends_on` instead, or give the entry its own id), two entries with the same id, a
-`slack_id` already linked to a different person than the member's email, an email two
-people share, and a file over 256 KB.
+with `depends_on` instead, or give the entry its own id), two entries with the same id, an
+email two people share, anything already in Company Brain for other readers (a team
+onboarded in a private channel cannot be re-onboarded from a public one), and a file over
+256 KB.
+
+An import links a Slack account only to a person it creates. A DM reads the private repos
+of the person its Slack user is linked to, so a file or a command that paired a Slack
+account with someone already here would hand that account their access. For someone
+already in Company Brain, `slack_id` must be the Slack account already linked to them, or
+left out (they link their own with `link account` in a DM to the bot). In the Slack
+command, each @mention resolves through the person its Slack account is linked to, and a
+mention with no person yet becomes a new one; a name is never matched to someone here.
 
 ## What it writes
 
