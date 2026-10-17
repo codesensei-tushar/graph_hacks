@@ -101,7 +101,8 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         _merge_node(graph, "Person", person)
 
     for team in company.TEAMS:
-        _merge_node(graph, "Team", {"id": team["id"], "name": team["name"], "summary": team.get("summary")})
+        # ``scope`` is set only by a team onboarded from a private room; seeds leave it out.
+        _merge_node(graph, "Team", {"id": team["id"], "name": team["name"], "summary": team.get("summary"), "scope": team.get("scope")})
         _link(graph, "Team", team["id"], "PART_OF", "Company", company.COMPANY["id"])
         for member in team["members"]:
             _link(graph, "Person", member, "MEMBER_OF", "Team", team["id"])
@@ -154,7 +155,7 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
 
     # Nodes first: a decision may supersede one listed after it.
     for decision in company.DECISIONS:
-        _merge_node(graph, "Decision", {key: decision.get(key) for key in ("id", "name", "summary", "aliases", "decided_at")})
+        _merge_node(graph, "Decision", {key: decision.get(key) for key in ("id", "name", "summary", "aliases", "decided_at", "scope")})
     for decision in company.DECISIONS:
         if decision.get("proposer"):
             _link(graph, "Person", decision["proposer"], "PROPOSED", "Decision", decision["id"])

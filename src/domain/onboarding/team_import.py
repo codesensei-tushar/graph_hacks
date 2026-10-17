@@ -26,10 +26,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from src.db.falkordb_client import connect
+from src.domain.knowledge.dto import PathStep
 from src.domain.knowledge.kinds import KIND_OF, NOT_DEPENDABLE, SERVICE_KINDS, normalize_kind
 from src.seed.seed import SeedReport, seed_company
 
 MAX_FILE_BYTES = 256 * 1024
+ORG_SHARED = "org_shared"
 _MAX_TEXT = 200
 _MAX_SUMMARY = 1000
 
@@ -103,7 +105,25 @@ class GraphLookup:
 
     def slack_person(self, slack_user: str) -> str | None:
         """The person a Slack user is already linked to, if any."""
-        rows = self.graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.id LIMIT 1", {"id": slack_user}).result_set
+        linked = self.linked_person(slack_user)
+        return linked[0] if linked else None
+
+    def linked_person(self, slack_user: str) -> tuple[str, str] | None:
+        """(id, name) of the person a Slack user is already linked to, if any."""
+        rows = self.graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.id, p.name LIMIT 1", {"id": slack_user}).result_set
+        return (rows[0][0], rows[0][1] or rows[0][0]) if rows else None
+
+    def person_exists(self, person_id: str) -> bool:
+        return bool(self.graph.ro_query("MATCH (p:Person {id: $id}) RETURN count(p)", {"id": person_id}).result_set[0][0])
+
+    def slack_users_of(self, person_id: str) -> list[str]:
+        """The Slack users already linked to a person."""
+        rows = self.graph.ro_query("MATCH (u:SlackUser)-[:IS]->(:Person {id: $id}) RETURN u.id", {"id": person_id}).result_set
+        return [ident for (ident,) in rows]
+
+    def scope_of(self, label: str, ident: str) -> str | None:
+        """Who can read a node that is already here (``org_shared`` when it has no scope), or None if it is not."""
+        rows = self.graph.ro_query(f"MATCH (n:{label} {{id: $id}}) RETURN coalesce(n.scope, 'org_shared') LIMIT 1", {"id": ident}).result_set
         return rows[0][0] if rows else None
 
     def has_company(self, company_id: str) -> bool:
@@ -134,11 +154,30 @@ def parse_team(text: str | bytes, company_id: str, lookup: GraphLookup | None = 
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         raise TeamFileError([f"this is not valid TOML: {error}"]) from None
-    return _Reader(data, company_id, lookup).read()
+    return parse_team_data(data, company_id, lookup)
 
 
 def parse_team_file(path: str | Path, company_id: str, lookup: GraphLookup | None = None) -> SimpleNamespace:
     return parse_team(Path(path).read_bytes(), company_id, lookup)
+
+
+def parse_team_data(data: dict, company_id: str, lookup: GraphLookup | None = None, scope: str = ORG_SHARED) -> SimpleNamespace:
+    """``parse_team`` for data already read, as the ``onboard team:`` command builds it.
+
+    ``scope`` is who may read what the import writes: the team, what it runs and its
+    decisions carry it unless it is ``org_shared``. People never do; they belong to the
+    whole company. Anything already in the graph under another scope is refused, so an
+    import never changes who can see something.
+    """
+    return _Reader(data, company_id, lookup, scope).read()
+
+
+def default_company_id() -> str:
+    """The id of the company this instance runs (``SEED_COMPANY``), which a new team joins."""
+    from src.core.config import settings
+    from src.seed.seed import company_module
+
+    return company_module(settings.seed_company).COMPANY["id"]
 
 
 @dataclass
@@ -163,6 +202,17 @@ def import_team(text: str | bytes, company_id: str) -> ImportResult:
     return ImportResult(team, seed_company(team))
 
 
+def check_team_data(data: dict, company_id: str, scope: str = ORG_SHARED, scopes: list[str] | None = None) -> SimpleNamespace:
+    """``check_team`` for data already read. References resolve in ``scopes``, what the asker can read."""
+    _, graph = connect()
+    return parse_team_data(data, company_id, GraphLookup(graph, scopes or [ORG_SHARED]), scope)
+
+
+def import_team_data(data: dict, company_id: str, scope: str = ORG_SHARED, scopes: list[str] | None = None) -> ImportResult:
+    team = check_team_data(data, company_id, scope, scopes)
+    return ImportResult(team, seed_company(team))
+
+
 def contents(team: SimpleNamespace) -> dict:
     """What a parsed file will create, counted: people, things by kind, decisions."""
     return {
@@ -175,14 +225,39 @@ def contents(team: SimpleNamespace) -> dict:
 def describe(team: SimpleNamespace) -> str:
     """One line, kinds in ``SERVICE_KINDS`` order: "Sales: 3 people, 1 system, 1 process, 1 account, 1 playbook, 2 decisions"."""
     counts = contents(team)
-    parts = [_count(counts["people"], "person")]
-    parts += [_count(counts["runs"][kind], kind) for kind in SERVICE_KINDS if kind in counts["runs"]]
-    parts.append(_count(counts["decisions"], "decision"))
+    parts = [counted(counts["people"], "person")]
+    parts += [counted(counts["runs"][kind], kind) for kind in SERVICE_KINDS if kind in counts["runs"]]
+    if counts["decisions"]:
+        parts.append(counted(counts["decisions"], "decision"))
     return f"{team.TEAMS[0]['name']}: {', '.join(parts)}"
 
 
-def _count(number: int, noun: str) -> str:
+def counted(number: int, noun: str) -> str:
     return f"{number} {noun if number == 1 else _PLURAL.get(noun, noun + 's')}"
+
+
+def edges(team: SimpleNamespace) -> list[PathStep]:
+    """The edges a parsed team merges, named for a reply that cites what was written."""
+    row = team.TEAMS[0]
+    names = {("Person", p["id"]): p["name"] for p in team.PEOPLE}
+    names |= {("Service", s["id"]): s["name"] for s in team.SERVICES} | {("Decision", d["id"]): d["name"] for d in team.DECISIONS}
+
+    def step(from_label, from_id, rel, to_label, to_id):
+        return PathStep(
+            names.get((from_label, from_id), from_id), rel, names.get((to_label, to_id), to_id),
+            from_id=from_id, to_id=to_id, from_label=from_label, to_label=to_label,
+        )
+
+    steps = [PathStep(names[("Person", p)], "MEMBER_OF", row["name"], from_id=p, to_id=row["id"], from_label="Person", to_label="Team") for p in row["members"]]
+    steps += [PathStep(row["name"], "RUNS", s["name"], from_id=row["id"], to_id=s["id"], from_label="Team", to_label="Service") for s in team.SERVICES]
+    steps += [step("Person", person, rel, "Service", thing) for person, rel, thing in team.WORK]
+    steps += [step("Service", child, "DEPENDS_ON", "Service", parent) for child, parent in team.DEPENDS_ON]
+    for decision in team.DECISIONS:
+        steps += [step("Decision", decision["id"], "ABOUT", "Service", about) for about in decision["about"]]
+        steps += [step("Person", decision[role], rel, "Decision", decision["id"]) for role, rel in (("proposer", "PROPOSED"), ("approver", "APPROVED")) if decision.get(role)]
+        if decision.get("supersedes"):
+            steps.append(step("Decision", decision["id"], "SUPERSEDES", "Decision", decision["supersedes"]))
+    return steps
 
 
 def _millis(value) -> int:
@@ -199,10 +274,11 @@ def _millis(value) -> int:
 class _Reader:
     """One pass over a parsed file. Collects every problem instead of stopping at the first."""
 
-    def __init__(self, data: dict, company_id: str, lookup: GraphLookup | None):
+    def __init__(self, data: dict, company_id: str, lookup: GraphLookup | None, scope: str = ORG_SHARED):
         self.data = data
         self.company_id = company_id
         self.lookup = lookup
+        self.scope = scope or ORG_SHARED
         self.problems: list[str] = []
         # Reference keys (the slug of an id or a name) to ids, per section.
         self.people: dict[str, str] = {}
@@ -284,13 +360,15 @@ class _Reader:
                     self.problems.append(f"decided_on in {where} should be a date like \"2026-09-01\"")
             rows.append({key: value for key, value in decision.items() if value not in (None, [])} | {"about": about})
 
+        teams = [{**team, "members": [person["id"] for person, _ in people if person]}]
+        self._keep_who_can_read([("Team", teams), ("Service", services), ("Decision", rows)])
         if self.problems:
             raise TeamFileError(self.problems)
         return SimpleNamespace(
             TEAM_ID=team["id"],
             COMPANY={"id": self.company_id},
             PEOPLE=[person for person, _ in people if person],
-            TEAMS=[{**team, "members": [person["id"] for person, _ in people if person]}],
+            TEAMS=teams,
             SERVICES=services,
             DEPENDS_ON=list(dict.fromkeys(depends_on)),
             WORK=list(dict.fromkeys(work)),
@@ -382,7 +460,12 @@ class _Reader:
         return {"id": ident, "name": name, "summary": self._text(row, "summary", where, limit=_MAX_SUMMARY), "aliases": self._aliases(row, where)}
 
     def _slack_users_once(self, people: list, members: list) -> None:
-        """One Slack user is one person: not two members here, and not someone else already."""
+        """One Slack user is one person, and an import links a Slack user only to a person it creates.
+
+        Permissions hang on that link: a DM reads the private repos of the person its Slack
+        user IS. So a file may name a Slack user for someone already here only if it is the
+        one already linked to them; anything else would hand that Slack user their access.
+        """
         seen: dict[str, str] = {}
         for (person, slack_user), (_, where) in zip(people, members):
             if not (person and slack_user):
@@ -390,12 +473,34 @@ class _Reader:
             if slack_user in seen:
                 self.problems.append(f"{where} has the same slack_id as '{seen[slack_user]}'")
             seen[slack_user] = person["id"]
-            linked = self.lookup.slack_person(slack_user) if self.lookup is not None else None
-            if linked and linked != person["id"]:
+            if self.lookup is None:
+                continue
+            if self.lookup.person_exists(person["id"]):
+                linked = self.lookup.slack_users_of(person["id"])
+                if slack_user in linked:
+                    continue
+                if linked:
+                    self.problems.append(f"slack_id for {person['name']} does not match the Slack account already linked to them")
+                else:
+                    self.problems.append(
+                        f"slack_id for {person['name']}: they are already in Company Brain with no Slack account linked, and an "
+                        "import cannot link one; leave slack_id out, and they can send `link account` to the bot"
+                    )
+            elif linked := self.lookup.slack_person(slack_user):
                 self.problems.append(
                     f"slack_id in {where} already belongs to '{linked}' in Company Brain; if that is this member, "
                     f'add their email or set id = "{linked}"'
                 )
+
+    def _keep_who_can_read(self, sections: list[tuple[str, list[dict]]]) -> None:
+        """Write ``self.scope`` onto the rows, and refuse a row already here under another scope."""
+        for label, rows in sections:
+            for row in rows:
+                if self.lookup is not None and (current := self.lookup.scope_of(label, row["id"])) not in (None, self.scope):
+                    readers = "public channels" if current == ORG_SHARED else "another channel"
+                    self.problems.append(f"'{row['name']}' is already in Company Brain for {readers}; onboard it from there")
+                if self.scope != ORG_SHARED:
+                    row["scope"] = self.scope
 
     def _not_run_by_another_team(self, thing: dict, team: dict, where: str) -> None:
         others = [name for ident, name in self.lookup.run_by(thing["id"]) if ident != team["id"]]

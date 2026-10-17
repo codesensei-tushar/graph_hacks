@@ -1,5 +1,6 @@
 """A team file reads into the seed's company shape, or is refused whole with one message per problem."""
 
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from src.domain.onboarding.team_import import (  # noqa: E402
     TeamFileError,
     describe,
     parse_team,
+    parse_team_data,
     parse_team_file,
     slug,
 )
@@ -36,12 +38,16 @@ owner = "Priya Shah"
 class FakeLookup:
     """Stands in for the graph: what a reference outside the file finds there."""
 
-    def __init__(self, things=(), run_by=None, slack=None, companies=("quillfern",), emails=None):
+    def __init__(self, things=(), run_by=None, slack=None, companies=("quillfern",), emails=None, people=(), scopes=None):
         self.things = list(things)
         self.runs = run_by or {}
         self.slack = slack or {}
         self.companies = companies
         self.emails = emails or {}
+        self.scopes = scopes or {}
+        # Everyone already here: named outright, by an email, by a Slack link, or found by name.
+        self.people = {*people, *self.slack.values(), *(p for ids in self.emails.values() for p in ids)}
+        self.people |= {item.id for item in self.things if item.label == "Person"}
 
     def has_company(self, company_id):
         return company_id in self.companies
@@ -58,9 +64,25 @@ class FakeLookup:
     def slack_person(self, slack_user):
         return self.slack.get(slack_user)
 
+    def linked_person(self, slack_user):
+        return (self.slack[slack_user], self.slack[slack_user]) if slack_user in self.slack else None
+
+    def person_exists(self, person_id):
+        return person_id in self.people
+
+    def slack_users_of(self, person_id):
+        return [user for user, person in self.slack.items() if person == person_id]
+
+    def scope_of(self, label, ident):
+        return self.scopes.get((label, ident))
+
 
 # What the Sales file names outside itself: Tomas, Quillfern's engineering manager.
 QUILLFERN = FakeLookup([Found("Person", "tomas", "Tomas Reyes")])
+
+
+def parse_team_data_in_room(text: str, lookup, scope: str):
+    return parse_team_data(tomllib.loads(text), "quillfern", lookup, scope)
 
 
 def problems(text: str | bytes, lookup=None) -> list[str]:
@@ -218,10 +240,34 @@ class GraphReferenceTest(unittest.TestCase):
         self.assertEqual(team.WORK, [("person-5238dd", "OWNS", "renewals")])
         self.assertEqual(team.SLACK_USERS, [("UPRIYA", "person-5238dd")])
 
-    def test_an_email_and_a_slack_id_that_disagree_or_an_email_two_people_share_are_refused(self):
+    def test_an_import_links_a_slack_user_only_to_a_person_it_creates(self):
+        # A DM reads the private repos of the person its Slack user IS, so pairing a Slack user
+        # with someone already here would hand over their access.
         text = MINIMAL.replace('name = "Priya Shah"', 'name = "Priya Shah"\nemail = "priya@example.com"\nslack_id = "UPRIYA"')
         found = problems(text, FakeLookup(emails={"priya@example.com": ["priya"]}, slack={"UPRIYA": "maya"}))
-        self.assertTrue(any(p.startswith("slack_id in [[members]] 'Priya Shah' already belongs to 'maya'") for p in found), found)
+        self.assertIn(
+            "slack_id for Priya Shah: they are already in Company Brain with no Slack account linked, and an import cannot link one; "
+            "leave slack_id out, and they can send `link account` to the bot",
+            found,
+        )
+        tomas = '[team]\nname = "Ops"\n[[members]]\nid = "tomas"\nname = "Tomas Reyes"\nslack_id = "UNOTTOMAS"\n'
+        found = problems(tomas, FakeLookup(people=["tomas"], slack={"UTOMAS": "tomas"}))
+        self.assertEqual(found, ["slack_id for Tomas Reyes does not match the Slack account already linked to them"])
+        self.assertEqual(parse_team(tomas.replace("UNOTTOMAS", "UTOMAS"), "quillfern", FakeLookup(slack={"UTOMAS": "tomas"})).SLACK_USERS, [("UTOMAS", "tomas")])
+        self.assertEqual(parse_team(tomas.replace('id = "tomas"\n', ""), "quillfern", FakeLookup(people=["tomas"])).SLACK_USERS, [("UNOTTOMAS", "tomas-reyes")])
+
+    def test_rows_carry_a_private_scope_and_nothing_changes_who_can_see_it(self):
+        team = parse_team_data_in_room(MINIMAL, FakeLookup(), "slack_channel_CPRIVATE")
+        self.assertEqual((team.TEAMS[0]["scope"], team.SERVICES[0]["scope"]), ("slack_channel_CPRIVATE", "slack_channel_CPRIVATE"))
+        self.assertNotIn("scope", team.PEOPLE[0])
+        self.assertNotIn("scope", parse_team(MINIMAL, "quillfern", FakeLookup()).TEAMS[0])
+        public = FakeLookup(scopes={("Team", "sales"): "org_shared"})
+        with self.assertRaises(TeamFileError) as caught:
+            parse_team_data_in_room(MINIMAL, public, "slack_channel_CPRIVATE")
+        self.assertEqual(caught.exception.problems, ["'Sales' is already in Company Brain for public channels; onboard it from there"])
+
+    def test_an_email_two_people_share_is_refused_unless_the_id_names_one(self):
+        text = MINIMAL.replace('name = "Priya Shah"', 'name = "Priya Shah"\nemail = "priya@example.com"\nslack_id = "UPRIYA"')
         shared = FakeLookup(emails={"priya@example.com": ["priya-a", "priya-b"]})
         found = problems(text.replace('slack_id = "UPRIYA"\n', ""), shared)
         self.assertEqual(found, ["email in [[members]] 'Priya Shah' belongs to more than one person in Company Brain (priya-a, priya-b); set id to the right one"])
