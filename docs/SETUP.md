@@ -87,7 +87,7 @@ Locally, with nothing but FalkorDB running:
 python scripts/replay_workspace.py --graph company_demo
 ```
 
-That starts a fake Slack Web API (`scripts/replay/slack_api.py`), points the app at it through `SLACK_API_BASE_URL`, seeds Quillfern, loads the repos, plays the chat history and the seven demo steps from [STRATEGY.md](STRATEGY.md), and prints every reply. Nothing reaches Slack, and nothing calls the model unless you pass `--with-model`: without one, channel messages are kept as raw memories. `tests/integration/test_demo_replay.py` runs the same script and asserts the answers.
+That starts a fake Slack Web API (`scripts/replay/slack_api.py`), points the app at it through `SLACK_API_BASE_URL`, seeds Quillfern and imports its Sales team from [`examples/teams/quillfern-sales.toml`](../examples/teams/quillfern-sales.toml), loads the repos, plays the chat history, the seven demo steps from [STRATEGY.md](STRATEGY.md) and the three Sales steps, and prints every reply. `--no-sales` leaves Sales out, to onboard it live ([ONBOARDING-TEAMS.md](ONBOARDING-TEAMS.md)). Nothing reaches Slack, and nothing calls the model unless you pass `--with-model`: without one, channel messages are kept as raw memories. `tests/integration/test_demo_replay.py` runs the same script and asserts the answers.
 
 To load a real dev workspace before a live demo, run the app with `SEED_ON_STARTUP` off, seed Quillfern with `python scripts/seed_graph.py --company quillfern`, then post the history to the running instance, mapping the scripted ids to the real ones:
 

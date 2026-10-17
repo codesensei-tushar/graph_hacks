@@ -3,9 +3,10 @@
 Two ways to run it.
 
 In-process (default): starts the fake Slack Web API, points the app at it, seeds
-Quillfern into the graph, loads the scripted repos, plays the chat history and the
-seven demo steps through the real routes, and prints every reply. Nothing reaches
-Slack. The graph it leaves behind is the demo graph.
+Quillfern into the graph and imports its Sales team (examples/teams/quillfern-sales.toml),
+loads the scripted repos, plays the chat history and the demo steps (the seven, then the
+Sales beat) through the real routes, and prints every reply. Nothing reaches Slack. The
+graph it leaves behind is the demo graph.
 
     python scripts/replay_workspace.py --graph company_demo
 
@@ -52,6 +53,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--map", action="append", default=[], metavar="SCRIPTED=REAL", help="map a scripted user/channel id to the real one")
     parser.add_argument("--steps", choices=["all", "history", "demo"], help="what to play (default: all in-process, history with --app-url)")
     parser.add_argument("--no-seed", action="store_true", help="keep the graph as it is; only play")
+    parser.add_argument(
+        "--no-sales",
+        action="store_true",
+        help="seed Quillfern without its Sales team, to import examples/teams/quillfern-sales.toml live over POST /ops/import",
+    )
     parser.add_argument("--no-github", action="store_true", help="skip the scripted repos")
     parser.add_argument(
         "--fake-slack",
@@ -96,11 +102,14 @@ def _play(replayer, steps: str) -> None:
 def _seed_and_repos(args) -> None:
     from src.core.config import settings
     from src.seed import quillfern
+    from src.seed.quillfern_sales import seed_sales
     from src.seed.seed import reset_and_seed
     from scripts.replay.driver import load_github_history
 
     if not args.no_seed:
         print(f"seeded quillfern graph={settings.falkordb_graph} nodes={reset_and_seed(quillfern)}")
+        if not args.no_sales:
+            print(f"imported {seed_sales().team.TEAM_ID} team from the example team file")
     if not args.no_github:
         for result in load_github_history():
             print(f"loaded repo={result['repo']} pull_requests={result['pull_requests']} issues={result['issues']}")
