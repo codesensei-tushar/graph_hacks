@@ -96,7 +96,13 @@ def _seed_and_repos(args) -> None:
 
 
 def run_in_process(args) -> None:
-    from scripts.replay.driver import WorkspaceReplayer, clear_team_state, fake_workspace_from_script, register_fake_workspace
+    from scripts.replay.driver import (
+        WorkspaceReplayer,
+        clear_team_state,
+        fake_workspace_from_script,
+        register_fake_workspace,
+        use_agent_loop,
+    )
     from scripts.replay.slack_api import FakeSlackServer
 
     fake = fake_workspace_from_script()
@@ -117,6 +123,7 @@ def run_in_process(args) -> None:
 
         _seed_and_repos(args)
         register_fake_workspace()
+        use_agent_loop()
         replayer = WorkspaceReplayer(
             TestClient(app),
             signing_secret=settings.slack_signing_secret,

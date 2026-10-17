@@ -99,6 +99,16 @@ def clear_team_state(replayer: "WorkspaceReplayer | None" = None, team_id: str =
         scheduler.cancel(_job_id(approval_id))
 
 
+def use_agent_loop(enabled: bool = True) -> None:
+    """Route replies through the agent loop, as the app's startup does. The replay builds the
+    app without its lifespan (that would also start the scheduler and the Slack recovery
+    thread), so the loop has to be registered here; ``enabled=False`` restores the fallback."""
+    from src.domain.slack import compute
+    from src.domain.slack.agent_turn import answer_turn
+
+    compute.register_turn_agent(answer_turn if enabled else None)
+
+
 def load_github_history(repos: Iterable[Repo] = script.REPOS, installation_id: int = script.INSTALLATION_ID) -> list[dict]:
     """Backfill the scripted repos through the real backfill service with the fake client."""
     from src.domain.github import backfill
