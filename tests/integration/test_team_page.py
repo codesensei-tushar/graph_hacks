@@ -145,3 +145,14 @@ class TeamPageTest(unittest.TestCase):
         writes = self.get("/api/ask/tools")["writes"]
         self.assertIn("ingest_ticket", writes)
         self.assertIn("record_decision", writes)
+
+    def test_suggested_questions_have_answers_with_a_path(self):
+        platform = team_page.team_page("platform")
+        self.assertIn("what breaks if Auth Service goes down", platform.questions)
+        self.assertEqual({thing.name: thing.dependents for group in platform.owns for thing in group.items}["Auth Service"], 4)
+        for team_id in ("data", "payments", "platform"):
+            for question in team_page.team_page(team_id).questions:
+                with self.subTest(team=team_id, question=question):
+                    answer = ask_api.answer_question(question)
+                    self.assertTrue(answer.found and answer.edges, f"{question}: {answer.answer}")
+
