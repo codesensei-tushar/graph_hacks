@@ -12,7 +12,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.api.v1 import ask, teams
+from src.api.v1 import ask, graph, teams
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 INDEX = STATIC_DIR / "index.html"
@@ -35,5 +35,6 @@ def team(team_id: str):
 def install(app: FastAPI) -> None:
     app.include_router(ask.router)
     app.include_router(teams.router)
+    app.include_router(graph.router)
     app.include_router(router)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
