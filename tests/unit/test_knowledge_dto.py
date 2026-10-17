@@ -65,9 +65,9 @@ class CatalogueTest(unittest.TestCase):
             self.assertTrue(spec.description)
             self.assertTrue(callable(spec.run))
 
-    def test_only_the_ticket_writer_needs_approval(self):
+    def test_only_the_graph_writers_need_approval(self):
         writers = sorted(spec.name for spec in catalogue.list_tools() if spec.needs_approval)
-        self.assertEqual(writers, ["ingest_ticket"])
+        self.assertEqual(writers, ["ingest_ticket", "record_decision"])
         self.assertIsNone(catalogue.get_tool("drop_everything"))
 
     def test_register_adds_and_replaces_by_name(self):

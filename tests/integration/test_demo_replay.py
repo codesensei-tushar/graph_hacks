@@ -164,34 +164,45 @@ class DemoReplayTest(unittest.TestCase):
         decision = "Move the memory layer off Postgres"
         self.assertIn("Proposed by Kofi Mensah", reply)
         self.assertIn("Approved by Tomas Reyes", reply)
+        self.assertIn("This replaced *Keep notebook links in Postgres join tables* (decided 1 Jun 2026)", reply)
         for line in (
             edge("Kofi Mensah", "PROPOSED", decision),
-            edge(decision, "CITES", "RFC: memory layer on a graph store"),
-            edge(decision, "CITES", "TKT-101"),
+            edge(decision, "BASED_ON", "RFC: memory layer on a graph store"),
+            edge(decision, "BASED_ON", "TKT-101"),
+            edge(decision, "SUPERSEDES", "Keep notebook links in Postgres join tables"),
         ):
             self.assertIn(line, reply)
         # Retained channel talk about the same move comes back as a source too.
         self.assertIn("*From conversations*", reply)
         self.assertIn("Kofi owns the migration", reply)
 
-    def test_3_a_plan_change_in_the_channel_shows_up_in_the_next_answer(self):
-        said, asked = self._rows("A plan changes in the channel")
+    def test_3_a_plan_change_in_the_channel_is_recorded_after_approval(self):
+        said, recorded, approved, asked = self._rows("A plan changes in the channel")
         self.assertEqual(said.status, 200)
         self.assertEqual(said.replies, [], "a plain channel message gets no reply without a model")
-        reply = self._only_reply(asked)
-        # Until the plan change is recorded as a decision, the loop refuses rather than guessing
-        # from chatter: no decision matches, and no memories are shown under a refusal.
-        self.assertIn("Nothing in the graph matches", reply)
-        self.assertIn("billing retries", reply)
-        self.assertNotIn("*From conversations*", reply)
-        self.assertIn("Tool `decision_trace`, picked by keywords", reply)
-
-    def test_3b_the_plan_change_is_a_decision_that_supersedes_the_old_one(self):
-        reply = self._only_reply(self._rows("A plan changes in the channel")[1])
-        if "SUPERSEDES" not in reply:
-            self.skipTest("pending item 2: the plan change becomes a Decision that supersedes the old one, with dates")
+        self.assertEqual(recorded.replies, [], "recording a decision waits for approval")
+        reply = self._only_reply(approved)
+        self.assertIn("Recorded *Move billing retries to the invoice worker*", reply)
+        self.assertIn("replacing *Retry renewal webhooks inside the billing service* (decided 20 Sep 2026)", reply)
         self.assertIn(edge("Arjun Mehta", "PROPOSED", "Move billing retries to the invoice worker"), reply)
-        self.assertRegex(reply, r"decided .*20\d\d")
+        self.assertIn(edge("Move billing retries to the invoice worker", "DECIDED_IN", "#engineering"), reply)
+
+    def test_3b_the_next_why_answer_shows_the_new_decision_what_it_replaced_and_when(self):
+        reply = self._only_reply(self._rows("A plan changes in the channel")[3])
+        self.assert_cites_path(reply)
+        new, old = "Move billing retries to the invoice worker", "Retry renewal webhooks inside the billing service"
+        self.assertTrue(reply.startswith(new), reply)
+        self.assertRegex(reply, r"Decided \d{1,2} \w{3} 20\d\d\.")
+        self.assertIn("Proposed by Arjun Mehta", reply)
+        self.assertIn(f"This replaced *{old}* (decided 20 Sep 2026)", reply)
+        for line in (
+            edge("Arjun Mehta", "PROPOSED", new),
+            edge(new, "ABOUT", "Billing Service"),
+            edge(new, "SUPERSEDES", old),
+            edge(new, "DECIDED_IN", "#engineering"),
+            edge("Tomas Reyes", "APPROVED", old),
+        ):
+            self.assertIn(line, reply)
 
     def test_4_blast_radius_then_two_hops_out(self):
         first, deeper = self._rows("Blast radius, then two hops out")

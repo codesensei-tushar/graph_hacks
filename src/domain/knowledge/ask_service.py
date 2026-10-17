@@ -314,61 +314,10 @@ def _reason(step: PathStep, target: Entity) -> str:
 
 
 def decision_trace(question: str, scopes: list[str]) -> ToolResult:
-    _, graph = connect()
-    resolution = resolve.resolve_name(question, ("Decision",), scopes, graph=graph)
-    if not resolution.found:
-        return _miss("decision_trace", resolution, kind="decision")
-    target = resolution.entity
+    """Lives in ``decisions.py`` (current decision, what it replaced, dates). Kept here for the keyword router."""
+    from src.domain.knowledge import decisions
 
-    people = graph.ro_query(
-        """
-        MATCH (person:Person)-[rel:PROPOSED|APPROVED]->(decision:Decision {id: $id})
-        RETURN person.id, person.name, type(rel), decision.name
-        ORDER BY type(rel) DESC
-        """,
-        {"id": target.id},
-    ).result_set
-    cites = graph.ro_query(
-        f"""
-        MATCH (decision:Decision {{id: $id}})-[rel:CITES|ABOUT]->(source)
-        WHERE {SCOPED.format(var="source")}
-        RETURN decision.name, type(rel), source.id, source.name, labels(source)[0]
-        """,
-        {"id": target.id, "scopes": scopes},
-    ).result_set
-    chats = graph.ro_query(
-        f"""
-        MATCH (chat:Chat)-[:ABOUT]->(decision:Decision {{id: $id}})
-        WHERE {SCOPED.format(var="chat")}
-        OPTIONAL MATCH (author:Person)-[:AUTHORED]->(chat)
-        RETURN author.id, author.name, chat.id, chat.name
-        """,
-        {"id": target.id, "scopes": scopes},
-    ).result_set
-
-    summary_rows = graph.ro_query("MATCH (d:Decision {id: $id}) RETURN d.summary", {"id": target.id}).result_set
-    summary = summary_rows[0][0] if summary_rows else ""
-    proposed = [row[1] for row in people if row[2] == "PROPOSED"]
-    approved = [row[1] for row in people if row[2] == "APPROVED"]
-    sources = [row[3] for row in cites if row[1] == "CITES"]
-    answer = f"{target.name}. {summary}"
-    if proposed:
-        answer += f" Proposed by {', '.join(proposed)}."
-    if approved:
-        answer += f" Approved by {', '.join(approved)}."
-    if sources:
-        answer += f" Sources: {', '.join(sources)}."
-
-    result = ToolResult(tool="decision_trace", answer=answer, candidates=resolution.candidate_names())
-    for person_id, person, rel, decision in people:
-        result.add(PathStep(person, rel, decision, from_id=person_id, to_id=target.id, from_label="Person", to_label="Decision"))
-    for decision, rel, source_id, source, label in cites:
-        result.add(PathStep(decision, rel, source, from_id=target.id, to_id=source_id, from_label="Decision", to_label=label))
-    for author_id, author, chat_id, chat in chats:
-        if author:
-            result.add(PathStep(author, "AUTHORED", chat, from_id=author_id, to_id=chat_id, from_label="Person", to_label="Chat"))
-        result.add(PathStep(chat, "ABOUT", target.name, from_id=chat_id, to_id=target.id, from_label="Chat", to_label="Decision"))
-    return result
+    return decisions.decision_trace(question, scopes)
 
 
 def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:

@@ -146,6 +146,8 @@ def run_against_instance(args) -> None:
     if not (args.team and args.bot):
         sys.exit("--app-url needs --team and --bot")
     ids = dict(item.split("=", 1) for item in args.map)
+    print(f"posting signed events to {args.app_url}/slack/events for team {args.team} (bot {args.bot})")
+    print("id map: " + (", ".join(f"{k}->{v}" for k, v in ids.items()) or "none; scripted ids are used as they are"))
     _seed_and_repos(args)
     with httpx.Client(base_url=args.app_url, timeout=30) as http:
         replayer = WorkspaceReplayer(http, signing_secret=settings.slack_signing_secret, team_id=args.team, bot_user_id=args.bot, ids=ids)

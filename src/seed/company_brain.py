@@ -210,6 +210,13 @@ DOCUMENTS = [
         "summary": "slack_app/manifest.yaml: scopes, events, and request URLs for the dev app behind an ngrok tunnel.",
     },
     {
+        "id": "doc-strategy",
+        "name": "docs/STRATEGY.md",
+        "service": "knowledge-tools",
+        "author": "tushar",
+        "summary": "What the judges reward, where we stand, which FalkorDB features are confirmed, and the build order with its cut line.",
+    },
+    {
         "id": "doc-manifest-prod",
         "name": "Slack production manifest",
         "service": "slack-events",
@@ -270,7 +277,8 @@ DECISIONS = [
         "proposer": "tushar",
         "approver": "tushar",
         "about": "memory-layer",
-        "cites": ["doc-problem", "doc-slack"],
+        "based_on": ["doc-problem", "doc-slack"],
+        "decided_at": 1_792_033_200_000,  # 15 Oct 2026 03:00 UTC
     },
     {
         "id": "decision-narrowest-scope",
@@ -280,7 +288,8 @@ DECISIONS = [
         "proposer": "tushar",
         "approver": "tushar",
         "about": "access-control",
-        "cites": ["doc-slack"],
+        "based_on": ["doc-slack"],
+        "decided_at": 1_792_044_000_000,  # 15 Oct 2026 06:00 UTC
     },
     {
         "id": "decision-http-events",
@@ -290,7 +299,8 @@ DECISIONS = [
         "proposer": "tushar",
         "approver": "tushar",
         "about": "slack-events",
-        "cites": ["doc-slack", "doc-manifest-prod", "TKT-102"],
+        "based_on": ["doc-slack", "doc-manifest-prod", "TKT-102"],
+        "decided_at": 1_792_054_800_000,  # 15 Oct 2026 09:00 UTC
     },
     {
         "id": "decision-haiku",
@@ -300,7 +310,31 @@ DECISIONS = [
         "proposer": "tushar",
         "approver": "tushar",
         "about": "llm-gateway",
-        "cites": ["TKT-101"],
+        "based_on": ["TKT-101"],
+        "decided_at": 1_792_144_800_000,  # 16 Oct 2026 10:00 UTC
+    },
+    {
+        "id": "decision-vector-recall",
+        "name": "Hybrid recall with a vector index on Memory.embedding",
+        "summary": "Add a vector index next to the full-text index and union both result sets in search, with a local sentence-transformers encoder so no key is needed.",
+        "aliases": "vector recall, hybrid recall, vector index, embeddings, semantic search",
+        "proposer": "tushar",
+        "approver": "tushar",
+        "about": "memory-layer",
+        "based_on": ["doc-strategy"],
+        "decided_at": 1_792_207_800_000,  # 17 Oct 2026 03:30 UTC (09:00 IST)
+    },
+    {
+        "id": "decision-mentions-recall",
+        "name": "Recall follows MENTIONS edges, vector search cut",
+        "summary": "Memories link to the services, tickets and people they mention, and recall walks those edges from the graph instead of ranking embeddings. The vector index is cut from the plan.",
+        "aliases": "mentions recall, mentions edges, vector search cut, why no vector search, no embeddings",
+        "proposer": "tushar",
+        "approver": "tushar",
+        "about": "memory-layer",
+        "based_on": ["doc-strategy"],
+        "supersedes": "decision-vector-recall",
+        "decided_at": 1_792_225_800_000,  # 17 Oct 2026 08:30 UTC (14:00 IST)
     },
 ]
 

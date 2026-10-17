@@ -127,16 +127,43 @@ TICKETS = [
     },
 ]
 
-DECISIONS = [{
-    "id": "decision-memory-off-postgres",
-    "name": "Move the memory layer off Postgres",
-    "summary": "Store notebook links in the graph store instead of Postgres join tables, because multi-hop lookups timed out.",
-    "aliases": "memory layer off postgres, graph store migration, why move memory",
-    "proposer": "kofi",
-    "approver": "tomas",
-    "about": "memory-layer",
-    "cites": ["doc-memory-graph-rfc", "TKT-101"],
-}]
+# decided_at is milliseconds since the epoch (UTC).
+DECISIONS = [
+    {
+        "id": "decision-postgres-join-tables",
+        "name": "Keep notebook links in Postgres join tables",
+        "summary": "One database for everything; notebook links live in join tables next to the notes.",
+        "aliases": "postgres join tables, one database, links in postgres",
+        "proposer": "sara",
+        "approver": "tomas",
+        "about": "memory-layer",
+        "based_on": ["doc-memory-graph-rfc"],
+        "decided_at": 1_780_272_000_000,  # 1 Jun 2026
+    },
+    {
+        "id": "decision-memory-off-postgres",
+        "name": "Move the memory layer off Postgres",
+        "summary": "Store notebook links in the graph store instead of Postgres join tables, because multi-hop lookups timed out.",
+        "aliases": "memory layer off postgres, graph store migration, why move memory",
+        "proposer": "kofi",
+        "approver": "tomas",
+        "about": "memory-layer",
+        "based_on": ["doc-memory-graph-rfc", "TKT-101"],
+        "supersedes": "decision-postgres-join-tables",
+        "decided_at": 1_789_430_400_000,  # 15 Sep 2026
+    },
+    {
+        "id": "decision-billing-retries",
+        "name": "Retry renewal webhooks inside the billing service",
+        "summary": "The billing service retries a failed renewal webhook itself, once, idempotently.",
+        "aliases": "billing retries, renewal retries, retry webhooks, where retries live",
+        "proposer": "arjun",
+        "approver": "tomas",
+        "about": "billing-service",
+        "based_on": ["TKT-102", "doc-billing-runbook"],
+        "decided_at": 1_789_862_400_000,  # 20 Sep 2026
+    },
+]
 
 CHATS = [{
     "id": "chat-memory-migration",

@@ -39,6 +39,7 @@ TICKET_TOOL_NAME = "Create ticket"
 
 _REMEMBER = re.compile(r"^(?:remember|note)\s*[:\-]\s*(.+)$", re.IGNORECASE | re.DOTALL)
 _TICKET = re.compile(r"^(?:ticket|file ticket|new ticket)\s*[:\-]\s*(.+)$", re.IGNORECASE | re.DOTALL)
+_DECISION = re.compile(r"^(?:decision|decided|record decision|we decided)\s*[:\-]\s*(.+)$", re.IGNORECASE | re.DOTALL)
 _SCOPES = re.compile(r"^(?:what can you see|scopes?|what do you know about me)\??$", re.IGNORECASE)
 _PROMOTE = re.compile(r"^(promote|demote)\b", re.IGNORECASE)
 _FORGET = re.compile(r"^forget (?:this )?(?:channel|conversation|dm)\b", re.IGNORECASE)
@@ -181,6 +182,24 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
             ),
         )
 
+    if match := _DECISION.match(text):
+        # The no-model way to record a decision; with a model the agent picks record_decision itself.
+        container = write_tag or SHARED_TEAM_BRAIN_CONTAINER_TAG
+        spec = catalogue.get_tool("record_decision")
+        tool_input = {"title": match.group(1).strip(), "asker_slack_user_id": asker, "channel_id": request.channel}
+        if decided_at := _epoch_millis(request.event.ts):
+            tool_input["decided_at"] = decided_at
+        preview = spec.preview(tool_input, request.read_tags)
+        return TurnOutcome(
+            status="suspended",
+            approval=TurnApproval(
+                tool_name=spec.name,
+                tool_input=tool_input,
+                summary=f"{preview}. Visible to {scope_label(container, names)}.",
+                container_tag=container,
+            ),
+        )
+
     if _PROMOTE.match(text):
         # Mentions are stripped from the question; read targets from the raw message.
         return TurnOutcome(reply=_change_role(asker, text, request.raw_text, request.workspace.bot_user_id))
@@ -210,6 +229,15 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
             after_reply=lambda: disconnect_slack_workspace(team_id),
         )
     return None
+
+
+def _epoch_millis(ts) -> int | None:
+    """A Slack message ts ("1700000000.000100") as epoch milliseconds, or None."""
+    try:
+        millis = int(float(ts) * 1000)
+    except (TypeError, ValueError):
+        return None
+    return millis if millis > 0 else None
 
 
 def _split_ticket(text: str) -> tuple[str, str]:

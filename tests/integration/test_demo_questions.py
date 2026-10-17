@@ -85,12 +85,15 @@ class DemoQuestionsTest(unittest.TestCase):
             _step("Kofi Mensah", "PROPOSED", decision),
             _step("Tomas Reyes", "APPROVED", decision),
             _step(decision, "ABOUT", "Memory Layer"),
-            _step(decision, "CITES", "RFC: memory layer on a graph store"),
-            _step(decision, "CITES", "TKT-101"),
+            _step(decision, "BASED_ON", "RFC: memory layer on a graph store"),
+            _step(decision, "BASED_ON", "TKT-101"),
+            _step(decision, "SUPERSEDES", "Keep notebook links in Postgres join tables"),
             _step("Kofi Mensah", "AUTHORED", thread),
             _step(thread, "ABOUT", decision),
         ):
             self.assertIn(step, result["path"])
+        self.assertIn("Decided 15 Sep 2026", result["answer"])
+        self.assertIn("This replaced *Keep notebook links in Postgres join tables* (decided 1 Jun 2026)", result["answer"])
 
     def test_what_breaks_when_auth_goes_down(self):
         result = _ask("What breaks if the auth service goes down?", ORG)
