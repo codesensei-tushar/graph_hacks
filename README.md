@@ -66,6 +66,7 @@ flowchart LR
     Decision -- "BASED_ON / CITES" --> Ticket
     Decision -- SUPERSEDES --> Decision
     Decision -- DECIDED_IN --> Channel
+    Decision -- RECORDED_FROM --> Memory
     Chat -- ABOUT --> Decision
   end
   subgraph github[GitHub, scope org_shared or github_repo_id]
@@ -102,7 +103,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 | `Service` | `id`, `name`, `aliases`, `summary`, `paths` (repo prefixes a pull request can touch) | `-[:DEPENDS_ON]->(Service)` |
 | `Document` | `id`, `name`, `summary` | `-[:DESCRIBES]->(Service)` |
 | `Ticket` | `id`, `name`, `title`, `summary`, `scope`; from GitHub also `number`, `state`, `url`, `source = 'github'`, `updated_at` | `-[:ABOUT]->(Service)`, `-[:IN_REPO]->(Repo)` |
-| `Decision` | `id`, `name`, `summary`, `aliases`, `decided_at` (ms), `scope` | `-[:ABOUT]->(Service)`, `-[:BASED_ON]->(Document\|Ticket\|PullRequest)` (older seeds: `CITES`, still read), `-[:SUPERSEDES]->(Decision)`, `-[:DECIDED_IN]->(Channel\|Document)` |
+| `Decision` | `id`, `name`, `summary`, `aliases`, `decided_at` (ms), `scope` | `-[:ABOUT]->(Service)`, `-[:BASED_ON]->(Document\|Ticket\|PullRequest)` (older seeds: `CITES`, still read), `-[:SUPERSEDES]->(Decision)`, `-[:DECIDED_IN]->(Channel\|Document)`, `-[:RECORDED_FROM]->(Memory)` (the Slack message it was recorded from) |
 | `Chat` | `id`, `name`, `summary` | `-[:ABOUT]->(Decision)` |
 
 **Slack** (`src/domain/slack/`):
@@ -146,7 +147,7 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | --- | --- | --- |
 | `who_owns` | Who owns a service, and which team runs it | no |
 | `who_knows` | Everyone connected to a service, document or ticket, and through which edge | no |
-| `decision_trace` | Why a decision was made, who proposed and approved it, what it cites | no |
+| `decision_trace` | Why a decision was made: the one that stands today, quoted from the message it was recorded from, who proposed and approved it, what it rests on, and what it replaced | no |
 | `blast_radius` | What stops working if a service goes down, grouped by hop, with the main connector | no |
 | `path_between` | Why two things are connected: the shortest route, each hop cited in its true direction | no |
 | `load_bearing` | Which services the company leans on most, by PageRank, with dependent counts | no |
@@ -196,7 +197,7 @@ OPTIONAL MATCH (gh)-[:IS]->(person:Person)
 RETURN coalesce(person.name, '@' + gh.login), type(rel), pr.name, service.name
 ```
 
-**decision_trace** (the decision that stands today, who made it, what it rests on, where it was decided, and what it replaced). The question's decision is resolved, then `SUPERSEDES` is followed forward to the current one; a stale decision answers "*old* (decided <date>) is no longer current." first.
+**decision_trace** (the decision that stands today, who made it, what it rests on, where it was decided, and what it replaced). The question's decision is resolved, then `SUPERSEDES` is followed forward to the current one; a stale decision answers "*old* (decided <date>) is no longer current." first. A decision recorded from Slack quotes its reason from the message it came from: "Decided in #engineering on 17 Oct 2026 by Arjun Mehta: “we're moving billing retries to the invoice worker, decided in today's sync”", with the `RECORDED_FROM` edge in the path. Seeded decisions have no message and keep the date and proposer lines.
 
 ```cypher
 MATCH (newer:Decision)-[:SUPERSEDES]->(:Decision {id: $id})
@@ -214,13 +215,19 @@ RETURN source.id, source.name, labels(source)[0], type(rel) ORDER BY source.name
 MATCH (:Decision {id: $id})-[:DECIDED_IN]->(place)
 RETURN place.id, coalesce(place.name, place.id), labels(place)[0]
 
+MATCH (:Decision {id: $id})-[:RECORDED_FROM]->(m:Memory)
+OPTIONAL MATCH (u:SlackUser)-[:SAID]->(m)
+OPTIONAL MATCH (u)-[:IS]->(p:Person)
+OPTIONAL MATCH (c:Channel {id: m.channel_id})
+RETURN m.id, coalesce(m.text, m.content, ''), coalesce(c.name, m.channel_id, ''), m.ts, coalesce(p.name, u.name, u.id) LIMIT 1
+
 MATCH (:Decision {id: $id})-[:SUPERSEDES]->(older:Decision)
 WHERE coalesce(older.scope, 'org_shared') IN $scopes
 RETURN older.id, older.name, coalesce(older.summary, ''), older.decided_at
 ORDER BY coalesce(older.decided_at, 0) DESC LIMIT 1
 ```
 
-**record_decision** (after Approve). Writes the decision in the room's scope with the message time as `decided_at`, links the proposer, every service the title names, the documents, tickets or pull requests it is based on, the channel it was decided in, and the decision it supersedes: the one named outright, or else the standing decision about the same services that shares a word with the title, which the card showed before Approve. A named decision that does not resolve is refused with the nearest names, never guessed.
+**record_decision** (after Approve). Writes the decision in the room's scope with the message time as `decided_at`, links the proposer, every service the title names, the documents, tickets or pull requests it is based on, the channel it was decided in, the asker's own message in that channel from the 15 minutes before (kept by the memory layer; Slack timestamps are compared as strings, because FalkorDB's `toFloat` is single precision), and the decision it supersedes: the one named outright, or else the standing decision about the same services that shares a word with the title, which the card showed before Approve. A named decision that does not resolve is refused with the nearest names, never guessed.
 
 ```cypher
 MERGE (d:Decision {id: $id})
@@ -230,6 +237,11 @@ MATCH (p:Person {id: $p}), (d:Decision {id: $d}) MERGE (p)-[:PROPOSED]->(d)
 MATCH (d:Decision {id: $d}), (s:Service {id: $s}) MERGE (d)-[:ABOUT]->(s)
 MATCH (d:Decision {id: $d}), (o:Decision {id: $o}) MERGE (d)-[:SUPERSEDES]->(o)
 MERGE (c:Channel {id: $c}) WITH c MATCH (d:Decision {id: $d}) MERGE (d)-[:DECIDED_IN]->(c)
+
+MATCH (:SlackUser {id: $user})-[:SAID]->(m:Memory {channel_id: $channel})
+WHERE m.ts IS NOT NULL AND m.ts <= $upper AND m.ts >= $lower
+RETURN m.id, coalesce(m.text, m.content, ''), m.ts ORDER BY m.ts DESC LIMIT 1
+MATCH (d:Decision {id: $d}), (m:Memory {id: $m}) MERGE (d)-[:RECORDED_FROM]->(m)
 ```
 
 **blast_radius** (everything that depends on a service, grouped by hop). The walk always runs to the ceiling of six hops so the reply can say where it stopped finding anything new; the depth the asker named is clamped to an integer in Python and applied to the rows. The bound in the query is a constant, never a value from the question. Betweenness names the main connector among the services hit.
