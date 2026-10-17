@@ -45,8 +45,15 @@ def _run_who_knows(args: dict, scopes: list[str]) -> ToolResult:
 
 
 def _run_decision_trace(args: dict, scopes: list[str]) -> ToolResult:
-
     return decisions.decision_trace(args["topic"], scopes)
+
+
+def _run_decision_pressure(args: dict, scopes: list[str]) -> ToolResult:
+    return decisions.decision_pressure(args["topic"], scopes)
+
+
+def _run_working_groups(_args: dict, scopes: list[str]) -> ToolResult:
+    return algorithms.working_groups(scopes)
 
 
 def _run_blast_radius(args: dict, scopes: list[str]) -> ToolResult:
@@ -124,6 +131,32 @@ register(
             ["topic"],
         ),
         run=_run_decision_trace,
+    )
+)
+register(
+    ToolSpec(
+        name="decision_pressure",
+        description=(
+            "Whether the standing decision is still the last word: tickets and pull requests about the same "
+            "service that the decision does not cite. Use when the question asks if a decision still holds, "
+            "not when it asks why the decision was made."
+        ),
+        args_schema=_schema(
+            {"topic": {"type": "string", "description": "The decision the question is checking, copied from the question."}},
+            ["topic"],
+        ),
+        run=_run_decision_pressure,
+    )
+)
+register(
+    ToolSpec(
+        name="working_groups",
+        description=(
+            "Who actually clusters together from shared work. Label propagation over people who share a service, "
+            "and where that differs from the teams on the org chart."
+        ),
+        args_schema=_schema({}, []),
+        run=_run_working_groups,
     )
 )
 register(

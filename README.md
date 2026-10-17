@@ -140,7 +140,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a schema whose `tool` is an enum of the catalogue's names and whose `args` are the tools' argument schemas; the choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
 
-**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event or a webhook travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string or concatenated Cypher literal in `src/` (32 of them) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH` and `MAX_PATH_LENGTH`, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed and the container settings, labels, relationship types and property names that come from code. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event or a webhook travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string or concatenated Cypher literal in `src/` (34 of them) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH` and `MAX_PATH_LENGTH`, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed and the container settings, labels, relationship types and property names that come from code. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |
@@ -152,6 +152,8 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `load_bearing` | Which services the company leans on most, by PageRank, with dependent counts | no |
 | `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
 | `recall` | Memories whose text matches the question, dated, no path | no |
+| `working_groups` | Who clusters together from shared work, by label propagation, and where that splits from the org chart | no |
+| `decision_pressure` | Tickets and pull requests about a decision's service that the standing decision does not cite | no |
 | `ingest_ticket` | Files a ticket about a service, then answers who should look at it | yes, after Approve |
 | `record_decision` | Records a decision, links it to its services and sources, and supersedes the one it replaces | yes, after Approve; the card names what it replaces |
 
@@ -284,6 +286,32 @@ ORDER BY hops, learned_at DESC
 ```
 
 **recall** (memories whose text matches the question, for questions that name no node) runs the full-text memory search below across the asker's read set and returns dated lines and no path.
+
+**working_groups** reads who owns or worked on a service, then runs label propagation on a throwaway graph and deletes it. Each shared service is a hub that those people point at both ways. A direct edge between two people does not settle (their labels swap every iteration), and including `KNOWS` glues the whole company into one community, so knowing a service is cited but does not join a cluster. The reply cites the real `OWNS`, `WORKED_ON`, `KNOWS` and `MEMBER_OF` edges, never the scratch hubs. The call is skipped when no service is shared, because FalkorDB rejects a relationship type that is not in the graph.
+
+```cypher
+MATCH (person:Person)-[rel:OWNS|WORKED_ON|KNOWS]->(service:Service)
+WHERE coalesce(service.scope, 'org_shared') IN $scopes
+RETURN person.id, person.name, type(rel), service.id, service.name
+
+CALL algo.labelPropagation({nodeLabels: ['Person', 'Work'], relationshipTypes: ['AT']})
+YIELD node, communityId
+RETURN labels(node)[0], node.id, communityId
+```
+
+**decision_pressure** (is this decision still the last word). The standing decision, followed through `SUPERSEDES`, then the tickets and pull requests on the same service that it does not cite. "Why did we" stays on `decision_trace`.
+
+```cypher
+MATCH (ticket:Ticket)-[:ABOUT]->(service:Service)
+WHERE service.id IN $services AND coalesce(ticket.scope, 'org_shared') IN $scopes
+  AND NOT (:Decision {id: $id})-[:BASED_ON|CITES]->(ticket)
+RETURN ticket.id, ticket.name, service.id, service.name
+
+MATCH (pr:PullRequest)-[:TOUCHES]->(service:Service)
+WHERE service.id IN $services AND coalesce(pr.scope, 'org_shared') IN $scopes
+  AND NOT (:Decision {id: $id})-[:BASED_ON|CITES]->(pr)
+RETURN pr.id, pr.name, service.id, service.name
+```
 
 **ingest_ticket** (the `ticket:` command; runs through the catalogue after Approve with the room's write scope, then asks `who_knows` about the service):
 

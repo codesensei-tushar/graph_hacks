@@ -114,7 +114,7 @@ Claude Code wrote a large share of the code and the docs, in several sessions th
 
 ## What's next
 
-Expose the same catalogue over MCP, so other agents can walk the graph with the same permissions. Add semantic recall next to the full-text pass. Add more sources, each one as more edges rather than another store.
+The same catalogue is already live over MCP, read-only, so another agent can walk the graph with the same cited results. Two reads landed after that. Label propagation groups people by the services they share and says where that splits from the org chart. A decision can be asked whether it is still the last word: the reply lists tickets and pull requests on the same service that it does not cite. Semantic recall is still the first thing we would add next, beside the full-text pass. More sources should arrive as more edges, not as another store.
 
 The line we kept coming back to: the answer is the path.
 

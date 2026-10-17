@@ -10,8 +10,10 @@ so ``who_knows`` weighs edges instead.
 
 import logging
 import re
+import uuid
+from collections import defaultdict
 
-from src.db.falkordb_client import connect
+from src.db.falkordb_client import client, connect, graph_reads_disabled
 from src.domain.knowledge import resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import Entity, join_names
@@ -286,3 +288,199 @@ def load_bearing(limit=DEFAULT_LOAD_BEARING) -> ToolResult:
         answer += " Then " + join_names(sentences[1:]) + "."
     result.answer = answer
     return result
+
+
+# --- label propagation --------------------------------------------------------------------
+
+# People are not linked to each other. Knowing a service is a weak bridge: include it and
+# label propagation returns one community for the whole component. Owning a service or
+# having worked on it is the de facto team. Each such service with two or more people
+# becomes a hub on a throwaway graph; the call below is deleted with that graph.
+_STRONG = {"OWNS", "WORKED_ON"}
+
+
+def working_groups(scopes: list[str]) -> ToolResult:
+    """Who clusters together from hands-on work, and where that splits from the org chart.
+
+    ``algo.labelPropagation`` runs on a throwaway graph: one hub per service that two or
+    more people own or worked on, linked both ways. ``KNOWS`` is left out of that graph,
+    because it glues every team into one community. The company graph is only read. The
+    reply cites the real work edges and ``MEMBER_OF``.
+    """
+    _, graph = connect()
+    work = graph.ro_query(
+        """
+        MATCH (person:Person)-[rel:OWNS|WORKED_ON|KNOWS]->(service:Service)
+        WHERE coalesce(service.scope, 'org_shared') IN $scopes
+        RETURN person.id, person.name, type(rel), service.id, service.name
+        ORDER BY person.name, service.name, type(rel)
+        """,
+        {"scopes": scopes},
+    ).result_set
+    teams = graph.ro_query(
+        """
+        MATCH (person:Person)-[:MEMBER_OF]->(team:Team)
+        RETURN person.id, team.id, team.name
+        ORDER BY team.name
+        """,
+        {},
+    ).result_set
+    result = ToolResult(tool="working_groups", answer="")
+    if not work:
+        result.answer = "The graph has no shared work between people yet."
+        return result
+
+    by_person: dict[str, dict] = {}
+    by_service: dict[str, dict] = {}
+    for person_id, person_name, rel, service_id, service_name in work:
+        person = by_person.setdefault(person_id, {"name": person_name, "edges": []})
+        person["edges"].append((rel, service_id, service_name))
+        if rel not in _STRONG:
+            continue
+        service = by_service.setdefault(service_id, {"name": service_name, "people": {}})
+        service["people"].setdefault(person_id, rel)
+    team_of = {person_id: (team_id, team_name) for person_id, team_id, team_name in teams}
+    hubs = {service_id: service["people"] for service_id, service in by_service.items() if len(service["people"]) >= 2}
+    communities = _propagate_hubs(sorted(by_person), hubs)
+    if not communities:
+        result.answer = "The graph has no shared work between people yet."
+        return result
+
+    clusters: dict[int, list[str]] = defaultdict(list)
+    for person_id, community in communities.items():
+        clusters[community].append(person_id)
+    ordered = sorted(clusters.values(), key=lambda members: [by_person[person]["name"] for person in members])
+    grouped = [members for members in ordered if len(members) > 1]
+    alone = [members[0] for members in ordered if len(members) == 1]
+
+    count = len(grouped)
+    sentences = [
+        f"Label propagation over who owns or worked on the same service finds {count} work cluster{'s' if count != 1 else ''}."
+    ]
+    crossed = 0
+    for members in grouped:
+        names = [by_person[person]["name"] for person in sorted(members, key=lambda person: by_person[person]["name"])]
+        sentences.append(f"{join_names(names)}.")
+        org = _org_chart_sentence(members, by_person, team_of)
+        sentences.append(org)
+        if org.startswith("The org chart splits"):
+            crossed += 1
+        sentences.extend(_shared_services(members, by_person, by_service))
+        _cite_cluster(result, members, by_person, by_service, team_of)
+    for person in alone:
+        team = team_of.get(person)
+        where = f" They are on {team[1]}, and" if team else ""
+        sentences.append(f"{by_person[person]['name']} is on their own.{where} no service they own or worked on is shared.")
+        _cite_person(result, person, by_person, team_of)
+    sentences.extend(_knows_outside(by_person, by_service, communities, result))
+    if crossed:
+        verb = "crosses" if crossed == 1 else "cross"
+        sentences.append(f"{crossed} of those clusters {verb} the org chart.")
+    result.answer = " ".join(sentences)
+    return result
+
+
+def _org_chart_sentence(members: list[str], by_person: dict, team_of: dict) -> str:
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for person in members:
+        team = team_of.get(person)
+        grouped[team[1] if team else "no team"].append(by_person[person]["name"])
+    parts = []
+    for team, names in sorted(grouped.items()):
+        names = sorted(names)
+        verb = "is" if len(names) == 1 else "are"
+        parts.append(f"{join_names(names)} {verb} on {team}")
+    if len(grouped) == 1:
+        return f"That matches the org chart: {parts[0]}."
+    return f"The org chart splits them: {join_names(parts)}."
+
+
+def _shared_services(members: list[str], by_person: dict, by_service: dict) -> list[str]:
+    member_set = set(members)
+    sentences = []
+    for _service_id, service in sorted(by_service.items(), key=lambda item: item[1]["name"]):
+        here = sorted((person for person in service["people"] if person in member_set), key=lambda person: by_person[person]["name"])
+        if len(here) < 2:
+            continue
+        names = [by_person[person]["name"] for person in here]
+        sentences.append(f"Inside the cluster, {join_names(names)} share {service['name']}.")
+    return sentences
+
+
+def _knows_outside(by_person: dict, by_service: dict, communities: dict, result: ToolResult) -> list[str]:
+    """Someone who only knows a service a cluster shares stays outside. Cite that KNOWS edge."""
+    sentences = []
+    for person_id, person in sorted(by_person.items(), key=lambda item: item[1]["name"]):
+        for rel, service_id, service_name in person["edges"]:
+            if rel != "KNOWS" or service_id not in by_service:
+                continue
+            sharers = by_service[service_id]["people"]
+            if len(sharers) < 2 or person_id in sharers:
+                continue
+            if any(communities.get(other) == communities.get(person_id) for other in sharers):
+                continue
+            sentences.append(
+                f"{person['name']} knows {service_name} and stays outside that cluster: knowing a service is not shared work."
+            )
+            result.add(PathStep(person["name"], "KNOWS", service_name, from_id=person_id, to_id=service_id, from_label="Person", to_label="Service"))
+    return sentences
+
+
+def _cite_cluster(result: ToolResult, members: list[str], by_person: dict, by_service: dict, team_of: dict) -> None:
+    member_set = set(members)
+    for person in members:
+        _cite_membership(result, person, by_person, team_of)
+        for rel, service_id, service_name in by_person[person]["edges"]:
+            if rel not in _STRONG or service_id not in by_service:
+                continue
+            others = [other for other in by_service[service_id]["people"] if other != person and other in member_set]
+            if others:
+                result.add(PathStep(by_person[person]["name"], rel, service_name, from_id=person, to_id=service_id, from_label="Person", to_label="Service"))
+
+
+def _cite_person(result: ToolResult, person: str, by_person: dict, team_of: dict) -> None:
+    _cite_membership(result, person, by_person, team_of)
+    for rel, service_id, service_name in by_person[person]["edges"]:
+        if rel in _STRONG:
+            result.add(PathStep(by_person[person]["name"], rel, service_name, from_id=person, to_id=service_id, from_label="Person", to_label="Service"))
+
+
+def _cite_membership(result: ToolResult, person: str, by_person: dict, team_of: dict) -> None:
+    team = team_of.get(person)
+    if team is not None:
+        result.add(PathStep(by_person[person]["name"], "MEMBER_OF", team[1], from_id=person, to_id=team[0], from_label="Person", to_label="Team"))
+
+
+def _propagate_hubs(people: list[str], hubs: dict[str, dict]) -> dict[str, int]:
+    """Community id per person. The scratch graph is deleted before this returns.
+
+    A person–person edge of two nodes does not settle under label propagation (the labels
+    swap each iteration). A hub both of them point at does. The call is skipped when no
+    service is shared, because FalkorDB rejects a relationship type that is not in the graph.
+    """
+    if graph_reads_disabled.get() or not hubs:
+        return {person: index for index, person in enumerate(people)}
+    scratch = client().select_graph(f"brain_lp_{uuid.uuid4().hex}")
+    try:
+        for person in people:
+            scratch.query("CREATE (:Person {id: $id})", {"id": person})
+        for service_id, members in sorted(hubs.items()):
+            scratch.query("CREATE (:Work {id: $id})", {"id": service_id})
+            for person in sorted(members):
+                scratch.query(
+                    "MATCH (p:Person {id: $p}), (w:Work {id: $w}) CREATE (p)-[:AT]->(w), (w)-[:AT]->(p)",
+                    {"p": person, "w": service_id},
+                )
+        rows = scratch.ro_query(
+            """
+            CALL algo.labelPropagation({nodeLabels: ['Person', 'Work'], relationshipTypes: ['AT']})
+            YIELD node, communityId
+            RETURN labels(node)[0], node.id, communityId
+            """
+        ).result_set
+        return {node_id: int(community) for label, node_id, community in rows if label == "Person"}
+    finally:
+        try:
+            scratch.delete()
+        except Exception as error:  # noqa: BLE001  the scratch graph must not outlive the call
+            log.warning("[working_groups] scratch graph cleanup failed: %s", error)

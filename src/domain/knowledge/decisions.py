@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from src.db.falkordb_client import connect
 from src.domain.knowledge import catalogue, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
-from src.domain.knowledge.resolve import Entity
+from src.domain.knowledge.resolve import Entity, join_names
 
 ORG_SHARED = "org_shared"
 SCOPED = "coalesce({var}.scope, 'org_shared') IN $scopes"
@@ -250,6 +250,90 @@ def decision_trace(question: str, scopes: list[str]) -> ToolResult:
             result.add(PathStep(author, "AUTHORED", chat, from_id=author_id, to_id=chat_id, from_label="Person", to_label="Chat"))
         result.add(PathStep(chat, "ABOUT", current.name, from_id=chat_id, to_id=current.id, from_label="Chat", to_label="Decision"))
 
+    result.answer = " ".join(parts)
+    return result
+
+
+def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
+    """Is the standing decision still the last word on its service?
+
+    Tickets ``ABOUT`` that service and pull requests that ``TOUCHES`` it, which this
+    decision does not ``BASED_ON`` or ``CITES``, are the pressure. Ordinary "why did we"
+    questions stay on ``decision_trace``; this only runs when the question asks whether
+    the decision still holds.
+    """
+    _, graph = connect()
+    resolution = resolve.resolve_name(question, ("Decision",), scopes, graph=graph)
+    if not resolution.found:
+        return ToolResult(
+            tool="decision_pressure",
+            answer=resolve.describe_miss(resolution, "decision"),
+            found=False,
+            candidates=resolution.candidate_names(),
+        )
+    named = resolution.entity
+    current = current_decision(graph, named.id, scopes) or _decision(graph, named.id)
+    result = ToolResult(tool="decision_pressure", answer="", candidates=resolution.candidate_names())
+    parts = []
+    if current.id != named.id:
+        parts.append(f"*{named.name}* is no longer current.")
+    about = graph.ro_query(
+        "MATCH (:Decision {id: $id})-[:ABOUT]->(service:Service) RETURN service.id, service.name ORDER BY service.name",
+        {"id": current.id},
+    ).result_set
+    for service_id, service in about:
+        result.add(PathStep(current.name, "ABOUT", service, from_id=current.id, to_id=service_id, from_label="Decision", to_label="Service"))
+    cited = graph.ro_query(
+        f"""
+        MATCH (:Decision {{id: $id}})-[rel:BASED_ON|CITES]->(source)
+        WHERE {SCOPED.format(var="source")}
+        RETURN source.id, source.name, labels(source)[0], type(rel)
+        ORDER BY source.name
+        """,
+        {"id": current.id, "scopes": scopes},
+    ).result_set
+    for source_id, source, label, rel in cited:
+        result.add(PathStep(current.name, rel, source, from_id=current.id, to_id=source_id, from_label="Decision", to_label=label))
+
+    service_ids = [service_id for service_id, _name in about]
+    service_names = join_names([name for _id, name in about])
+    parts.append(f"*{current.name}* is the standing decision{f' about {service_names}' if service_names else ''}.")
+    if cited:
+        parts.append(f"It cites {join_names([source for _id, source, _label, _rel in cited])}.")
+    if not about:
+        parts.append("It is not about a service, so there is no ticket or pull request to check it against.")
+        result.answer = " ".join(parts)
+        return result
+
+    tickets = graph.ro_query(
+        f"""
+        MATCH (ticket:Ticket)-[:ABOUT]->(service:Service)
+        WHERE service.id IN $services AND {SCOPED.format(var="ticket")}
+          AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(ticket)
+        RETURN ticket.id, ticket.name, service.id, service.name
+        ORDER BY ticket.name
+        """,
+        {"services": service_ids, "scopes": scopes, "id": current.id},
+    ).result_set
+    pull_requests = graph.ro_query(
+        f"""
+        MATCH (pr:PullRequest)-[:TOUCHES]->(service:Service)
+        WHERE service.id IN $services AND {SCOPED.format(var="pr")}
+          AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(pr)
+        RETURN pr.id, pr.name, service.id, service.name
+        ORDER BY pr.name
+        """,
+        {"services": service_ids, "scopes": scopes, "id": current.id},
+    ).result_set
+    for ticket_id, ticket, service_id, service in tickets:
+        result.add(PathStep(ticket, "ABOUT", service, from_id=ticket_id, to_id=service_id, from_label="Ticket", to_label="Service"))
+    for pr_id, pr, service_id, service in pull_requests:
+        result.add(PathStep(pr, "TOUCHES", service, from_id=pr_id, to_id=service_id, from_label="PullRequest", to_label="Service"))
+    uncited = [f"{name} (about {service})" for _id, name, _sid, service in tickets + pull_requests]
+    if uncited:
+        parts.append(f"It does not cite {join_names(uncited)}.")
+    else:
+        parts.append(f"Nothing else about {service_names} has landed that it does not cite.")
     result.answer = " ".join(parts)
     return result
 

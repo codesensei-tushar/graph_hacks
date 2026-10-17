@@ -41,6 +41,8 @@ _RELATED_MEMORIES = re.compile(
 _RECALL = re.compile(r"\b(?:remember|recall|what did .+ say|who said|said|discussed|talked about|mentioned)\b", re.IGNORECASE)
 _BLAST = re.compile(r"\b(?:breaks?|goes down|outage|depends?|dependents?|blast)\b", re.IGNORECASE)
 _DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
+_PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
+_GROUPS = re.compile(r"\b(?:working groups?|de facto teams?|who (?:actually )?works together|work clusters?)\b", re.IGNORECASE)
 
 
 def route(question: str) -> tuple[str, dict]:
@@ -48,6 +50,10 @@ def route(question: str) -> tuple[str, dict]:
     text = question.strip()
     if not text:
         return "none", {}
+    if _GROUPS.search(text):
+        return "working_groups", {}
+    if _PRESSURE.search(text):
+        return "decision_pressure", {"topic": text}
     if _LOAD_BEARING.search(text):
         return "load_bearing", {"limit": algorithms.DEFAULT_LOAD_BEARING}
     if _PATH.search(text):
@@ -317,6 +323,13 @@ def decision_trace(question: str, scopes: list[str]) -> ToolResult:
     return decisions.decision_trace(question, scopes)
 
 
+def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``decisions.py``. Tickets and pull requests the standing decision does not cite."""
+    from src.domain.knowledge import decisions
+
+    return decisions.decision_pressure(question, scopes)
+
+
 def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
     return algorithms.blast_radius(question, scopes, depth)
 
@@ -329,6 +342,8 @@ def match_service(text: str) -> dict | None:
 
 _ROUTED = {
     "decision_trace": lambda args, scopes: decision_trace(args["topic"], scopes),
+    "decision_pressure": lambda args, scopes: decision_pressure(args["topic"], scopes),
+    "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth")),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
     "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
