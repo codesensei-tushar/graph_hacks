@@ -16,7 +16,7 @@ A search box returns documents. A graph returns people, and the reason each of t
 
 Company Brain is a Slack bot over one FalkorDB graph. People, teams, services, documents, tickets, decisions and chat are nodes and edges. Slack and GitHub feed it live: messages in channels the bot has joined become scoped memories, and pull requests and reviews become edges between people and the services whose code they touched. You ask in Slack, in a channel or a DM, and every answer ends with the edges it walked, written as `A -[REL]-> B`.
 
-[[Image 1: the Slack reply to "a billing bug just landed, who should look at it", with the path lines visible.]]
+![“who knows billing” on the ask page: the ranked answer, the path drawn as a graph, and the same edges as A -[REL]-> B lines, including the pull request a teammate reviewed.](images/01-who-should-look.png)
 
 We entered Track 03, and Tracks 01 and 02 with the same build, because the agent acts on connected data and the memory it keeps is the graph.
 
@@ -51,7 +51,7 @@ Two things fall out of this. No model-generated string ever reaches a query, so 
 
 Without a model key, a keyword router picks the tool instead, and every path still works. The test suite never calls a model.
 
-[[Image 3: the refusal with candidates, demo step 6.]]
+![The refusal on the ask page: nothing in the graph matches “payments gateway” as one thing, the nearest names, and no path.](images/03-refusal.png)
 
 ## Decisions that stay current
 
@@ -90,7 +90,7 @@ Three things we learned by running them against FalkorDB 4.22, not by reading ab
 
 Blast radius is the one to watch in the video. At depth one, Auth going down takes out the gateway, billing, notifications and search. One hop further it reaches the invoice worker through Billing, and the reply shows the route. A search box cannot do that.
 
-[[Image 5: blast radius at one hop and two hops out, side by side.]]
+![Blast radius on the ask page at one hop, then two hops out: the depth in the path header changes, and the invoice worker appears through Billing and Notifications.](images/05-blast-radius.png)
 
 ## What we cut, and why
 
@@ -105,6 +105,8 @@ So recall follows edges. From the entity a question resolved to, through `MENTIO
 FalkorDB holds the graph. It also holds, as Redis keys in the same instance, the scheduler queue, pending approvals, running turns, and the dedupe keys for Slack events and GitHub deliveries. The app talks to one process. Production runs the same compose file behind nginx, with a password on the database and its port closed to the internet, and the deploy pipeline ships by git SHA and rolls back by SHA. The details are in docs/DEPLOY.md.
 
 Take FalkorDB out and nothing answers. Not "answers worse". Nothing. We made that checkable: `GET /api/proof` runs the same six questions through the same catalogue twice, once with the graph and once with every read returning no rows, and prints the table. Five of six collapse. The sixth is the question about something the graph does not know, and it is refused both ways. That is deliberate: an ablation where every question collapses would mean the system had answered a question it should have refused.
+
+![The proof table from GET /api/proof: five capabilities collapse without the graph, and the refusal stays a refusal.](images/06-proof-table.png)
 
 ## How we used AI assistants
 
@@ -124,20 +126,14 @@ The line we kept coming back to: the answer is the path.
 
 ## Capturing the images
 
-Five images, one sitting, about twenty minutes. Capture everything at 2x on a 1440 px wide window, light theme, Slack in a browser (not the desktop app, so the window width is controllable), no personal names or avatars outside the synthetic company. Crop to the content; no browser chrome. Save under `docs/images/` with the names below and reference them from the post in place of the `[[Image N]]` markers. Every screenshot comes from the Quillfern replay or the dev workspace loaded with it, never from a real workspace.
-
-Setup once: `python scripts/replay_workspace.py --app-url http://localhost:8000 --team <T> --bot <U> --map ...` against the dev instance as docs/SETUP.md describes, so the channel history and the repos are in, then type the questions below yourself so the replies carry real Slack rendering.
+Images 1, 3, 5 and 6 are in `docs/images/`, taken from the ask page and the proof route against a local replay of the synthetic company (headless Chrome at 2x, light theme). Two remain, both by hand. Every screenshot comes from the Quillfern replay or the dev workspace loaded with it, never from a real workspace. Capture at 2x on a 1440 px wide window, light theme, crop to the content, no browser chrome, and replace the marker with `![caption](images/0N-name.png)`.
 
 | File | Where | Type | Must be visible |
 | --- | --- | --- | --- |
-| `docs/images/01-who-should-look.png` | Slack, #engineering, in the thread of the approved ticket | `ticket: billing exports time out`, click Approve, then in the thread `who should look at it` | The "Ask first: Arjun Mehta (owns it, ...)" sentence, at least four path lines including `TKT-104 -[ABOUT]-> Billing Service` and `Arjun Mehta -[OWNS]-> Billing Service`, and the footer "Tool `who_knows`". Crop from the question to the footer. |
-| `docs/images/02-browser-graph.png` | FalkorDB Browser at http://localhost:3000, graph `company` (or the replay graph) | Run `MATCH (s:Service {id: 'billing-service'})-[r]-(n) RETURN s, r, n LIMIT 25` and switch to the graph view | Billing Service in the centre with `DEPENDS_ON`, `OWNS`, `TOUCHES` and at least one `MENTIONS` edge from a Memory node; edge labels readable. Drag nodes apart if they overlap. |
-| `docs/images/03-refusal.png` | Slack, #engineering | `who knows the payments gateway` | The exact sentence "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." and the footer. No path section should appear; that absence is the point. |
+| `docs/images/02-browser-graph.png` | FalkorDB Browser at http://localhost:3000 (it opens on a login form: host `localhost`, port `6379`), the replay graph | Run `MATCH (s:Service {id: 'billing-service'})-[r]-(n) RETURN s, r, n LIMIT 25` and switch to the graph view | Billing Service in the centre with `DEPENDS_ON`, `OWNS`, `TOUCHES` and at least one `MENTIONS` edge from a Memory node; edge labels readable. Drag nodes apart if they overlap. |
 | `docs/images/04-decision-before-after.png` | Slack, #engineering, two replies side by side (or stacked, crop both) | First `why did we move billing retries to the invoice worker` (before), then `decision: billing retries move to the invoice worker`, Approve on the card that says what it replaces, then the same question again (after) | Left or top: the refusal with the memory line. Right or bottom: the decision with "Decided <date>", "This replaced *...* (decided <date>)" and the `SUPERSEDES` and `DECIDED_IN` path lines. Include the approval card if it fits; its "replacing *...*" text is the strongest frame. |
-| `docs/images/05-blast-radius.png` | Slack, #engineering, one thread | `what breaks if auth goes down, one hop`, then in the thread `and two hops out` | Both replies. First: four services at one hop and "1 more breaks further out (Invoice Worker at depth 2)". Second: "Invoice Worker (2 hops)", the header "*Path* (`blast_radius`, depth 2, 6 edges)" and the two `Invoice Worker -[DEPENDS_ON]-> ...` lines. The depth in the header is what the caption points at. |
-| `docs/images/06-proof-table.png` (optional, for the "take FalkorDB out" section) | Terminal | `curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "http://localhost:8000/api/proof?format=text"` with `BRAIN_ADMIN_TOKEN` set in `.env` | The whole table: six rows, five marked collapsed, the last row refusing both ways. Widen the terminal so no row wraps. |
 
-Captions, one line each, already in the post next to the markers. After capturing, replace each `[[Image N: ...]]` marker with `![caption](images/0N-name.png)` and delete this section.
+For image 4, load the dev workspace first: `python scripts/replay_workspace.py --app-url http://localhost:8000 --team <T> --bot <U> --map ...` as docs/SETUP.md describes, then type the questions yourself so the replies carry real Slack rendering. Delete this section once both are in.
 
 ## Before publishing
 
