@@ -63,7 +63,9 @@ def format_answer(
             learned = f", learned {memory['learned_at']}" if memory.get("learned_at") else ""
             parts.append(f"• “{_clip(memory['text'], MAX_MEMORY_SNIPPET)}” — {memory['author']}, {where}{learned}")
     footer = f"Read from: {', '.join(scope_label(tag, channel_names) for tag in read_tags)}"
-    if chosen_by:
+    if chosen_by == "approval":
+        footer = f"Tool `{result.get('tool', 'graph')}`, run after your approval. {footer}"
+    elif chosen_by:
         picker = "the model" if chosen_by == "model" else "keywords"
         footer = f"Tool `{result.get('tool', 'graph')}`, picked by {picker}. {footer}"
         if chosen_by == "thread":

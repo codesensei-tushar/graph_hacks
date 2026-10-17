@@ -60,6 +60,10 @@ class FormatTests(unittest.TestCase):
         one = format_answer({"answer": "x", "path": path[:1], "tool": "who_owns"}, [], ["org_shared"], {})
         self.assertIn("*Path* (`who_owns`, 1 edge)", one)
 
+    def test_approved_write_footer_says_so(self):
+        text = format_answer({"answer": "Filed", "path": [], "tool": "ingest_ticket"}, [], ["org_shared"], {}, chosen_by="approval")
+        self.assertIn("Tool `ingest_ticket`, run after your approval. Read from: public channels", text)
+
     def test_answer_fallback_and_long_path(self):
         path = [{"from": f"n{i}", "rel": "DEPENDS_ON", "to": "auth"} for i in range(25)]
         text = format_answer({"answer": "", "path": path}, [], ["org_shared"], {})
