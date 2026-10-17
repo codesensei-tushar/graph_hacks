@@ -346,3 +346,26 @@ MATCH (u:GitHubUser {id: $user}), (r:Repo {id: $repo}) MERGE (u)-[c:CAN_READ]->(
 ```bash
 curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "https://brain.noobsurd.space/api/proof?format=text"
 ```
+
+## The same tools over MCP
+
+Every read-only tool in the catalogue is also an MCP tool, served at `/mcp` over streamable HTTP (stateless, JSON responses). Same names, same descriptions, the same argument schemas, and the same result: the answer, the cited path, `found`, and the nearest `candidates` on a miss, as structured content. Tools that write the graph (`ingest_ticket`, `record_decision`) are not exposed; they need a human's Approve in Slack.
+
+MCP callers read the company-wide `org_shared` scope only. There is no Slack identity to widen it from, so private channels and private repos stay out of reach, under the same permission model the Slack agent uses.
+
+Set `MCP_TOKEN` and send it as a bearer header; until it is set `/mcp` answers 503, without the header 401, with a wrong token 403.
+
+```python
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
+async with create_mcp_http_client(headers={"Authorization": f"Bearer {token}"}) as http:
+    async with streamable_http_client("https://brain.noobsurd.space/mcp", http_client=http) as streams:
+        async with ClientSession(streams[0], streams[1]) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            result = await session.call_tool("who_owns", {"name": "billing"})
+            print(result.structured_content["path"])
+```
+
+The mapping is `src/domain/knowledge/mcp_tools.py`; the mount, token check and session lifespan are `src/api/mcp.py`. `tests/integration/test_mcp_server.py` runs this exact exchange against a local server.

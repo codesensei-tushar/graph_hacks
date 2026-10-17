@@ -1,5 +1,5 @@
-"""Deploy plumbing, not bot behavior: ``/healthz``, the reserved ``/mcp`` path, a seed
-refresh for production, and a clock for the last verified Slack request.
+"""Deploy plumbing, not bot behavior: ``/healthz``, a seed refresh for production, and
+a clock for the last verified Slack request. ``/mcp`` is served by ``src/api/mcp.py``.
 
 ``deploy/deploy.sh`` polls ``/healthz`` until ``git_sha`` matches the commit it shipped.
 ``slack_last_event_at`` moves when ``/slack/events`` or ``/slack/interactions`` answers
@@ -13,7 +13,6 @@ import os
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, FastAPI, Request
-from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.api.v1.slack_install import _admin_denial
@@ -60,13 +59,6 @@ def seed(request: Request):
     report = seed_company(company_module(settings.seed_company))
     log.info("[ops] seed merged company=%s created nodes=%d edges=%d set=%d", report.company, report.nodes_created, report.edges_created, report.properties_set)
     return {"company": settings.seed_company, "mode": "merge", **dataclasses.asdict(report)}
-
-
-@router.api_route("/mcp", methods=["GET", "POST", "DELETE"], include_in_schema=False)
-@router.api_route("/mcp/{_rest:path}", methods=["GET", "POST", "DELETE"], include_in_schema=False)
-def mcp_reserved():
-    # nginx already proxies /mcp unbuffered with a 1h read timeout for streamed responses.
-    return JSONResponse({"error": "MCP is not implemented yet"}, status_code=501)
 
 
 class SlackEventClock:
