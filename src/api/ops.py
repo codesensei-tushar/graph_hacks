@@ -1,5 +1,5 @@
-"""Deploy plumbing, not bot behavior: ``/healthz``, the reserved ``/mcp`` path, and a
-clock for the last verified Slack request.
+"""Deploy plumbing, not bot behavior: ``/healthz``, the reserved ``/mcp`` path, a seed
+refresh for production, and a clock for the last verified Slack request.
 
 ``deploy/deploy.sh`` polls ``/healthz`` until ``git_sha`` matches the commit it shipped.
 ``slack_last_event_at`` moves when ``/slack/events`` or ``/slack/interactions`` answers
@@ -7,15 +7,19 @@ clock for the last verified Slack request.
 401). The clock lives in this process, so it resets on restart.
 """
 
+import dataclasses
 import logging
 import os
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from src.api.v1.slack_install import _admin_denial
+from src.core.config import settings
 from src.db.falkordb_client import connect
+from src.seed.seed import company_module, seed_company
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["ops"])
@@ -45,6 +49,17 @@ def healthz():
         "falkordb": _falkordb_status(),
         "slack_last_event_at": last.isoformat() if last else None,
     }
+
+
+@router.post("/ops/seed")
+def seed(request: Request):
+    """Refresh the configured company's seed in place. Merges by id and never deletes, so
+    memories, workspaces and GitHub history survive; the counts say what changed."""
+    if denied := _admin_denial(request):
+        return denied
+    report = seed_company(company_module(settings.seed_company))
+    log.info("[ops] seed merged company=%s created nodes=%d edges=%d set=%d", report.company, report.nodes_created, report.edges_created, report.properties_set)
+    return {"company": settings.seed_company, "mode": "merge", **dataclasses.asdict(report)}
 
 
 @router.api_route("/mcp", methods=["GET", "POST", "DELETE"], include_in_schema=False)

@@ -24,6 +24,7 @@ Graph shape, also what ``src/seed/seed.py`` writes::
 
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -375,7 +376,8 @@ def record_decision(args: dict, scopes: list[str]) -> ToolResult:
     sources = _sources(graph, args.get("sources") or [], scopes)
     proposer = _person_for_slack_user(graph, args.get("asker_slack_user_id"))
     channel_id = _channel_id(args)
-    decision_id = f"decision-{_slug(title)}-{decided_at}"
+    # The time alone could collide for two decisions in one millisecond; the suffix cannot.
+    decision_id = f"decision-{_slug(title)}-{decided_at}-{uuid.uuid4().hex[:6]}"
     aliases = ", ".join(dict.fromkeys(str(value) for value in (args.get("about"), args.get("supersedes")) if value))
 
     graph.query(

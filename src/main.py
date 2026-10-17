@@ -21,7 +21,7 @@ from src.domain.slack.compute import register_turn_agent
 from src.domain.slack.turn import approval_expiry, reaction_queue  # noqa: F401  register expiry and reaction jobs
 from src.domain.slack.turn import reset as turn_reset
 from src.domain.slack.workspace import list_connected_workspaces
-from src.seed.seed import reset_and_seed
+from src.seed.seed import company_module, reset_and_seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ def _seed_if_empty() -> None:
         _, graph = connect()
         nodes = graph.query("MATCH (n) RETURN count(n)").result_set[0][0]
         if nodes == 0:
-            log.info("graph is empty; seeding the company (SEED_ON_STARTUP)")
-            reset_and_seed()
+            log.info("graph is empty; seeding %s (SEED_ON_STARTUP)", settings.seed_company)
+            reset_and_seed(company_module(settings.seed_company))
     ensure_indexes()
 
 

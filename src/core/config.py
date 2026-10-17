@@ -19,6 +19,8 @@ class Settings:
     falkordb_password: str = field(default_factory=lambda: os.getenv("FALKORDB_PASSWORD", ""))
     # Seed the company graph on startup when it's empty. Local development only; off in production.
     seed_on_startup: bool = field(default_factory=lambda: os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"))
+    # Which seed the startup seed and POST /ops/seed load: company_brain (ourselves) or quillfern (the demo company).
+    seed_company: str = field(default_factory=lambda: os.getenv("SEED_COMPANY", "") or "company_brain")
 
     slack_bot_token: str = field(default_factory=lambda: os.getenv("SLACK_BOT_TOKEN", ""))
     # Slack Web API origin. Tests and the demo replay point it at a local fake (scripts/replay/slack_api.py).
