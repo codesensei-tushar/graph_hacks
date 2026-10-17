@@ -101,7 +101,7 @@
     statusLine.textContent = "Walking the graph…";
     statusLine.classList.remove("error");
     out.replaceChildren();
-    history.replaceState(null, "", `?q=${encodeURIComponent(q)}#ask`);
+    history.replaceState(null, "", `?q=${encodeURIComponent(q)}`);
     try {
       const response = await fetch(`/api/ask?q=${encodeURIComponent(q)}`);
       const data = await response.json();
@@ -118,6 +118,7 @@
   function render(data) {
     statusLine.textContent = "";
     out.replaceChildren();
+    if (data.notice) out.append(el("p", { class: "notice" }, data.notice));
     out.append(el("p", { class: "text" }, data.answer));
 
     const edges = data.edges || [];
@@ -191,78 +192,100 @@
   }
 
   // --- Drawing the path --------------------------------------------------------------------
-  // Columns follow the arrows: a node reached along an outgoing edge sits one column to the
-  // right of the node it was reached from, one reached against an edge sits to the left.
-  // The walk starts from the node with the most edges, which is the thing the question named.
+  // A small layered layout in which every edge points left to right. A node's column is the
+  // longest chain of edges leading into it; a node nothing points at moves right until it sits
+  // just before the nearest thing it points at. Rows follow the neighbours (barycentre sweeps)
+  // and every column is centred, so a hub sits level with what surrounds it.
 
   const NODE_H = 40;
-  const ROW_H = 60;
-  const COL_GAP = 84;
+  const ROW_H = 58;
+  const COL_GAP = 112;
   const PAD = 22;
+  const LABEL_GAP = 13;
 
   function layout(nodes, edges) {
-    const degree = new Map(nodes.map((node) => [node.id, 0]));
-    for (const edge of edges) { degree.set(edge.source, degree.get(edge.source) + 1); degree.set(edge.target, degree.get(edge.target) + 1); }
-    const column = new Map();
-    const order = [];
-    const unvisited = new Set(nodes.map((node) => node.id));
-    while (unvisited.size) {
-      let start = null;
-      for (const id of unvisited) if (start === null || degree.get(id) > degree.get(start)) start = id;
-      column.set(start, 0);
-      unvisited.delete(start);
-      const queue = [start];
-      while (queue.length) {
-        const id = queue.shift();
-        order.push(id);
-        for (const edge of edges) {
-          if (edge.source === id && unvisited.has(edge.target)) { unvisited.delete(edge.target); column.set(edge.target, column.get(id) + 1); queue.push(edge.target); }
-          if (edge.target === id && unvisited.has(edge.source)) { unvisited.delete(edge.source); column.set(edge.source, column.get(id) - 1); queue.push(edge.source); }
-        }
-      }
+    const ids = nodes.map((node) => node.id);
+    const outs = new Map(ids.map((id) => [id, []]));
+    const ins = new Map(ids.map((id) => [id, []]));
+    for (const edge of edges) {
+      if (edge.source === edge.target) continue;
+      outs.get(edge.source).push(edge.target);
+      ins.get(edge.target).push(edge.source);
     }
-    const distinct = [...new Set(column.values())].sort((a, b) => a - b);
-    const index = new Map(distinct.map((value, i) => [value, i]));
-    const columns = distinct.map(() => []);
-    for (const id of order) columns[index.get(column.get(id))].push(id);
-
-    // Rows: keep each node near the rows of the neighbours already placed to its left.
-    const row = new Map();
-    columns.forEach((ids, c) => {
-      if (c > 0) {
-        const key = (id) => {
-          const rows = [];
-          for (const edge of edges) {
-            const other = edge.source === id ? edge.target : edge.target === id ? edge.source : null;
-            if (other !== null && row.has(other) && index.get(column.get(other)) < c) rows.push(row.get(other));
-          }
-          return rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : order.indexOf(id);
-        };
-        ids.sort((a, b) => key(a) - key(b) || order.indexOf(a) - order.indexOf(b));
+    const layer = new Map();
+    const visiting = new Set();
+    const depth = (id) => {
+      if (layer.has(id)) return layer.get(id);
+      if (visiting.has(id)) return -1; // an edge that closes a cycle does not push a column
+      visiting.add(id);
+      let best = 0;
+      for (const parent of ins.get(id)) {
+        const d = depth(parent);
+        if (d >= 0) best = Math.max(best, d + 1);
       }
-      ids.forEach((id, r) => row.set(id, r));
-    });
-    return { columns, column: (id) => index.get(column.get(id)), row: (id) => row.get(id) };
+      visiting.delete(id);
+      layer.set(id, best);
+      return best;
+    };
+    ids.forEach(depth);
+    for (const id of ids) {
+      if (ins.get(id).length || !outs.get(id).length) continue;
+      const nearest = Math.min(...outs.get(id).map((child) => layer.get(child)));
+      if (nearest - 1 > layer.get(id)) layer.set(id, nearest - 1);
+    }
+
+    const count = Math.max(...layer.values()) + 1;
+    const columns = Array.from({ length: count }, () => []);
+    for (const id of ids) columns[layer.get(id)].push(id);
+    const pos = new Map();
+    const place = () => columns.forEach((col) => col.forEach((id, r) => pos.set(id, r - (col.length - 1) / 2)));
+    const sweep = (order, side) => {
+      for (const c of order) {
+        const key = new Map(columns[c].map((id) => {
+          const near = side.get(id).filter((other) => pos.has(other));
+          return [id, near.length ? near.reduce((sum, other) => sum + pos.get(other), 0) / near.length : pos.get(id)];
+        }));
+        columns[c].sort((a, b) => key.get(a) - key.get(b));
+        columns[c].forEach((id, r) => pos.set(id, r - (columns[c].length - 1) / 2));
+      }
+    };
+    place();
+    const down = [...columns.keys()].slice(1);
+    const up = [...columns.keys()].reverse().slice(1);
+    sweep(down, ins);
+    sweep(up, outs);
+    sweep(down, ins);
+    const row = new Map();
+    columns.forEach((col) => col.forEach((id, r) => row.set(id, r)));
+    return { columns, column: (id) => layer.get(id), row: (id) => row.get(id), ins, outs };
   }
 
   function drawPath(nodes, edges) {
     const byId = new Map(nodes.map((node) => [node.id, node]));
-    const { columns, column, row } = layout(nodes, edges);
-    const width = (id) => Math.min(220, Math.max(96, Math.round(byId.get(id).name.length * 7.4 + 26)));
+    const { columns, column, row, ins, outs } = layout(nodes, edges);
+    const width = (id) => Math.min(200, Math.max(96, Math.round(byId.get(id).name.length * 7.4 + 26)));
     const colWidth = columns.map((ids) => Math.max(...ids.map(width)));
     const colX = [];
     let x = PAD;
     columns.forEach((ids, c) => { colX.push(x); x += colWidth[c] + COL_GAP; });
-    const totalWidth = x - COL_GAP + PAD;
-    const totalHeight = PAD * 2 + Math.max(...columns.map((ids) => ids.length)) * ROW_H - (ROW_H - NODE_H);
+    const tallest = Math.max(...columns.map((ids) => ids.length));
+    const sameColumnEdges = edges.some((edge) => column(edge.source) >= column(edge.target));
+    const totalWidth = x - COL_GAP + PAD + (sameColumnEdges ? 60 : 0);
+    const totalHeight = PAD * 2 + tallest * ROW_H - (ROW_H - NODE_H);
 
     const box = (id) => {
       const c = column(id);
       const w = width(id);
-      return { x: colX[c] + (colWidth[c] - w) / 2, y: PAD + row(id) * ROW_H, w, h: NODE_H };
+      const offset = ((tallest - columns[c].length) * ROW_H) / 2;
+      return { x: colX[c] + (colWidth[c] - w) / 2, y: PAD + offset + row(id) * ROW_H, w, h: NODE_H };
     };
 
-    const svg = svgEl("svg", { viewBox: `0 0 ${totalWidth} ${totalHeight}`, width: totalWidth, height: totalHeight, role: "img" });
+    // Scales down to fit the column on a wide screen; on a phone it keeps a readable size and scrolls.
+    const svg = svgEl("svg", {
+      viewBox: `0 0 ${totalWidth} ${totalHeight}`,
+      role: "img",
+      style: `width:100%;height:auto;max-width:${totalWidth}px;min-width:${Math.min(totalWidth, 560)}px`,
+    });
     const caption = svgEl("title");
     caption.textContent = `The path: ${edges.length} edges over ${nodes.length} nodes`;
     svg.append(caption);
@@ -277,37 +300,48 @@
     svg.append(edgeLayer, nodeLayer);
 
     const edgeEls = [];
+    const labels = [];
     for (const edge of edges) {
       const a = box(edge.source);
       const b = box(edge.target);
-      let d, mid;
-      if (column(edge.target) > column(edge.source)) {
-        const p0 = [a.x + a.w, a.y + a.h / 2], p3 = [b.x, b.y + b.h / 2];
+      const from = column(edge.source);
+      const to = column(edge.target);
+      let p0, p1, p2, p3, labelX;
+      if (to > from) {
+        p0 = [a.x + a.w, a.y + a.h / 2];
+        p3 = [b.x, b.y + b.h / 2];
         const dx = Math.max(30, (p3[0] - p0[0]) / 2);
-        const p1 = [p0[0] + dx, p0[1]], p2 = [p3[0] - dx, p3[1]];
-        d = `M${p0} C${p1} ${p2} ${p3}`;
-        mid = bezierMid(p0, p1, p2, p3);
-      } else if (column(edge.target) < column(edge.source)) {
-        const p0 = [a.x, a.y + a.h / 2], p3 = [b.x + b.w, b.y + b.h / 2];
-        const dx = Math.max(30, (p0[0] - p3[0]) / 2);
-        const p1 = [p0[0] - dx, p0[1]], p2 = [p3[0] + dx, p3[1]];
-        d = `M${p0} C${p1} ${p2} ${p3}`;
-        mid = bezierMid(p0, p1, p2, p3);
+        p1 = [p0[0] + dx, p0[1]];
+        p2 = [p3[0] - dx, p3[1]];
+        // Converging edges are labelled near their source, diverging ones near their target,
+        // so labels spread out where the edges do instead of piling up at the hub.
+        const converging = ins.get(edge.target).length > 1 && outs.get(edge.source).length === 1;
+        const diverging = outs.get(edge.source).length > 1 && ins.get(edge.target).length === 1;
+        const gap = diverging ? to - 1 : from;
+        const gapStart = colX[gap] + colWidth[gap];
+        labelX = gapStart + COL_GAP * (converging ? 0.38 : diverging ? 0.62 : 0.5);
       } else {
-        const p0 = [a.x + a.w, a.y + a.h / 2], p3 = [b.x + b.w, b.y + b.h / 2];
+        // Same column, or against the columns because of a cycle: bow out to the right.
+        p0 = [a.x + a.w, a.y + a.h / 2];
+        p3 = [b.x + b.w, b.y + b.h / 2];
+        const right = Math.max(p0[0], p3[0]);
         const bulge = 46 + Math.abs(a.y - b.y) / 6;
-        const p1 = [p0[0] + bulge, p0[1]], p2 = [p3[0] + bulge, p3[1]];
-        d = `M${p0} C${p1} ${p2} ${p3}`;
-        mid = bezierMid(p0, p1, p2, p3);
+        p1 = [right + bulge, p0[1]];
+        p2 = [right + bulge, p3[1]];
+        labelX = null;
       }
       const group = svgEl("g", { class: "edge" });
-      group.append(svgEl("path", { d, "marker-end": "url(#arrow)" }));
-      const label = svgEl("text", { x: mid[0], y: mid[1] - 5, "text-anchor": "middle" });
+      group.append(svgEl("path", { d: `M${p0} C${p1} ${p2} ${p3}`, "marker-end": "url(#arrow)" }));
+      const t = labelX === null ? 0.5 : tAtX(p0, p1, p2, p3, labelX);
+      const point = bezierAt(p0, p1, p2, p3, t);
+      const label = svgEl("text", { "text-anchor": "middle" });
       label.textContent = edge.rel;
       group.append(label);
+      labels.push({ label, x: point[0], y: point[1] - 4 });
       edgeLayer.append(group);
       edgeEls.push(group);
     }
+    spreadLabels(labels);
 
     const nodeEls = new Map();
     for (const node of nodes) {
@@ -332,7 +366,40 @@
     return { svg, edgeEls, nodeEls };
   }
 
-  const bezierMid = (p0, p1, p2, p3) => [0, 1].map((i) => (p0[i] + 3 * p1[i] + 3 * p2[i] + p3[i]) / 8);
+  // Labels that share a column gap are nudged apart vertically so none sits on another.
+  function spreadLabels(labels) {
+    const byGap = new Map();
+    for (const item of labels) {
+      const key = Math.round(item.x / 24);
+      if (!byGap.has(key)) byGap.set(key, []);
+      byGap.get(key).push(item);
+    }
+    for (const group of byGap.values()) {
+      group.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < group.length; i += 1) {
+        if (group[i].y - group[i - 1].y < LABEL_GAP) group[i].y = group[i - 1].y + LABEL_GAP;
+      }
+    }
+    for (const item of labels) {
+      item.label.setAttribute("x", item.x.toFixed(1));
+      item.label.setAttribute("y", item.y.toFixed(1));
+    }
+  }
+
+  const bezierAt = (p0, p1, p2, p3, t) => {
+    const u = 1 - t;
+    return [0, 1].map((i) => u * u * u * p0[i] + 3 * u * u * t * p1[i] + 3 * u * t * t * p2[i] + t * t * t * p3[i]);
+  };
+  // The parameter at which the curve reaches x. The curves here only move right, so x grows with t.
+  const tAtX = (p0, p1, p2, p3, x) => {
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 24; i += 1) {
+      const mid = (lo + hi) / 2;
+      if (bezierAt(p0, p1, p2, p3, mid)[0] < x) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+  };
   const clip = (text, max) => (text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}…`);
 
   // --- Proof: the same questions with the graph switched off --------------------------------

@@ -16,6 +16,7 @@ graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WIN
 """
 
 import math
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -78,6 +79,23 @@ DEMO: dict[str, list[dict[str, str]]] = {
     ],
 }
 _QUESTION_KEYS = ("name", "topic", "query", "source")
+
+# The Slack commands that write the graph. Typed here, they get the read that answers the
+# same need, and a notice that the write itself happens in Slack behind an Approve card.
+_WRITE_COMMAND = re.compile(r"^(ticket|decision|remember)\s*:\s*(.*)$", re.IGNORECASE)
+_WRITE_READS = {
+    "ticket": (
+        "who_knows",
+        "Filing a ticket writes the graph, so it happens in Slack, after an Approve card names the service it will link to. "
+        "Here is who would look at it:",
+    ),
+    "decision": (
+        "decision_trace",
+        "Recording a decision writes the graph, so it happens in Slack, after an Approve card names the decision it replaces. "
+        "Here is what stands now:",
+    ),
+    "remember": ("recall", "Saving a memory writes the graph, so it happens in Slack. Here is what the memories already say:"),
+}
 
 
 class ToolRefused(ValueError):
@@ -222,9 +240,12 @@ class AskAnswer:
     edges: list[GraphEdge] = field(default_factory=list)
     memories: list[dict] = field(default_factory=list)
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
+    # Set when the question was a Slack write command: where the write happens instead.
+    notice: str = ""
 
     def to_dict(self) -> dict:
         return {
+            "notice": self.notice,
             "question": self.question,
             "tool": self.tool,
             "picked_by": self.picked_by,
@@ -290,6 +311,12 @@ def answer_question(question: str, tool: str | None = None, use_model: bool = Fa
 
 
 def _answer(question: str, tool: str | None, use_model: bool, read_scopes: list[str]) -> AskAnswer:
+    command = _WRITE_COMMAND.match(question) if tool is None else None
+    if command and command.group(2).strip():
+        read_tool, notice = _WRITE_READS[command.group(1).lower()]
+        answer = _answer(command.group(2).strip(), read_tool, False, read_scopes)
+        answer.question, answer.notice = question, notice
+        return answer
     if tool is not None:
         spec = _read_spec(tool)
         choice = agent.ToolChoice(spec.name, _args_for(spec, question), "caller")

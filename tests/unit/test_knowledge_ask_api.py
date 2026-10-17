@@ -75,7 +75,7 @@ class AskApiTest(unittest.TestCase):
         self.assertEqual(answer.path, [{"from": "Arjun Mehta", "rel": "OWNS", "to": "Billing Service"}, {"from": "Billing Service", "rel": "DEPENDS_ON", "to": "Postgres"}])
         as_dict = answer.to_dict()
         self.assertEqual(
-            set(as_dict), {"question", "tool", "picked_by", "answer", "found", "candidates", "depth", "path", "nodes", "edges", "memories", "scopes"}
+            set(as_dict), {"notice", "question", "tool", "picked_by", "answer", "found", "candidates", "depth", "path", "nodes", "edges", "memories", "scopes"}
         )
         self.assertEqual(len(as_dict["edges"]), len(as_dict["path"]))
 
@@ -126,3 +126,26 @@ class AskApiTest(unittest.TestCase):
         self.assertEqual([node.id for node in nodes], ["arjun", "billing-service", "Billing Service", "TKT-102"])
         self.assertEqual(nodes[3].label, "Ticket")  # a later step filled the label in
         self.assertEqual(len(edges), 2)
+
+    def test_a_slack_write_command_runs_the_matching_read_tool_and_never_the_writer(self):
+        def run(choice, question, scopes):
+            return ToolResult(tool=choice.tool, answer=f"read {question!r} with {choice.args}"), choice
+
+        with (
+            mock.patch.object(agent, "choose_with_keywords") as keywords,
+            mock.patch.object(ask_api, "_read_spec", wraps=ask_api._read_spec) as read_spec,
+            mock.patch.object(agent, "run_choice", side_effect=run),
+        ):
+            answer = ask_api.answer_question("ticket: billing exports time out")
+        keywords.assert_not_called()
+        read_spec.assert_called_once_with("who_knows")
+        self.assertEqual((answer.tool, answer.picked_by), ("who_knows", "caller"))
+        self.assertEqual(answer.answer, "read 'billing exports time out' with {'name': 'billing exports time out'}")
+        self.assertEqual(answer.question, "ticket: billing exports time out")
+        self.assertTrue(answer.notice.startswith("Filing a ticket writes the graph, so it happens in Slack"))
+
+    def test_a_bare_command_or_a_question_about_a_decision_gets_no_notice(self):
+        with mock.patch.object(agent, "choose_with_keywords", return_value=agent.ToolChoice("probe_read", {"name": "x"}, "keywords")):
+            self.assertEqual(ask_api.answer_question("ticket:").notice, "")
+            self.assertEqual(ask_api.answer_question("why did we decide to move billing").notice, "")
+
