@@ -54,8 +54,10 @@ flowchart LR
     Person -- WORKED_ON --> Ticket
     Person -- "PROPOSED / APPROVED" --> Decision
     Decision -- ABOUT --> Service
-    Decision -- CITES --> Document
-    Decision -- CITES --> Ticket
+    Decision -- "BASED_ON / CITES" --> Document
+    Decision -- "BASED_ON / CITES" --> Ticket
+    Decision -- SUPERSEDES --> Decision
+    Decision -- DECIDED_IN --> Channel
     Chat -- ABOUT --> Decision
   end
   subgraph github[GitHub, scope org_shared or github_repo_id]
@@ -92,7 +94,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 | `Service` | `id`, `name`, `aliases`, `summary`, `paths` (repo prefixes a pull request can touch) | `-[:DEPENDS_ON]->(Service)` |
 | `Document` | `id`, `name`, `summary` | `-[:DESCRIBES]->(Service)` |
 | `Ticket` | `id`, `name`, `title`, `summary`, `scope`; from GitHub also `number`, `state`, `url`, `source = 'github'`, `updated_at` | `-[:ABOUT]->(Service)`, `-[:IN_REPO]->(Repo)` |
-| `Decision` | `id`, `name`, `summary`, `aliases` | `-[:ABOUT]->(Service)`, `-[:CITES]->(Document\|Ticket)` |
+| `Decision` | `id`, `name`, `summary`, `aliases`, `decided_at` (ms), `scope` | `-[:ABOUT]->(Service)`, `-[:BASED_ON]->(Document\|Ticket\|PullRequest)` (older seeds: `CITES`, still read), `-[:SUPERSEDES]->(Decision)`, `-[:DECIDED_IN]->(Channel\|Document)` |
 | `Chat` | `id`, `name`, `summary` | `-[:ABOUT]->(Decision)` |
 
 **Slack** (`src/domain/slack/`):
@@ -120,7 +122,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 | `GitHubUser` | `id`, `login`, `name` | `-[:IS]->(Person)`, `-[:CAN_READ {user}]->(Repo)`, `-[:AUTHORED]->(PullRequest)`, `-[:REVIEWED {state}]->(PullRequest)`, `-[:OPENED\|ASSIGNED]->(Ticket)` |
 | `PullRequest` | `id`, `name`, `number`, `title`, `summary`, `state`, `merged`, `url`, `scope`, `updated_at` | `-[:IN_REPO]->(Repo)`, `-[:TOUCHES]->(Service)`, `-[:CLOSES]->(Ticket)` |
 
-**Landing this week** (docs/STRATEGY.md items 2 and 4): `Decision` gains `decided_at` and `rationale`, plus `-[:SUPERSEDES]->(Decision)`, `-[:DECIDED_IN]->(Channel|Document)`, `-[:BASED_ON]->(Document|Ticket|PullRequest)` and `-[:MADE_BY]->(Person)`, so a later message that changes a plan supersedes the old decision instead of overwriting it. `Memory` gains `embedding` with a vector index for semantic recall next to the full-text index.
+**Decisions stay current.** A decision recorded from Slack (`decision: <title>`, or the agent's `record_decision` tool, both behind an Approve card that names what the write will replace) gets `decided_at` and the room's `scope`, `SUPERSEDES` the standing decision it replaces, is `DECIDED_IN` the channel, and is `BASED_ON` the documents, tickets or pull requests it names. Nothing is deleted: asking about a superseded decision answers "*old* is no longer current" and then the current one, with both dates. Vector recall was left out on purpose for the hackathon; recall follows `MENTIONS` edges instead (see `related_memories` below).
 
 **Indexes** (`ensure_indexes` in `src/domain/memory/memory_service.py`): range indexes on `Memory.scope`, `Memory.id`, `Memory.custom_id`, `Tag.id`, `Tag.container`, `Scope.id`, `SlackUser.id`, `Channel.id`; a full-text index on `Memory.text`; the vector index on `Memory.embedding` once item 4 lands.
 
@@ -141,6 +143,7 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
 | `recall` | Memories whose text matches the question, dated, no path | no |
 | `ingest_ticket` | Files a ticket about a service, then answers who should look at it | yes, after Approve |
+| `record_decision` | Records a decision, links it to its services and sources, and supersedes the one it replaces | yes, after Approve; the card names what it replaces |
 
 **Name resolution, before any tool runs.** The question is matched against names, aliases and titles the asker may see. No match means the tool answers that the graph doesn't know the thing, and names the nearest candidates. It never guesses.
 
@@ -181,20 +184,40 @@ OPTIONAL MATCH (gh)-[:IS]->(person:Person)
 RETURN coalesce(person.name, '@' + gh.login), type(rel), pr.name, service.name
 ```
 
-**decision_trace** (who proposed and approved, what it cites, the chat it came from):
+**decision_trace** (the decision that stands today, who made it, what it rests on, where it was decided, and what it replaced). The question's decision is resolved, then `SUPERSEDES` is followed forward to the current one; a stale decision answers "*old* (decided <date>) is no longer current." first.
 
 ```cypher
+MATCH (newer:Decision)-[:SUPERSEDES]->(:Decision {id: $id})
+WHERE coalesce(newer.scope, 'org_shared') IN $scopes
+RETURN newer.id, newer.name, coalesce(newer.summary, ''), newer.decided_at
+ORDER BY coalesce(newer.decided_at, 0) DESC LIMIT 1
+
 MATCH (person:Person)-[rel:PROPOSED|APPROVED]->(decision:Decision {id: $id})
-RETURN person.name, type(rel), decision.name, decision.summary
+RETURN person.id, person.name, type(rel) ORDER BY type(rel) DESC, person.name
 
-MATCH (decision:Decision {id: $id})-[rel:CITES|ABOUT]->(source)
+MATCH (:Decision {id: $id})-[rel:BASED_ON|CITES]->(source)
 WHERE coalesce(source.scope, 'org_shared') IN $scopes
-RETURN decision.name, type(rel), source.name, labels(source)[0]
+RETURN source.id, source.name, labels(source)[0], type(rel) ORDER BY source.name
 
-MATCH (chat:Chat)-[:ABOUT]->(decision:Decision {id: $id})
-WHERE coalesce(chat.scope, 'org_shared') IN $scopes
-OPTIONAL MATCH (author:Person)-[:AUTHORED]->(chat)
-RETURN author.name, chat.name, chat.summary
+MATCH (:Decision {id: $id})-[:DECIDED_IN]->(place)
+RETURN place.id, coalesce(place.name, place.id), labels(place)[0]
+
+MATCH (:Decision {id: $id})-[:SUPERSEDES]->(older:Decision)
+WHERE coalesce(older.scope, 'org_shared') IN $scopes
+RETURN older.id, older.name, coalesce(older.summary, ''), older.decided_at
+ORDER BY coalesce(older.decided_at, 0) DESC LIMIT 1
+```
+
+**record_decision** (after Approve). Writes the decision in the room's scope with the message time as `decided_at`, links the proposer, every service the title names, the documents, tickets or pull requests it is based on, the channel it was decided in, and the decision it supersedes: the one named outright, or else the standing decision about the same services that shares a word with the title, which the card showed before Approve. A named decision that does not resolve is refused with the nearest names, never guessed.
+
+```cypher
+MERGE (d:Decision {id: $id})
+SET d.name = $name, d.summary = $summary, d.aliases = $aliases, d.decided_at = $decided_at, d.scope = $scope
+
+MATCH (p:Person {id: $p}), (d:Decision {id: $d}) MERGE (p)-[:PROPOSED]->(d)
+MATCH (d:Decision {id: $d}), (s:Service {id: $s}) MERGE (d)-[:ABOUT]->(s)
+MATCH (d:Decision {id: $d}), (o:Decision {id: $o}) MERGE (d)-[:SUPERSEDES]->(o)
+MERGE (c:Channel {id: $c}) WITH c MATCH (d:Decision {id: $d}) MERGE (d)-[:DECIDED_IN]->(c)
 ```
 
 **blast_radius** (everything that depends on a service, grouped by hop). The walk always runs to the ceiling of six hops so the reply can say where it stopped finding anything new; the depth the asker named is clamped to an integer in Python and applied to the rows. The bound in the query is a constant, never a value from the question. Betweenness names the main connector among the services hit.

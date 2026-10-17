@@ -205,6 +205,7 @@ The submit page renders only in a browser, so the exact fields are unknown until
 | When (IST) | What | Owner |
 | --- | --- | --- |
 | Morning | Last code PRs merge: agent loop, decisions, replay. Seed Quillfern and replay the history on the dev instance | coders, coordinator |
+| Morning, before recording | Production's graph predates the new decisions and the app only seeds an empty graph. Run the seed **upsert** against production (`POST /ops/seed` behind the admin token, or `scripts/seed_graph.py --merge`), never the reset, and confirm `why did we cut vector recall` answers with both dates | user |
 | Late morning | Record the video to the storyboard above. Redo once if a step stumbles | team |
 | Early afternoon | Publish the blog from docs/BLOG.md; link it from the README | coder B |
 | Afternoon | Final merge. CI deploys main. Run the seven steps against production once | coordinator |
@@ -237,7 +238,7 @@ Type these exactly, in this order, in the dev Slack workspace connected to produ
 - `/healthz` on production reports the git SHA of the final merge.
 - The GitHub App is installed on production for this repository, so pull requests that touched `src/domain/memory` are in the graph. Check in the FalkorDB Browser with `MATCH (p:PullRequest) RETURN count(p)`; if it is zero, step 1 shows only the `OWNS` edge and the private-repo step cannot be shown.
 - One private test repository is installed on the same App with one pull request by the recorder's GitHub account. The recorder has done `link github` in a DM; a second teammate has not.
-- Coder B's seeded decision pair (hybrid vector recall, superseded by recall over edges) is on main.
+- Coder B's seeded decision pair (hybrid vector recall, superseded by recall over edges) is on main **and has been upserted into production** with the seed merge, never the reset, which would wipe the real workspace data.
 - `LLM_API_KEY` is set on production, so the footer says "picked by the model". Without it the footer says "picked by keywords"; both are honest, say which one is on screen.
 - The seeded chat and document summaries name the hosted product this layer was modelled on. Decide before recording whether that is acceptable on screen; renaming them in `src/seed/company_brain.py` is a one-line seed change per entry.
 
@@ -269,7 +270,7 @@ What it shows: the same catalogue, the same questions, run twice, once with Falk
 
 - **Mechanism.** A context variable in `src/db/falkordb_client.py`, `graph_reads_disabled`, with a `dark_graph()` context manager that sets it. While set, `connect()` returns the real client plus a proxy graph whose `query` and `ro_query` return an object with an empty `result_set` without touching FalkorDB. Nothing else changes: the resolver sees no rows and returns `found=False`, every tool returns an empty path, memory search returns nothing. The proof only runs read tools, so the proxy never has to refuse a write; still, log a warning if `query` is called with `CREATE`, `MERGE`, `SET` or `DELETE` in it.
 - **Domain.** `src/domain/knowledge/proof.py`. `QUESTIONS: dict[str, list[str]]` keyed by the seeded `Company.id` (`quillfern`, `company-brain`), six read questions each: ownership, who knows, a decision, blast radius, a path or depth question, and a question about something not in the graph. `run_proof(scopes=("org_shared",)) -> ProofReport`. Dataclasses: `ProofOutcome(answer, found, steps)`, `ProofRow(question, tool, with_graph, without_graph, collapsed)`, `ProofReport(company, rows, collapsed, total)`. Each question goes through `ask_service.route` and the catalogue, never the model, so the result is deterministic. `collapsed = with_graph.found and with_graph.steps > 0 and not (without_graph.found and without_graph.steps > 0)`. The not-in-graph question is expected to refuse both ways; its row says so, which is the point: the refusal does not depend on the graph being up.
-- **Route.** `GET /api/proof` in `src/api/v1/proof.py`, bearer `BRAIN_ADMIN_TOKEN` exactly like `/slack/status` (503 until set, 401 on a wrong token). Returns the report as JSON; `?format=text` returns a fixed-width table for the terminal shot. One function call in the route, nothing else.
+- **Route.** `GET /api/proof` in `src/api/v1/proof.py`, bearer `BRAIN_ADMIN_TOKEN` exactly like `/slack/status` (503 until set, 401 with no token, 403 on a wrong one). Returns the report as JSON; `?format=text` returns a fixed-width table for the terminal shot. One function call in the route, nothing else.
 - **Tests.** Unit: the proxy returns empty result sets and never opens a connection. Integration on Quillfern: `collapsed == total - 1`, every `with_graph` row has at least one step, the `without_graph` answers are refusals, and the route answers 401 and 200.
 - **README.** One line under the query section: the curl and what the report means.
 
