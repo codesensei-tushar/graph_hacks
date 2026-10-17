@@ -164,7 +164,7 @@ register(
         name="blast_radius",
         description=(
             "What stops working if a service goes down: the services that depend on it, following DEPENDS_ON edges "
-            "for a number of hops, with the main connector by betweenness."
+            "for a number of hops, with the main connector: the one most of the others reach it through."
         ),
         args_schema=_schema(
             {

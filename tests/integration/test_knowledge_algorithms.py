@@ -84,15 +84,25 @@ class AlgorithmToolsTest(unittest.TestCase):
         self.assertIn("nothing new past depth 2", result.answer)
         self.assertEqual(len({step.from_name for step in result.path}), 6)
 
-    def test_the_main_connector_comes_from_betweenness(self):
+    def test_the_main_connector_is_counted_from_the_walked_routes(self):
+        # Invoice Worker reaches Auth through Billing and through Notification, one route each: a tie, both named.
         result = algorithms.blast_radius("auth", ORG)
-        # The connector is one of the affected services, never the one that went down.
-        self.assertIn("Among them, Billing Service is the main connector: the most shortest dependency paths run through it.", result.answer)
-        self.assertNotIn("Auth Service is the main connector", result.answer)
-        # Betweenness is fractional; no score is printed as if it were a count of paths.
-        self.assertNotRegex(result.answer, r"\d+\.\d+")
-        self.assertEqual(algorithms._main_connector(falkordb_client.connect()[1], ["billing-service"]), "Billing Service")
-        self.assertIsNone(algorithms._main_connector(falkordb_client.connect()[1], ["legacy-ftp"]))
+        self.assertTrue(
+            result.answer.endswith(
+                "Among them, Billing Service and Notification Service are the main connectors: 1 of the 5 reaches Auth Service through each."
+            ),
+            result.answer,
+        )
+        # Counted out to saturation, so a depth-1 answer still names the connector its listed services carry.
+        one = algorithms.blast_radius("auth", ORG, depth=1)
+        self.assertIn("are the main connectors: 1 of the 5 reaches Auth Service through each.", one.answer)
+        postgres = algorithms.blast_radius("postgres", ORG)
+        self.assertTrue(postgres.answer.endswith("Among them, Auth Service is the main connector: 3 of the 6 reach Postgres through it."), postgres.answer)
+        # Whole numbers only; no fractional score reads as a count of paths.
+        self.assertNotRegex(postgres.answer, r"\d+\.\d+")
+        # A dependent with no other service on its way names no connector.
+        billing = algorithms.blast_radius("billing", ORG)
+        self.assertNotIn("connector", billing.answer)
 
     def test_a_leaf_has_no_dependents_and_an_unknown_service_is_refused(self):
         self.assertEqual(algorithms.blast_radius("invoice worker", ORG).answer, "Nothing in the graph depends on Invoice Worker.")
