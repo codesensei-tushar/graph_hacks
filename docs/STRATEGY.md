@@ -206,6 +206,7 @@ The submit page renders only in a browser, so the exact fields are unknown until
 | When (IST) | What | Owner |
 | --- | --- | --- |
 | Morning | Last code PRs merge: agent loop, decisions, replay. Seed Quillfern and replay the history on the dev instance | coders, coordinator |
+| First thing in the morning | Production answers 503 on `/api/proof`, `/mcp` and `POST /ops/seed` because `BRAIN_ADMIN_TOKEN` and `MCP_TOKEN` are not in Secret Manager yet. Create both and redeploy: `read -rs V && printf '%s' "$V" \| gcloud secrets create BRAIN_ADMIN_TOKEN --data-file=- --configuration=graphhacks; unset V`, the same for `MCP_TOKEN` (use `openssl rand -hex 32` for each value), then `gh workflow run deploy.yml`. Verify: `curl -s -o /dev/null -w '%{http_code}' https://brain.noobsurd.space/api/proof` prints 401, not 503, and the same for a POST to `/mcp`. Keep both tokens out of the repo; the MCP token goes to the judges in the private submission notes | user |
 | Morning, before recording | Production's graph predates the new decisions and the app only seeds an empty graph. Refresh the seed in place, never the reset: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. Expect `{"company": "company_brain", "mode": "merge", ...}` with `nodes_created` 3 (the two decisions and the strategy document) and a handful of `edges_created`; a second call returns 0/0/0. Then confirm in Slack that `why did we cut vector recall` answers with both dates | user |
 | Late morning | Record the video to the storyboard above. Redo once if a step stumbles | team |
 | Early afternoon | Publish the blog from docs/BLOG.md; link it from the README | coder B |
@@ -237,6 +238,7 @@ Type these exactly, in this order, in the dev Slack workspace connected to produ
 **Before the first take**
 
 - `/healthz` on production reports the git SHA of the final merge.
+- `BRAIN_ADMIN_TOKEN` and `MCP_TOKEN` exist in Secret Manager and the redeploy has run: `/api/proof` and `/mcp` answer 401 without a token, not 503.
 - The GitHub App is installed on production for this repository, so pull requests that touched `src/domain/memory` are in the graph. Check in the FalkorDB Browser with `MATCH (p:PullRequest) RETURN count(p)`; if it is zero, step 1 shows only the `OWNS` edge and the private-repo step cannot be shown.
 - One private test repository is installed on the same App with one pull request by the recorder's GitHub account. The recorder has done `link github` in a DM; a second teammate has not.
 - The production seed refresh runs after the alias fix from #39 is on main (it is), so `who knows github ingest` resolves instead of refusing as ambiguous.
