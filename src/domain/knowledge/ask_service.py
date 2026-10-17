@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, kinds, memories, resolve
+from src.domain.knowledge import algorithms, bridges, kinds, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -60,6 +60,8 @@ _BRIEF = re.compile(
     r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b",
     re.IGNORECASE,
 )
+# People between teams. "how is maya connected to the invoice worker" is a path question.
+_CONNECTORS = re.compile(r"\bwho (?:connects|bridges|links)\b|\b(?:bridges?|connectors?|go-betweens?) between\b", re.IGNORECASE)
 
 
 def route(question: str) -> tuple[str, dict]:
@@ -78,6 +80,8 @@ def route(question: str) -> tuple[str, dict]:
         return "decision_pressure", {"topic": text}
     if _LOAD_BEARING.search(text):
         return "load_bearing", {"limit": algorithms.DEFAULT_LOAD_BEARING}
+    if _CONNECTORS.search(text):
+        return "connectors", {"source": text, "target": ""}
     if _PATH.search(text):
         return "path_between", {"source": text, "target": ""}
     if _DECISION.search(text):
@@ -412,6 +416,7 @@ _ROUTED = {
     "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
+    "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth")),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
     "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
