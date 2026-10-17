@@ -115,7 +115,7 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         _merge_node(
             graph,
             "Ticket",
-            {"id": ticket["id"], "name": ticket["name"], "title": ticket["title"], "summary": ticket["summary"]},
+            {"id": ticket["id"], "name": ticket["name"], "title": ticket["title"], "summary": ticket["summary"], "aliases": ticket.get("aliases")},
         )
         _link(graph, "Ticket", ticket["id"], "ABOUT", "Service", ticket["service"])
         _link(graph, "Person", ticket["owner"], "WORKED_ON", "Ticket", ticket["id"])
