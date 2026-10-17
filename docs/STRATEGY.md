@@ -228,6 +228,37 @@ Production keeps the Company Brain self-seed plus the real workspace and GitHub 
 
 Step 4 depends on `blast_radius` taking a depth; until then ask once and read the full set. Step 5 depends on the approval card showing the resolved service. Step 7 needs the private test repo and one `link github` done the day before.
 
+## Recording script, production
+
+Type these exactly, in this order, in the dev Slack workspace connected to production. Each step says the tool that should answer and the edges to read aloud. Hold every reply on screen for three seconds. If a step answers differently, stop and fix before recording on; do not improvise.
+
+**Before the first take**
+
+- `/healthz` on production reports the git SHA of the final merge.
+- The GitHub App is installed on production for this repository, so pull requests that touched `src/domain/memory` are in the graph. Check in the FalkorDB Browser with `MATCH (p:PullRequest) RETURN count(p)`; if it is zero, step 1 shows only the `OWNS` edge and the private-repo step cannot be shown.
+- One private test repository is installed on the same App with one pull request by the recorder's GitHub account. The recorder has done `link github` in a DM; a second teammate has not.
+- Coder B's seeded decision pair (hybrid vector recall, superseded by recall over edges) is on main.
+- `LLM_API_KEY` is set on production, so the footer says "picked by the model". Without it the footer says "picked by keywords"; both are honest, say which one is on screen.
+- The seeded chat and document summaries name the hosted product this layer was modelled on. Decide before recording whether that is acceptable on screen; renaming them in `src/seed/company_brain.py` is a one-line seed change per entry.
+
+| Step | Type | Tool | Read aloud |
+| --- | --- | --- | --- |
+| 1 | In the channel: `@Company Brain who owns the memory layer, and who else has worked on it` | `who_knows` | `Tushar -[OWNS]-> Memory layer`, then one pull request chain: `codesensei-tushar -[AUTHORED]-> graph_hacks#N -[TOUCHES]-> Memory layer`. "The answer is the path." |
+| 2 | `@Company Brain why do we store memory in FalkorDB instead of a hosted memory API` | `decision_trace` | `Tushar -[PROPOSED]-> Store memory in FalkorDB instead of a hosted memory API`, `-[CITES]-> Problem statement`, `-[CITES]-> Slack guide`, and the design chat `-[ABOUT]->` the decision. "Decision, author, sources, and the conversation it came from." |
+| 3 | `@Company Brain why did we cut vector recall` | `decision_trace` | The current decision with its date, then "This replaced *hybrid recall with a vector index* (decided 17 Oct)". "Knowledge stays current without deleting history." Optional live write: `@Company Brain decision: every model profile stays on Haiku through the demo`, Approve on the card that names what it replaces, then `why haiku` to show the chain grow. |
+| 4 | `@Company Brain what breaks if the claude api goes down, one hop` | `blast_radius`, depth 1 | `LLM gateway -[DEPENDS_ON]-> Claude API`, and the sentence "3 more break further out; ask with more hops". Then in the same thread: `and three hops out` |
+| 4b | (thread) `and three hops out` | `blast_radius`, depth 3 | `Slack workspace -[DEPENDS_ON]-> LLM gateway`, `Turn engine -[DEPENDS_ON]-> LLM gateway`, `Memory layer -[DEPENDS_ON]-> LLM gateway`, `Slack events API -[DEPENDS_ON]-> Slack workspace`. "Three hops. A search box could not." |
+| 5 | `@Company Brain ticket: scheduler jobs run twice after a restart` | approval card | Read the card: "File a ticket titled *scheduler jobs run twice after a restart*, linked to *Scheduler*". Click Approve. |
+| 5b | (reply after Approve) | `ingest_ticket` | `TKT-106 -[ABOUT]-> Scheduler`, `Tushar -[OWNS]-> Scheduler`. "Writes wait for a human. The card named the target before the write." |
+| 5c | (thread) `who should look at it` | `who_knows` on the thread's ticket | The Ask-first sentence and `Tushar -[OWNS]-> Scheduler`. |
+| 6 | `@Company Brain who owns the linear integration` | refusal | "Nothing in the graph matches “linear integration”", plus whatever nearest names it offers. "It says what it does not know, and never guesses." |
+| 7 | DM from the unlinked teammate: `who knows github ingest` | `who_knows` | No private repository edges; footer reads "public channels, your DMs". |
+| 7b | DM from the recorder (linked collaborator): `who knows github ingest` | `who_knows` | `<private repo>#N -[TOUCHES]-> GitHub ingest`, `codesensei-tushar -[AUTHORED]-> <private repo>#N`; footer ends with "the <private repo> repo". "Private repo data shows only to people who can read the repo. The permission check is a graph query too." |
+| 8 | Terminal: `curl -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/api/proof?format=text` | proof route | The table: every question collapses without the graph except the refusal. "Take FalkorDB out and nothing answers." (Skip if item 6 has not landed.) |
+| 9 | README in the browser: the Mermaid diagram, then the deploy URL and the three tracks | | Close. |
+
+Ticket numbers (`TKT-106`, `graph_hacks#N`) depend on the day's graph; read whatever the reply shows. The ticket in step 5 is new each take; delete it between takes with `MATCH (t:Ticket {title: 'scheduler jobs run twice after a restart'}) DETACH DELETE t` in the Browser, or use a new title.
+
 ## Specs for items 6 and 7
 
 Written for coder A to build straight after the D slice. Domain logic stays in `src/domain/`, routes stay thin, nothing here needs a model key.
