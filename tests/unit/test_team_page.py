@@ -8,8 +8,8 @@ from src.domain.knowledge import team_page
 from src.domain.knowledge.team_page import KindGroup, Member, OwnedThing, TeamPage
 
 
-def _thing(thing_id: str, kind: str, owners=()) -> OwnedThing:
-    return OwnedThing(thing_id, thing_id.title(), kind, "", list(owners))
+def _thing(thing_id: str, kind: str, owners=(), dependents: int = 0) -> OwnedThing:
+    return OwnedThing(thing_id, thing_id.title(), kind, "", list(owners), dependents)
 
 
 class GroupByKindTest(unittest.TestCase):
@@ -67,10 +67,18 @@ class QuestionsTest(unittest.TestCase):
             "",
             None,
             members=[Member("priya", "Priya Nair", "", [])],
-            owns=team_page.group_by_kind([_thing("acme", "account"), _thing("renewals", "process"), _thing("pricing", "playbook")]),
+            owns=team_page.group_by_kind(
+                [_thing("acme", "account", ["Priya Nair"], 3), _thing("renewals", "process", [], 1), _thing("pricing", "playbook", ["Priya Nair"], 2)]
+            ),
         )
         self.assertEqual([group.owner_label for group in page.owns], ["Run by", "Owned by", "Owned by"])
+        # The owner question skips Renewals, which has no owner; the outage question skips the account
+        # and picks the playbook, which more things depend on than Renewals.
         self.assertEqual(
             team_page.team_questions(page),
-            ["who owns Renewals, and who else has worked on it", "what breaks if Renewals stalls", "how is Priya Nair connected to Pricing"],
+            ["who owns Acme, and who else has worked on it", "what breaks if Pricing no longer applies", "how is Priya Nair connected to Pricing"],
         )
+
+    def test_no_outage_question_when_nothing_depends_on_what_the_team_runs(self):
+        page = TeamPage("ops", "Ops", "", None, owns=team_page.group_by_kind([_thing("runbook", "playbook", ["Dev Rao"])]))
+        self.assertEqual(team_page.team_questions(page), ["who owns Runbook, and who else has worked on it"])

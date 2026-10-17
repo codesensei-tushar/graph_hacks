@@ -71,9 +71,11 @@ class OwnedThing:
     kind: str
     summary: str
     owners: list[str]
+    # How many services depend on it directly: the outage question asks about the one most depended on.
+    dependents: int = 0
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "name": self.name, "kind": self.kind, "summary": self.summary, "owners": list(self.owners)}
+        return {"id": self.id, "name": self.name, "kind": self.kind, "summary": self.summary, "owners": list(self.owners), "dependents": self.dependents}
 
 
 @dataclass(frozen=True)
@@ -231,16 +233,18 @@ def team_page(team_id: str, scopes=DEFAULT_SCOPES) -> TeamPage | None:
         owners.setdefault(service_id, []).append((owner_id, owner_name))
 
     things = []
-    for service_id, service_name, kind, service_summary in graph.ro_query(
+    for service_id, service_name, kind, service_summary, dependents in graph.ro_query(
         f"""
         MATCH (:Team {{id: $id}})-[:RUNS]->(s:Service)
         WHERE {SCOPED.format(var="s")}
-        RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, coalesce(s.summary, '')
+        OPTIONAL MATCH (d:Service)-[:DEPENDS_ON]->(s)
+        WHERE {SCOPED.format(var="d")}
+        RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, coalesce(s.summary, ''), count(DISTINCT d)
         ORDER BY s.name
         """,
         params,
     ).result_set:
-        things.append(OwnedThing(service_id, service_name, kinds.kind_or_default(kind), service_summary, [owner for _, owner in owners.get(service_id, [])]))
+        things.append(OwnedThing(service_id, service_name, kinds.kind_or_default(kind), service_summary, [owner for _, owner in owners.get(service_id, [])], dependents))
     page.owns = group_by_kind(things)
 
     owned_by: dict[str, list[str]] = {}
@@ -302,17 +306,20 @@ def team_path(page: TeamPage) -> list[PathStep]:
 def team_questions(page: TeamPage) -> list[str]:
     """Reads worth asking about this team, in the words the keyword router answers.
 
-    Who owns the first thing it runs; what breaks if the first thing that can fail fails, worded
-    by kind (an account never has a blast radius); why the newest standing decision was made;
-    and how the first member is connected to the last thing the team runs.
+    Each question must have an answer with a path: who owns the first thing that has an owner;
+    what breaks if the thing most depended on fails, worded by kind (an account never has a
+    blast radius, and nothing is asked when nothing depends on what the team runs); why the
+    newest standing decision was made; and how the first member is connected to the last thing.
     """
     things = [thing for group in page.owns for thing in group.items]
     questions = []
-    if things:
-        questions.append(f"who owns {things[0].name}, and who else has worked on it")
-    dependable = [thing for thing in things if thing.kind not in kinds.NOT_DEPENDABLE]
+    owned = [thing for thing in things if thing.owners]
+    if owned:
+        questions.append(f"who owns {owned[0].name}, and who else has worked on it")
+    dependable = [thing for thing in things if thing.kind not in kinds.NOT_DEPENDABLE and thing.dependents > 0]
     if dependable:
-        questions.append(f"what breaks if {dependable[0].name} {kinds.down(dependable[0].kind)}")
+        most = max(dependable, key=lambda thing: thing.dependents)
+        questions.append(f"what breaks if {most.name} {kinds.down(most.kind)}")
     if page.decisions:
         questions.append(f"why {page.decisions[0].name[:1].lower()}{page.decisions[0].name[1:]}")
     if page.members and len(things) > 1:
