@@ -18,6 +18,7 @@ If the thing you named is not in the graph, it says so and offers the nearest ma
 - What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
 - Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
 - Blog post outline: [docs/BLOG.md](docs/BLOG.md)
+- Pitch deck, slide by slide: [docs/PITCH.md](docs/PITCH.md)
 - How to run the graph: [docs/SETUP.md](docs/SETUP.md)
 - Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
 - GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
