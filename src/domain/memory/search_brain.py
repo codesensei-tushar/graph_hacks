@@ -73,7 +73,7 @@ def search_container(
         WHERE m.scope = $scope AND {LIVE}
           AND (size($focus) = 0 OR any(k IN coalesce(m.brain_tags, []) WHERE k IN $focus))
         OPTIONAL MATCH (author:SlackUser)-[:SAID]->(m)
-        RETURN m.id, m.text, m.scope, m.channel_id, m.ts, m.title, m.brain_tags, m.updated_at,
+        RETURN m.id, m.text, m.scope, m.channel_id, m.ts, m.title, m.brain_tags, m.updated_at, m.created_at,
                author.id, author.name, score
         ORDER BY score DESC
         LIMIT $candidates
@@ -81,7 +81,7 @@ def search_container(
         {"q": _fulltext_query(terms), "scope": container_tag, "now": now_ms(), "focus": focus, "candidates": max(limit * 3, 60)},
     ).result_set
     results = []
-    for memory_id, text, scope, channel_id, ts, title, tags, updated_at, author_id, author_name, _score in rows:
+    for memory_id, text, scope, channel_id, ts, title, tags, updated_at, created_at, author_id, author_name, _score in rows:
         score = similarity(q, text or "")
         if score < threshold:
             continue
@@ -97,6 +97,7 @@ def search_container(
                 "title": title,
                 "tags": list(tags or []),
                 "updated_at": updated_at,
+                "created_at": created_at,
                 "author_id": author_id,
                 "author": author_name or author_id,
             }

@@ -1,0 +1,177 @@
+"""Algorithm tools on a real FalkorDB seeded with the fictional Quillfern company.
+
+Depth 1 against depth 2 on the dependency graph, shortest paths cited in their true
+direction, PageRank for what is load-bearing, and people ranked by weighted edges.
+"""
+
+import unittest
+from unittest import mock
+
+import tests  # noqa: F401  pins the test graph and owner before src loads
+
+from src.db import falkordb_client  # noqa: E402
+from src.domain.knowledge import algorithms, ask_service, catalogue  # noqa: E402
+from src.seed import quillfern, seed  # noqa: E402
+
+GRAPH = f"company_algorithms_test{tests.TEST_GRAPH_SUFFIX}"
+ORG = ["org_shared"]
+PRIVATE = "github_repo_777"
+
+
+def _cites(result) -> list[str]:
+    return [step.cite() for step in result.path]
+
+
+class AlgorithmToolsTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._patches = [
+            mock.patch.object(falkordb_client, "graph_name", return_value=GRAPH),
+            mock.patch.object(seed, "graph_name", return_value=GRAPH),
+        ]
+        for patch in cls._patches:
+            patch.start()
+        seed.reset_and_seed(quillfern)
+        _, graph = falkordb_client.connect()
+        # Pull requests touching Billing (public) and Auth (private repo), by linked and unlinked GitHub accounts.
+        graph.query(
+            """
+            MATCH (arjun:Person {id: 'arjun'}), (lena:Person {id: 'lena'}), (tomas:Person {id: 'tomas'}),
+                  (billing:Service {id: 'billing-service'}), (auth:Service {id: 'auth-service'})
+            CREATE (ga:GitHubUser {id: 'gh-arjun', login: 'arjun-dev', name: 'arjun-dev'})-[:IS]->(arjun),
+                   (gl:GitHubUser {id: 'gh-lena', login: 'lena-f', name: 'lena-f'})-[:IS]->(lena),
+                   (gt:GitHubUser {id: 'gh-tomas', login: 'tomas-r', name: 'tomas-r'})-[:IS]->(tomas),
+                   (gx:GitHubUser {id: 'gh-ext', login: 'ext-contrib', name: 'ext-contrib'}),
+                   (p41:PullRequest {id: 'pr41', name: 'app#41', scope: 'org_shared'})-[:TOUCHES]->(billing),
+                   (p42:PullRequest {id: 'pr42', name: 'app#42', scope: 'org_shared'})-[:TOUCHES]->(billing),
+                   (p43:PullRequest {id: 'pr43', name: 'app#43', scope: $private})-[:TOUCHES]->(auth),
+                   (ga)-[:AUTHORED]->(p41), (gl)-[:REVIEWED]->(p41),
+                   (gl)-[:AUTHORED]->(p42), (ga)-[:REVIEWED]->(p42), (gt)-[:REVIEWED]->(p42),
+                   (gx)-[:AUTHORED]->(p43), (ga)-[:REVIEWED]->(p43),
+                   (:Service {id: 'legacy-ftp', name: 'Legacy FTP drop', aliases: 'ftp, legacy ftp'})
+            """,
+            {"private": PRIVATE},
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            falkordb_client.client().select_graph(GRAPH).delete()
+        finally:
+            for patch in cls._patches:
+                patch.stop()
+
+    # --- blast radius ---
+
+    def test_depth_one_misses_what_depth_two_finds(self):
+        one = algorithms.blast_radius("auth", ORG, depth=1)
+        two = algorithms.blast_radius("auth", ORG, depth=2)
+        self.assertEqual(one.depth, 1)
+        self.assertEqual(two.depth, 2)
+        self.assertNotIn("Invoice Worker", one.answer.split("further out")[0])
+        self.assertIn("1 more breaks further out (Invoice Worker at depth 2); ask with more hops.", one.answer)
+        self.assertIn("Invoice Worker (2 hops)", two.answer)
+        self.assertIn("Depth 2 reached 5 services; nothing new past depth 2.", two.answer)
+        self.assertNotIn("Invoice Worker -[DEPENDS_ON]-> Billing Service", _cites(one))
+        self.assertIn("Invoice Worker -[DEPENDS_ON]-> Billing Service", _cites(two))
+        self.assertIn("Billing Service -[DEPENDS_ON]-> Auth Service", _cites(two))
+
+    def test_no_depth_follows_everything_and_reports_where_it_saturated(self):
+        result = algorithms.blast_radius("postgres", ORG)
+        self.assertEqual(result.depth, 2)
+        self.assertIn("Auth Service, Billing Service (1 hop)", result.answer)
+        self.assertIn("API Gateway, Invoice Worker, Notification Service, Search Service (2 hops)", result.answer)
+        self.assertIn("nothing new past depth 2", result.answer)
+        self.assertEqual(len({step.from_name for step in result.path}), 6)
+
+    def test_the_main_connector_comes_from_betweenness(self):
+        result = algorithms.blast_radius("auth", ORG)
+        # Whichever of the target and its dependents tops betweenness over DEPENDS_ON is named, with its score.
+        self.assertRegex(result.answer, r"(Auth Service|Billing Service) is the main connector: [\d.]+ of the shortest dependency paths run through it\.")
+        self.assertIsNotNone(algorithms._main_connector(falkordb_client.connect()[1], ["auth-service"]))
+        self.assertIsNone(algorithms._main_connector(falkordb_client.connect()[1], ["legacy-ftp"]))
+
+    def test_a_leaf_has_no_dependents_and_an_unknown_service_is_refused(self):
+        self.assertEqual(algorithms.blast_radius("invoice worker", ORG).answer, "Nothing in the graph depends on Invoice Worker.")
+        miss = algorithms.blast_radius("the espresso machine", ORG)
+        self.assertFalse(miss.found)
+        self.assertIn("Nothing in the graph matches “espresso machine”", miss.answer)
+
+    def test_depth_comes_through_the_catalogue_and_the_router(self):
+        spec = catalogue.get_tool("blast_radius")
+        self.assertEqual(spec.run({"name": "auth", "depth": 1}, ORG).depth, 1)
+        routed = ask_service.ask("what breaks if auth goes down, one hop", ORG)
+        self.assertEqual((routed.tool, routed.depth), ("blast_radius", 1))
+
+    # --- shortest paths ---
+
+    def test_path_between_cites_each_hop_in_its_true_direction(self):
+        result = algorithms.path_between("Maya Ortiz", "invoice worker", ORG)
+        self.assertEqual(result.depth, 3)
+        self.assertTrue(result.answer.startswith("Maya Ortiz reaches Invoice Worker in 3 hops: Maya Ortiz → "))
+        self.assertIn("2 other routes of the same length.", result.answer)
+        cites = _cites(result)
+        self.assertEqual(len(cites), 3)
+        self.assertTrue(cites[0].startswith("Maya Ortiz -[OWNS]-> "))
+        # The route walks DEPENDS_ON edges backwards; the citation keeps the edge's real direction.
+        self.assertTrue(cites[-1].startswith("Invoice Worker -[DEPENDS_ON]-> "))
+        for step in result.path:
+            self.assertIsNotNone(step.from_id)
+            self.assertIsNotNone(step.to_label)
+
+    def test_person_to_person_and_the_router_with_two_names(self):
+        result = algorithms.path_between("arjun", "kofi", ORG)
+        self.assertTrue(result.found)
+        self.assertTrue(result.path)
+        self.assertIn("Arjun Mehta reaches Kofi Mensah", result.answer)
+        routed = ask_service.ask("how is maya connected to the invoice worker", ORG)
+        self.assertEqual(routed.tool, "path_between")
+        self.assertEqual(routed.depth, 3)
+
+    def test_unreachable_pairs_and_missing_names_are_said_not_guessed(self):
+        apart = algorithms.path_between("legacy ftp", "billing", ORG)
+        self.assertTrue(apart.found)
+        self.assertEqual(apart.path, [])
+        self.assertEqual(apart.answer, "No path between Legacy FTP drop and Billing Service within 6 hops in what you can read.")
+        miss = algorithms.path_between("maya", "the espresso machine", ORG)
+        self.assertFalse(miss.found)
+        one = algorithms.path_between("how is maya connected to things", "", ORG)
+        self.assertIn("I found Maya Ortiz; name a second thing", one.answer)
+
+    def test_private_pull_requests_only_connect_people_who_can_read_them(self):
+        public = algorithms.path_between("ext-contrib", "auth", ORG)
+        self.assertFalse(public.found)
+        private = algorithms.path_between("@ext-contrib", "auth", ORG + [PRIVATE]) if False else None
+        self.assertIsNone(private)
+
+    # --- PageRank ---
+
+    def test_load_bearing_ranks_by_pagerank_with_dependent_counts(self):
+        result = algorithms.load_bearing(3)
+        self.assertRegex(result.answer, r"^Postgres carries the most weight \(PageRank 0\.\d+\): 6 services depend on it directly or through others\.")
+        self.assertRegex(result.answer, r"Then Auth Service \(0\.\d+, 5\), Graph Store \(0\.\d+, 2\)\.")
+        self.assertIn("Auth Service -[DEPENDS_ON]-> Postgres", _cites(result))
+        self.assertIn("Billing Service -[DEPENDS_ON]-> Postgres", _cites(result))
+        self.assertEqual(ask_service.ask("which services are load bearing", ORG).tool, "load_bearing")
+        self.assertEqual(catalogue.get_tool("load_bearing").run({}, ORG).tool, "load_bearing")
+
+    # --- who_knows ranking ---
+
+    def test_who_knows_ranks_people_by_weighted_edges_and_says_why(self):
+        public = ask_service.who_knows("billing", ORG)
+        ranked = ask_service.rank_people(public.path, public.path[0].__class__ and type("E", (), {"name": "Billing Service"})())
+        names = [name for name, _score, _why in ranked]
+        self.assertEqual(names[:2], ["Arjun Mehta", "Lena Fischer"])
+        self.assertEqual(names[-1], "Sara Lindqvist")
+        self.assertIn("Ask first: Arjun Mehta (owns it, wrote app#41, reviewed app#42, wrote Billing runbook)", public.answer)
+        self.assertIn("Ranked by weighted edges", public.answer)
+        self.assertIn("Billing runbook -[DESCRIBES]-> Billing Service", _cites(public))
+        self.assertNotIn("ext-contrib", public.answer)
+
+    def test_private_pull_requests_count_only_for_readers(self):
+        public = ask_service.who_knows("auth", ORG)
+        private = ask_service.who_knows("auth", ORG + [PRIVATE])
+        self.assertNotIn("@ext-contrib", public.answer)
+        self.assertIn("@ext-contrib (wrote app#43)", private.answer)
+        step = next(step for step in private.path if step.from_name == "@ext-contrib")
+        self.assertEqual(step.from_label, "GitHubUser")

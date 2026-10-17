@@ -17,14 +17,30 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import resolve
+from src.domain.knowledge import algorithms, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution
 
 ANSWER_LABELS = ("Service", "Document", "Ticket")
 
+# How much each edge says about a person's knowledge of a thing. Explainable on purpose:
+# PageRank over people comes out flat, because people have almost no incoming edges.
+EDGE_WEIGHTS = {"OWNS": 5, "AUTHORED": 3, "WORKED_ON": 2, "REVIEWED": 2, "ASSIGNED": 2, "OPENED": 1, "KNOWS": 1}
+DOCUMENT_WEIGHT = 2
+
 _OWNS = re.compile(r"\b(?:owns?|owner|owned|responsible)\b", re.IGNORECASE)
 _WIDER_THAN_OWNER = re.compile(r"\b(?:else|also|worked|works|knows?|reviewed|touched)\b", re.IGNORECASE)
+_LOAD_BEARING = re.compile(
+    r"\b(?:load[- ]bearing|most (?:critical|depended|important|central)|single point of failure|pagerank|central services?)\b", re.IGNORECASE
+)
+_PATH = re.compile(r"\b(?:connected|connection|path between|related to|linked to|link between|how does .+ reach|route (?:from|between))\b", re.IGNORECASE)
+_RELATED_MEMORIES = re.compile(
+    r"\b(?:memories|notes|chats?|conversations?|discussions?) (?:about|on|mentioning|around)\b|\bwhat (?:have|has) (?:we|people|anyone) said about\b",
+    re.IGNORECASE,
+)
+_RECALL = re.compile(r"\b(?:remember|recall|what did .+ say|who said|said|discussed|talked about|mentioned)\b", re.IGNORECASE)
+_BLAST = re.compile(r"\b(?:breaks?|goes down|outage|depends?|dependents?|blast)\b", re.IGNORECASE)
+_DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
 
 
 def route(question: str) -> tuple[str, dict]:
@@ -32,12 +48,23 @@ def route(question: str) -> tuple[str, dict]:
     text = question.strip()
     if not text:
         return "none", {}
-    lowered = text.lower()
-    if any(word in lowered for word in ("why", "decision", "decide", "decided")):
+    if _LOAD_BEARING.search(text):
+        return "load_bearing", {"limit": algorithms.DEFAULT_LOAD_BEARING}
+    if _PATH.search(text):
+        return "path_between", {"source": text, "target": ""}
+    if _RELATED_MEMORIES.search(text):
+        return "related_memories", {"name": text}
+    if _RECALL.search(text):
+        return "recall", {"query": text}
+    if _DECISION.search(text):
         return "decision_trace", {"topic": text}
-    if any(word in lowered for word in ("break", "breaks", "goes down", "outage", "depend", "blast")):
-        return "blast_radius", {"name": text}
-    if _OWNS.search(lowered) and not _WIDER_THAN_OWNER.search(lowered):
+    if _BLAST.search(text):
+        args = {"name": text}
+        depth = algorithms.depth_in(text)
+        if depth is not None:
+            args["depth"] = depth
+        return "blast_radius", args
+    if _OWNS.search(text) and not _WIDER_THAN_OWNER.search(text):
         return "who_owns", {"name": text}
     return "who_knows", {"name": text}
 
@@ -218,6 +245,17 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
         for who_id, who, who_label, rel, pr_id, pull_request, service in pull_requests:
             result.add(PathStep(pull_request, "TOUCHES", service, from_id=pr_id, to_id=target.id, from_label="PullRequest", to_label="Service"))
             result.add(PathStep(who, rel, pull_request, from_id=who_id, to_id=pr_id, from_label=who_label, to_label="PullRequest"))
+        documents = graph.ro_query(
+            """
+            MATCH (person:Person)-[:AUTHORED]->(document:Document)-[:DESCRIBES]->(service:Service {id: $id})
+            RETURN person.id, person.name, document.id, document.name, service.name
+            ORDER BY document.name
+            """,
+            {"id": target.id},
+        ).result_set
+        for person_id, person, document_id, document, service in documents:
+            result.add(PathStep(document, "DESCRIBES", service, from_id=document_id, to_id=target.id, from_label="Document", to_label="Service"))
+            result.add(PathStep(person, "AUTHORED", document, from_id=person_id, to_id=document_id, from_label="Person", to_label="Document"))
 
     if not result.path:
         result.answer = f"{target.name} is in the graph, and no person is linked to it yet."
@@ -242,8 +280,37 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
         parts.append(f"Known by {', '.join(_unique(knowers))}.")
     if open_tickets:
         parts.append(f"Tickets: {', '.join(_unique(open_tickets))}.")
+    ranked = rank_people(result.path, target)
+    if ranked:
+        first, *rest = [f"{name} ({', '.join(why)})" for name, _score, why in ranked]
+        parts.append(f"Ask first: {first}" + (f", then {', '.join(rest)}" if rest else "") + ".")
+        parts.append("Ranked by weighted edges: owns 5, wrote a pull request 3, worked on, reviewed, or assigned 2, knows or opened 1.")
     result.answer = " ".join(parts)
     return result
+
+
+def rank_people(path: list[PathStep], target: Entity) -> list[tuple[str, int, list[str]]]:
+    """People in a path, heaviest edges first, each with the reasons in plain words. The path lines are the proof."""
+    scores: dict[str, int] = {}
+    reasons: dict[str, list[str]] = {}
+    for step in path:
+        if step.from_label not in ("Person", "GitHubUser"):
+            continue
+        weight = DOCUMENT_WEIGHT if step.rel == "AUTHORED" and step.to_label == "Document" else EDGE_WEIGHTS.get(step.rel, 1)
+        scores[step.from_name] = scores.get(step.from_name, 0) + weight
+        reason = _reason(step, target)
+        if reason not in reasons.setdefault(step.from_name, []):
+            reasons[step.from_name].append(reason)
+    return sorted(((name, scores[name], reasons[name]) for name in scores), key=lambda row: (-row[1], row[0]))
+
+
+def _reason(step: PathStep, target: Entity) -> str:
+    it = step.to_name == target.name
+    verbs = {"OWNS": "owns", "WORKED_ON": "worked on", "KNOWS": "knows", "AUTHORED": "wrote", "REVIEWED": "reviewed", "OPENED": "opened", "ASSIGNED": "is assigned"}
+    verb = verbs.get(step.rel, step.rel.lower().replace("_", " "))
+    if it and step.rel in ("OWNS", "WORKED_ON", "KNOWS"):
+        return f"{verb} it"
+    return f"{verb} {step.to_name}"
 
 
 def decision_trace(question: str, scopes: list[str]) -> ToolResult:
@@ -304,40 +371,8 @@ def decision_trace(question: str, scopes: list[str]) -> ToolResult:
     return result
 
 
-def blast_radius(question: str, scopes: list[str]) -> ToolResult:
-    _, graph = connect()
-    resolution = resolve.resolve_name(question, ("Service",), scopes, graph=graph)
-    if not resolution.found:
-        return _miss("blast_radius", resolution, kind="service")
-    target = resolution.entity
-
-    edges = graph.ro_query(
-        """
-        MATCH (child:Service)-[:DEPENDS_ON]->(parent:Service)
-        RETURN child.id, child.name, parent.id, parent.name
-        """
-    ).result_set
-    dependents: dict[str, list[tuple[str, str, str]]] = {}
-    for child_id, child_name, parent_id, parent_name in edges:
-        dependents.setdefault(parent_id, []).append((child_id, child_name, parent_name))
-
-    result = ToolResult(tool="blast_radius", answer="", candidates=resolution.candidate_names())
-    seen = {target.id}
-    queue = [target.id]
-    while queue:
-        current = queue.pop(0)
-        for child_id, child_name, parent_name in dependents.get(current, []):
-            result.add(PathStep(child_name, "DEPENDS_ON", parent_name, from_id=child_id, to_id=current, from_label="Service", to_label="Service"))
-            if child_id not in seen:
-                seen.add(child_id)
-                queue.append(child_id)
-
-    if not result.path:
-        result.answer = f"Nothing in the graph depends on {target.name}."
-        return result
-    affected = _unique(step.from_name for step in result.path)
-    result.answer = f"If {target.name} goes down, these stop with it: {', '.join(affected)}."
-    return result
+def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
+    return algorithms.blast_radius(question, scopes, depth)
 
 
 def match_service(text: str) -> dict | None:
@@ -348,9 +383,13 @@ def match_service(text: str) -> dict | None:
 
 _ROUTED = {
     "decision_trace": lambda args, scopes: decision_trace(args["topic"], scopes),
-    "blast_radius": lambda args, scopes: blast_radius(args["name"], scopes),
+    "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth")),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
     "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
+    "path_between": lambda args, scopes: algorithms.path_between(args["source"], args.get("target") or "", scopes),
+    "load_bearing": lambda args, scopes: algorithms.load_bearing(args.get("limit")),
+    "related_memories": lambda args, scopes: memories.related_memories(args["name"], scopes, args.get("k")),
+    "recall": lambda args, scopes: memories.recall(args["query"], scopes, args.get("k")),
 }
 
 

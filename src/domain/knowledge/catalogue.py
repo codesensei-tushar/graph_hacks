@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import ask_service
+from src.domain.knowledge import algorithms, ask_service, memories
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 
 _TOOLS: dict[str, ToolSpec] = {}
@@ -49,7 +49,23 @@ def _run_decision_trace(args: dict, scopes: list[str]) -> ToolResult:
 
 
 def _run_blast_radius(args: dict, scopes: list[str]) -> ToolResult:
-    return ask_service.blast_radius(args["name"], scopes)
+    return algorithms.blast_radius(args["name"], scopes, args.get("depth"))
+
+
+def _run_path_between(args: dict, scopes: list[str]) -> ToolResult:
+    return algorithms.path_between(args["source"], args.get("target") or "", scopes)
+
+
+def _run_load_bearing(args: dict, _scopes: list[str]) -> ToolResult:
+    return algorithms.load_bearing(args.get("limit", algorithms.DEFAULT_LOAD_BEARING))
+
+
+def _run_related_memories(args: dict, scopes: list[str]) -> ToolResult:
+    return memories.related_memories(args["name"], scopes, args.get("k", memories.DEFAULT_K))
+
+
+def _run_recall(args: dict, scopes: list[str]) -> ToolResult:
+    return memories.recall(args["query"], scopes, args.get("k", memories.DEFAULT_K))
 
 
 def _run_ingest_ticket(args: dict, scopes: list[str]) -> ToolResult:
@@ -111,9 +127,82 @@ register(
 register(
     ToolSpec(
         name="blast_radius",
-        description="What stops working if a service goes down: the services that depend on it, following DEPENDS_ON edges.",
-        args_schema=_schema({"name": _NAME}, ["name"]),
+        description=(
+            "What stops working if a service goes down: the services that depend on it, following DEPENDS_ON edges "
+            "for a number of hops, with the main connector by betweenness."
+        ),
+        args_schema=_schema(
+            {
+                "name": _NAME,
+                "depth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": algorithms.MAX_DEPTH,
+                    "description": "How many dependency hops to follow when the question says (one hop, two hops out). Omit to follow all.",
+                },
+            },
+            ["name"],
+        ),
         run=_run_blast_radius,
+    )
+)
+register(
+    ToolSpec(
+        name="path_between",
+        description="Why two things are connected: the shortest route between two services, people, teams, documents, tickets, or decisions.",
+        args_schema=_schema(
+            {
+                "source": {"type": "string", "description": "The first thing named, copied from the question."},
+                "target": {"type": "string", "description": "The second thing named, copied from the question."},
+            },
+            ["source", "target"],
+        ),
+        run=_run_path_between,
+    )
+)
+register(
+    ToolSpec(
+        name="load_bearing",
+        description="Which services the company leans on most: PageRank over DEPENDS_ON, with how many services depend on each.",
+        args_schema=_schema(
+            {"limit": {"type": "integer", "minimum": 1, "maximum": algorithms.MAX_LOAD_BEARING, "description": "How many services to list."}},
+            [],
+        ),
+        run=_run_load_bearing,
+    )
+)
+register(
+    ToolSpec(
+        name="related_memories",
+        description=(
+            "What has been said in chat about a service, document, ticket, or decision: memories that mention it, "
+            "then memories about things one hop away, each with the day it was learned."
+        ),
+        args_schema=_schema(
+            {
+                "name": _NAME,
+                "k": {"type": "integer", "minimum": 1, "maximum": memories.MAX_K, "description": "How many memories to return."},
+            },
+            ["name"],
+        ),
+        run=_run_related_memories,
+    )
+)
+register(
+    ToolSpec(
+        name="recall",
+        description=(
+            "Search memory text for a free-form question. Only when the question names no service, document, ticket, "
+            "person, or decision; otherwise use a graph tool."
+        ),
+        args_schema=_schema(
+            {
+                "query": {"type": "string", "description": "The words to search for, copied from the question."},
+                "k": {"type": "integer", "minimum": 1, "maximum": memories.MAX_K, "description": "How many memories to return."},
+            },
+            ["query"],
+        ),
+        run=_run_recall,
     )
 )
 register(

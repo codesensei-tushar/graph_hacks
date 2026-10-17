@@ -8,6 +8,7 @@ the traversal instead of a sentence written after the fact.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 
 @dataclass(frozen=True)
@@ -114,3 +115,18 @@ class ToolSpec:
     # For tools that need approval: one line saying what ``run`` will write, computed from the
     # same arguments before the asker approves, so the card shows the resolved target.
     preview: Callable[[dict, list[str]], str] | None = None
+
+
+def day_from(ms, ts=None) -> str:
+    """The UTC day of a millisecond epoch, else of a Slack message ts, else "". Memories are dated nodes."""
+    seconds = None
+    if isinstance(ms, (int, float)) and not isinstance(ms, bool) and ms > 0:
+        seconds = ms / 1000
+    elif ts:
+        try:
+            seconds = float(ts)
+        except (TypeError, ValueError):
+            seconds = None
+    if not seconds or seconds <= 0:
+        return ""
+    return datetime.fromtimestamp(seconds, tz=timezone.utc).strftime("%Y-%m-%d")
