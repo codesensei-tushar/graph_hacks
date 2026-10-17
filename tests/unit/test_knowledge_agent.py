@@ -137,6 +137,8 @@ class ThreadFollowUpTest(unittest.TestCase):
         self.assertEqual(agent.follow_up_choice("and two hops out", who, subject), agent.ToolChoice("blast_radius", {"name": "Auth Service", "depth": 2}, "thread"))
         self.assertEqual(agent.follow_up_choice("go deeper", who, subject), agent.ToolChoice("blast_radius", {"name": "Auth Service", "depth": 2}, "thread"))
         self.assertEqual(agent.follow_up_choice("who should look at it", who, subject).tool, "blast_radius")
+        self.assertEqual(agent.follow_up_choice("and all the way", who, subject), agent.ToolChoice("blast_radius", {"name": "Auth Service"}, "thread"))
+        self.assertEqual(agent.follow_up_choice("and three hops out", who, subject).args, {"name": "Auth Service", "depth": 3})
         ticket_thread = agent.ThreadSubject(agent.Entity("TKT-104", "TKT-104", "Ticket"), None, None)
         self.assertEqual(agent.follow_up_choice("who should look at it", who, ticket_thread), agent.ToolChoice("who_knows", {"name": "TKT-104"}, "thread"))
         why = agent.ToolChoice("decision_trace", {"topic": "why though"}, "keywords")

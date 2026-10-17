@@ -86,9 +86,10 @@ class AlgorithmToolsTest(unittest.TestCase):
 
     def test_the_main_connector_comes_from_betweenness(self):
         result = algorithms.blast_radius("auth", ORG)
-        # Whichever of the target and its dependents tops betweenness over DEPENDS_ON is named, with its score.
-        self.assertRegex(result.answer, r"(Auth Service|Billing Service) is the main connector: [\d.]+ of the shortest dependency paths run through it\.")
-        self.assertIsNotNone(algorithms._main_connector(falkordb_client.connect()[1], ["auth-service"]))
+        # The connector is one of the affected services, never the one that went down.
+        self.assertRegex(result.answer, r"Among them, Billing Service is the connector: [\d.]+ shortest dependency paths run through it\.")
+        self.assertNotIn("Auth Service is the connector", result.answer)
+        self.assertIsNotNone(algorithms._main_connector(falkordb_client.connect()[1], ["billing-service"]))
         self.assertIsNone(algorithms._main_connector(falkordb_client.connect()[1], ["legacy-ftp"]))
 
     def test_a_leaf_has_no_dependents_and_an_unknown_service_is_refused(self):
@@ -163,8 +164,10 @@ class AlgorithmToolsTest(unittest.TestCase):
         names = [name for name, _score, _why in ranked]
         self.assertEqual(names[:2], ["Arjun Mehta", "Lena Fischer"])
         self.assertEqual(names[-1], "Sara Lindqvist")
-        self.assertIn("Ask first: Arjun Mehta (owns it, wrote app#41, reviewed app#42, wrote Billing runbook)", public.answer)
-        self.assertIn("Ranked by weighted edges", public.answer)
+        self.assertIn("Ask first: Arjun Mehta (owns it, wrote app#41 and the Billing runbook, reviewed app#42), then Lena Fischer (worked on it and TKT-102, reviewed app#41, wrote app#42)", public.answer)
+        self.assertIn("Open tickets: TKT-102.", public.answer)
+        self.assertNotIn("Ranked by weighted edges", public.answer)
+        self.assertTrue(public.answer.startswith("Billing Service is owned by Arjun Mehta. Ask first:"))
         self.assertIn("Billing runbook -[DESCRIBES]-> Billing Service", _cites(public))
         self.assertNotIn("ext-contrib", public.answer)
 

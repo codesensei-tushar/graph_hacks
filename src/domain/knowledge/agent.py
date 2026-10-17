@@ -40,6 +40,7 @@ THREAD_LABELS = ("Service", "Document", "Ticket", "Decision")
 _TOOL_IN_REPLY = re.compile(r"Tool `(\w+)`")
 _DEPTH_IN_REPLY = re.compile(r"depth (\d+)")
 _DEEPER = re.compile(r"\b(?:deeper|further out|more hops|next hop|one more hop|keep going)\b", re.IGNORECASE)
+_ALL_THE_WAY = re.compile(r"\b(?:all the way|everything|the whole chain|the full chain|every hop)\b", re.IGNORECASE)
 
 SYSTEM_PROMPT = (
     "You route questions about a company to one tool from a fixed catalogue. You never write queries "
@@ -157,10 +158,14 @@ def thread_subject(thread: list[dict] | None, scopes: list[str], bot_ids: frozen
 
 def follow_up_choice(question: str, choice: ToolChoice, subject: ThreadSubject) -> ToolChoice | None:
     """The same question asked about the thread's subject. Depth words, or a thread about blast radius, mean blast_radius."""
+    about_blast = subject.tool == "blast_radius" and choice.tool in ("who_knows", "who_owns")
+    if about_blast and _ALL_THE_WAY.search(question):
+        # No depth means the walk runs to saturation.
+        return ToolChoice("blast_radius", {"name": subject.entity.name}, "thread")
     depth = algorithms.depth_in(question)
     if depth is None and _DEEPER.search(question):
         depth = algorithms.clamp_depth((subject.depth or 1) + 1)
-    if depth is not None or (subject.tool == "blast_radius" and choice.tool in ("who_knows", "who_owns")):
+    if depth is not None or about_blast:
         return ToolChoice("blast_radius", {"name": subject.entity.name, "depth": depth or algorithms.clamp_depth((subject.depth or 1) + 1)}, "thread")
     spec = catalogue.get_tool(choice.tool)
     properties = spec.args_schema.get("properties", {}) if spec else {}

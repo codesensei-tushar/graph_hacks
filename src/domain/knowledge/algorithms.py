@@ -118,10 +118,10 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
         parts.append(f"{len(beyond)} more break{'s' if len(beyond) == 1 else ''} further out ({further}); ask with more hops.")
     else:
         parts.append(f"Depth {reached} reached {len(affected)} service{'s' if len(affected) != 1 else ''}; nothing new past depth {saturation}.")
-    connector = _main_connector(graph, [target.id, *affected])
+    connector = _main_connector(graph, list(affected))
     if connector is not None:
         name, score = connector
-        parts.append(f"{name} is the main connector: {score:g} of the shortest dependency paths run through it.")
+        parts.append(f"Among them, {name} is the connector: {score:g} shortest dependency paths run through it.")
     result.answer = " ".join(parts)
     return result
 

@@ -29,6 +29,9 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(algorithms.depth_in("blast radius of postgres at depth 9"), 6)
         self.assertEqual(algorithms.depth_in("what depends on auth directly"), 1)
         self.assertIsNone(algorithms.depth_in("what breaks if auth goes down"))
+        self.assertEqual(algorithms.depth_in("what breaks if the claude api goes down, one hop"), 1)
+        self.assertEqual(algorithms.depth_in("and three hops out"), 3)
+        self.assertIsNone(algorithms.depth_in("all the way"))
 
     def test_depth_is_clamped_to_an_integer_or_none(self):
         self.assertEqual(algorithms.clamp_depth(0), 1)

@@ -107,8 +107,9 @@ register(
     ToolSpec(
         name="who_knows",
         description=(
-            "Everyone connected to a service, document, or ticket: its owner, and the people who worked on it, "
-            "wrote or reviewed pull requests touching it, filed tickets about it, or are marked as knowing it."
+            "Who to ask about a service, document, or ticket: its owner, and the people who worked on it, "
+            "wrote or reviewed pull requests touching it, filed tickets about it, or are marked as knowing it, "
+            "ranked by weighted edges (owns 5, wrote a pull request 3, worked on, reviewed, or assigned 2, knows or opened 1)."
         ),
         args_schema=_schema({"name": _NAME}, ["name"]),
         run=_run_who_knows,
