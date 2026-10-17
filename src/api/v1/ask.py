@@ -5,6 +5,11 @@ keyword router picks the tool. ``?model=1`` lets the model pick instead, behind 
 token as a bearer header: 503 until ``BRAIN_ADMIN_TOKEN`` is set, 401 without a token, 403
 with the wrong one. ``GET /api/ask/tools`` lists the read-only catalogue and the example
 questions for the seeded company.
+
+Every route here is public: each client (``X-Real-IP``, which nginx sets) gets
+``ask_api.RATE_LIMIT`` calls a minute and then a 429 with ``Retry-After``; a question over
+``ask_api.MAX_QUESTION_CHARS`` characters is a 400. Answers and the proof are cached in the
+domain for a minute.
 """
 
 import secrets
@@ -29,19 +34,35 @@ def _denial(request: Request) -> JSONResponse | None:
     return None
 
 
+def _throttled(request: Request) -> JSONResponse | None:
+    client = request.headers.get("x-real-ip") or (request.client.host if request.client else None)
+    decision = ask_api.admit(client)
+    if decision.allowed:
+        return None
+    return JSONResponse(
+        {"error": f"too many questions from this address; try again in {decision.retry_after} seconds"},
+        status_code=429,
+        headers={"Retry-After": str(decision.retry_after)},
+    )
+
+
 @router.get("/ask")
 def ask(request: Request, q: str = "", tool: str | None = None, model: bool = False):
+    if throttled := _throttled(request):
+        return throttled
     if model and (denied := _denial(request)):
         return denied
     try:
         answer = ask_api.answer_question(q, tool=tool, use_model=model)
-    except ask_api.ToolRefused as refused:
+    except (ask_api.ToolRefused, ask_api.QuestionTooLong) as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)
     return answer.to_dict()
 
 
 @router.get("/ask/tools")
-def tools():
+def tools(request: Request):
+    if throttled := _throttled(request):
+        return throttled
     examples = ask_api.examples()
     return {
         "company": examples.company_id,
@@ -53,12 +74,12 @@ def tools():
 
 
 @router.get("/ask/proof")
-def ask_proof():
+def ask_proof(request: Request):
     """The ablation a public page can show: org_shared questions, with the graph and without it.
 
     ``GET /api/proof`` stays behind the admin token. This route reads the same public
     slice the ask page already answers, and it writes nothing.
     """
-    from src.domain.knowledge.proof import run_proof
-
-    return run_proof().to_dict()
+    if throttled := _throttled(request):
+        return throttled
+    return ask_api.public_proof().to_dict()

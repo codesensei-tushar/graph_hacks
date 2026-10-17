@@ -1,0 +1,144 @@
+"""The public surface's limits with a fake clock: the TTL cache, the question cap, the per-client rate limit. No database."""
+
+import unittest
+from unittest import mock
+
+import tests  # noqa: F401  pins the test settings before src loads
+
+from src.domain.knowledge import agent, ask_api, catalogue
+from src.domain.knowledge.dto import ToolResult, ToolSpec
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class TtlCacheTest(unittest.TestCase):
+    def test_a_value_is_reused_until_it_expires(self):
+        clock = Clock()
+        cache = ask_api.TtlCache(ttl=60, max_entries=8, clock=clock)
+        calls = []
+
+        def compute():
+            calls.append(clock.now)
+            return len(calls)
+
+        self.assertEqual(cache.get_or_compute("q", compute), 1)
+        clock.now += 59
+        self.assertEqual(cache.get_or_compute("q", compute), 1)
+        clock.now += 2
+        self.assertEqual(cache.get_or_compute("q", compute), 2)
+        self.assertEqual(len(calls), 2)
+
+    def test_the_oldest_entry_goes_first_and_failures_are_not_kept(self):
+        cache = ask_api.TtlCache(ttl=60, max_entries=2, clock=Clock())
+        for key in ("a", "b", "c"):
+            cache.get_or_compute(key, lambda key=key: key.upper())
+        self.assertEqual(cache.get_or_compute("a", lambda: "recomputed"), "recomputed")
+        self.assertEqual(cache.get_or_compute("c", lambda: "recomputed"), "C")
+
+        def fail():
+            raise ask_api.ToolRefused("no")
+
+        with self.assertRaises(ask_api.ToolRefused):
+            cache.get_or_compute("bad", fail)
+        self.assertEqual(cache.get_or_compute("bad", lambda: "fine"), "fine")
+
+
+class RateLimiterTest(unittest.TestCase):
+    def test_each_client_gets_the_limit_per_window_and_a_retry_time(self):
+        clock = Clock()
+        limiter = ask_api.RateLimiter(limit=30, window=60, clock=clock)
+        self.assertTrue(all(limiter.check("203.0.113.7").allowed for _ in range(30)))
+        clock.now += 20
+        refused = limiter.check("203.0.113.7")
+        self.assertEqual((refused.allowed, refused.retry_after), (False, 40))
+        self.assertTrue(limiter.check("198.51.100.9").allowed)
+        clock.now += 40
+        self.assertTrue(limiter.check("203.0.113.7").allowed)
+
+    def test_stale_clients_are_dropped_when_the_table_is_full(self):
+        clock = Clock()
+        limiter = ask_api.RateLimiter(limit=1, window=60, clock=clock, max_clients=2)
+        limiter.check("a")
+        limiter.check("b")
+        clock.now += 61
+        limiter.check("c")
+        self.assertEqual(set(limiter._windows), {"c"})
+
+    def test_admit_counts_clients_without_an_address_together(self):
+        with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=1, window=60)):
+            self.assertTrue(ask_api.admit(None).allowed)
+            self.assertFalse(ask_api.admit("").allowed)
+            self.assertTrue(ask_api.admit("203.0.113.7").allowed)
+
+
+COUNTER = {"runs": 0}
+
+
+def _counted(args: dict, scopes: list[str]) -> ToolResult:
+    COUNTER["runs"] += 1
+    return ToolResult(tool="probe_count", answer=f"run {COUNTER['runs']}")
+
+
+COUNT_SPEC = ToolSpec(
+    name="probe_count",
+    description="Counts its runs.",
+    args_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+    run=_counted,
+)
+
+
+class AnswerLimitsTest(unittest.TestCase):
+    def setUp(self):
+        ask_api.ANSWERS.clear()
+        COUNTER["runs"] = 0
+        catalogue.register(COUNT_SPEC)
+        self.keywords = mock.patch.object(agent, "choose_with_keywords", return_value=agent.ToolChoice("probe_count", {"name": "billing"}, "keywords"))
+        self.keywords.start()
+        self.graph = mock.patch.object(ask_api.falkordb_client, "graph_name", return_value="company_limits_probe")
+        self.graph.start()
+
+    def tearDown(self):
+        self.graph.stop()
+        self.keywords.stop()
+        catalogue._TOOLS.pop("probe_count", None)
+        ask_api.ANSWERS.clear()
+
+    def test_the_cap_counts_the_question_after_whitespace_is_collapsed(self):
+        at_cap = "b" * ask_api.MAX_QUESTION_CHARS
+        self.assertEqual(ask_api.answer_question(at_cap + "   ").tool, "probe_count")
+        with self.assertRaisesRegex(ask_api.QuestionTooLong, "limited to 300 characters; this one has 301"):
+            ask_api.answer_question(at_cap + "x")
+        self.assertEqual(COUNTER["runs"], 1)
+
+    def test_the_same_question_runs_once_and_a_different_one_or_tool_runs_again(self):
+        self.assertEqual(ask_api.answer_question("who owns billing").answer, "run 1")
+        self.assertEqual(ask_api.answer_question("  who owns   billing ").answer, "run 1")
+        self.assertEqual(ask_api.answer_question("who owns invoices").answer, "run 2")
+        self.assertEqual(ask_api.answer_question("who owns billing", tool="probe_count").answer, "run 3")
+        with mock.patch.object(ask_api.falkordb_client, "graph_name", return_value="another_graph"):
+            self.assertEqual(ask_api.answer_question("who owns billing").answer, "run 4")
+
+    def test_model_picked_answers_are_never_cached(self):
+        ask_api.answer_question("who owns billing", use_model=True)
+        ask_api.answer_question("who owns billing", use_model=True)
+        self.assertEqual(COUNTER["runs"], 2)
+
+    def test_the_answer_expires_with_the_cache(self):
+        clock = Clock()
+        with mock.patch.object(ask_api, "ANSWERS", ask_api.TtlCache(ttl=60, max_entries=8, clock=clock)):
+            ask_api.answer_question("who owns billing")
+            clock.now += 61
+            self.assertEqual(ask_api.answer_question("who owns billing").answer, "run 2")
+
+    def test_the_public_proof_is_computed_once_per_period(self):
+        report = object()
+        with mock.patch.object(ask_api, "run_proof", return_value=report) as run:
+            self.assertIs(ask_api.public_proof(), report)
+            self.assertIs(ask_api.public_proof(), report)
+        run.assert_called_once_with()
