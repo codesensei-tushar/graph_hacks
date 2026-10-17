@@ -19,6 +19,36 @@ If the thing you named is not in the graph, it says so and offers the nearest ma
 
 Engineering was first; any team joins the same graph from one TOML file. A `Service` node has a `kind`, so a Sales team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as the billing service, worded for what they are: a process stalls, a playbook no longer applies. The import only merges, and people Slack already knows are matched by email, never duplicated. Every read-only tool is also served over MCP and returns the path it walked. See [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md).
 
+## Try it in two minutes
+
+**Live.** Open [brain.noobsurd.space](https://brain.noobsurd.space). It serves Quillfern, a synthetic company built for the demo. Paste any of these into the ask box; each answer comes with the path it walked, drawn and as `A -[REL]-> B` lines.
+
+| Ask | What it shows |
+| --- | --- |
+| `who owns billing, and who else has worked on it` | The owner, then the people ranked by the edges that tie them to it: "Billing Service is owned by Arjun Mehta. Ask first: Arjun Mehta (owns it, wrote the Billing runbook), then Lena Fischer ..." |
+| `what if arjun mehta leaves` | What rests on one person alone, and who is next in line: "If Arjun Mehta leaves, 1 thing rests on them alone. Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes; 2 others depend on it." |
+| `why did we move the memory layer off postgres` | The decision, who proposed and approved it, the RFC and ticket it rests on, and the chat it came from |
+| `who knows the payments gateway` | Something the graph does not know: "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." It never guesses. |
+
+Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, and the decisions that stand. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
+
+**Over MCP.** The same read-only tools, with the same cited results, from any MCP client. The token is in the private submission notes.
+
+```bash
+claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp \
+  --header "Authorization: Bearer <MCP_TOKEN>"
+```
+
+Any other client: streamable HTTP at `https://brain.noobsurd.space/mcp` with that bearer header. A Python client is under [The same tools over MCP](#the-same-tools-over-mcp).
+
+**Locally, no Slack and no model key.** With FalkorDB running (`docker compose up -d`) and `pip install -r requirements.txt` done:
+
+```bash
+python scripts/replay_workspace.py --graph company_demo
+```
+
+In about two seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 16 replies from "who owns billing" to the Sales questions. It ends with `fake Slack calls=155 bot messages=16`.
+
 - What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
 - Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
 - Blog post outline: [docs/BLOG.md](docs/BLOG.md)
