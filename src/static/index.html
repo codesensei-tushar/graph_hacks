@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Company Brain</title>
+<meta name="description" content="A Slack agent that answers from one FalkorDB graph and shows the path behind every answer. Ask the graph here.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='8' cy='16' r='4' fill='%232a78d6'/%3E%3Ccircle cx='24' cy='8' r='4' fill='%23eb6834'/%3E%3Ccircle cx='24' cy='24' r='4' fill='%231baf7a'/%3E%3Cpath d='M11 14l10-5M11 18l10 5' stroke='%23807e77' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="/">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="8" cy="16" r="4" fill="var(--person)"/><circle cx="24" cy="8" r="4" fill="var(--service)"/><circle cx="24" cy="24" r="4" fill="var(--knowledge)"/><path d="M11 14l10-5M11 18l10 5" stroke="var(--ink-3)" stroke-width="2"/></svg>
+      Company Brain
+    </a>
+    <nav>
+      <a href="#ask">Ask</a>
+      <a href="#how">How it answers</a>
+      <a href="#tools">Tools</a>
+      <a href="#demo">Demo</a>
+      <a href="https://github.com/codesensei-tushar/graph_hacks">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>One graph of how the company is connected.<br>Answers that show the path.</h1>
+    <p class="lede">Company Brain is a Slack agent over a single FalkorDB graph. People, teams, services, documents, tickets, decisions and chat are nodes and edges; Slack and GitHub feed it live. Ask who owns billing, why a decision was made, or what breaks if auth goes down, and it answers by walking the graph, then prints the edges it used.</p>
+    <ul class="claims">
+      <li><b>The agent never writes Cypher.</b> It picks from a fixed catalogue of hand-written, parameterised queries.</li>
+      <li><b>The answer is the path.</b> Every tool returns the exact edges it walked, as <code>A -[REL]-&gt; B</code>.</li>
+      <li><b>It never guesses.</b> Names resolve against the graph first; a miss returns the nearest names.</li>
+      <li><b>Permissions are a graph query.</b> Every read is filtered by the rooms and repos the asker can see.</li>
+    </ul>
+  </section>
+
+  <section class="ask" id="ask">
+    <h2>Ask the graph</h2>
+    <p class="sub">The same tools the Slack bot runs, read-only, reading what a public channel reads. <span id="company"></span></p>
+    <form id="ask-form" autocomplete="off">
+      <input type="text" id="q" name="q" placeholder="who owns billing, and who else has worked on it" aria-label="Your question">
+      <button class="btn" id="ask-btn" type="submit">Ask</button>
+    </form>
+    <ul class="chips" id="chips" aria-label="Example questions"></ul>
+
+    <div class="answer" id="answer" aria-live="polite">
+      <div class="status" id="status"></div>
+      <div id="out"></div>
+    </div>
+  </section>
+
+  <section class="block" id="how">
+    <h2>How it answers</h2>
+    <p class="sub">The design the whole project hangs on: the graph decides what the agent can know and how it explains itself.</p>
+    <ul class="how">
+      <li><b>A fixed tool catalogue</b><p>Each tool is a hand-written, parameterised traversal with a JSON schema for its arguments. One structured call to Claude Haiku picks the tool and fills the arguments; a keyword router does the same job with no model, so every path works offline. No model-generated string ever reaches a query.</p></li>
+      <li><b>The path comes back with the answer</b><p>Every tool returns the edges it walked. The reply prints them, names the tool, and says whether the model or the keywords picked it. Explanation is the traversal, not a sentence written afterwards.</p></li>
+      <li><b>Refuse to guess</b><p>The names in a question are resolved against the graph before anything runs. A miss answers "Nothing in the graph matches" and offers the nearest candidates.</p></li>
+      <li><b>Decisions stay current</b><p>A decision recorded in a channel, after approval, supersedes the one it replaces and links to the documents, tickets and pull requests it is based on. Asking about the old one answers "no longer current", then the current one, with both dates. Nothing is deleted.</p></li>
+      <li><b>Writes wait for a human</b><p>Tools that write the graph never run from the loop. The turn suspends with an Approve card that names the resolved target, and the write lands only after a click.</p></li>
+      <li><b>Algorithms as tools</b><p>PageRank over <code>DEPENDS_ON</code> ranks load-bearing services, betweenness names the connector in a blast radius, and <code>algo.SPpaths</code> explains why two things are connected.</p></li>
+      <li><b>Scopes per room</b><p>Every node written from Slack or GitHub carries the scope of the public channel, private channel, DM or private repo it came from. Every query ends with the same filter on what the asker may read.</p></li>
+      <li><b>Take FalkorDB out and nothing answers</b><p>A proof route runs the same questions with every graph read returning nothing; all but the refusal collapse. FalkorDB is the only store, including the scheduler, approvals and dedupe keys.</p></li>
+    </ul>
+  </section>
+
+  <section class="block" id="tools">
+    <h2>The tool catalogue</h2>
+    <p class="sub">The read-only tools this page can run, straight from the catalogue the agent picks from. Tools that write (filing a ticket, recording a decision) exist too; they run in Slack after approval. The Cypher behind each one is in the <a href="https://github.com/codesensei-tushar/graph_hacks#cypher-queries-the-product-depends-on">README</a>.</p>
+    <table class="tools">
+      <thead><tr><th>Tool</th><th>Answers</th><th>Arguments</th></tr></thead>
+      <tbody id="tools-body"><tr><td colspan="3" class="note">Loading the catalogue…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="block" id="demo">
+    <h2>The demo, in order</h2>
+    <p class="sub">Seven moves against a synthetic company. Steps that write the graph or depend on who is asking run in Slack; the rest run here too.</p>
+    <ol class="demo-steps">
+      <li><code>who owns billing, and who else has worked on it</code><span class="exp">The owner, then everyone linked by past work, pull requests and reviews, ranked by their edges to the service.</span></li>
+      <li><code>why did we move the memory layer off postgres</code><span class="exp">The decision, who proposed and approved it, the RFC and the ticket it is based on, and the decision it superseded.</span></li>
+      <li>In Slack: <code>decision: move billing retries to the invoice worker</code>, then Approve<span class="exp">The card names what the write will replace. The new decision supersedes the old one; asking "why" again shows both, with dates.</span></li>
+      <li><code>what breaks if auth goes down</code>, then <code>and two hops out</code><span class="exp">Dependents grouped by hop, the main connector by betweenness, and the route to the invoice worker two hops out.</span></li>
+      <li>In Slack: <code>ticket: billing exports time out</code>, Approve, then <code>who should look at it</code><span class="exp">The ticket is in the graph and the next answer ranks the people connected to that service.</span></li>
+      <li><code>who knows the payments gateway</code><span class="exp">Not in the graph. The answer says so and names the nearest matches. It never guesses.</span></li>
+      <li>The same question from two DMs<span class="exp">Only the teammate whose linked GitHub account can read a private repo sees that repo's pull requests. The permission check is a graph query.</span></li>
+    </ol>
+  </section>
+
+  <footer>
+    <p>Built for Graph Hacks 2026, Track 03 Company Brain; also entered in Tracks 01 and 02 with the same build. FalkorDB is the only store.</p>
+    <p><a href="https://github.com/codesensei-tushar/graph_hacks">Source and README</a> · <a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/SLACK.md">Install the Slack app</a> · <a href="/healthz">Health</a></p>
+    <p>AI assistance: parts of this project were written with Claude Code (Anthropic). The graph model, the tool catalogue, the scope rules and every query were decided and reviewed by the team.</p>
+  </footer>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
