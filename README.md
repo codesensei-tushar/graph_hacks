@@ -144,7 +144,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a small schema: `tool`, an enum of the catalogue's names, and `args`, the chosen tool's arguments as JSON text (each tool's argument names, types and bounds are in the prompt, because the structured-output API rejects integer bounds and refuses the union of every tool's arguments as too complex). The choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
 
-**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (45 of them on 17 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH` and `MAX_PATH_LENGTH` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (49 of them on 17 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH` and `MAX_PATH_LENGTH` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |
@@ -157,6 +157,7 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
 | `recall` | Memories whose text matches the question, dated, no path | no |
 | `working_groups` | Who clusters together from shared work, by label propagation, and where that splits from the org chart | no |
+| `if_person_leaves` | What rests on one person alone if they leave, ranked by what depends on it, and who is next in line for each | no |
 | `decision_pressure` | Tickets and pull requests about a decision's service that the standing decision does not cite | no |
 | `ingest_ticket` | Files a ticket about a service, then answers who should look at it | yes, after Approve |
 | `record_decision` | Records a decision, links it to its services and sources, and supersedes the one it replaces | yes, after Approve; the card names what it replaces |
@@ -310,6 +311,18 @@ RETURN person.id, person.name, type(rel), service.id, service.name
 CALL algo.labelPropagation({nodeLabels: ['Person', 'Work'], relationshipTypes: ['AT']})
 YIELD node, communityId
 RETURN labels(node)[0], node.id, communityId
+```
+
+**if_person_leaves** (what a person leaving takes with them, for any team). The person is resolved first; a name not in the graph gets the same refusal as every other tool. Then it finds what rests on them alone: things of any kind they are the only owner of or that nobody else knows, standing decisions nobody else proposed or approved, and open tickets nobody else worked on. "Knows" is `who_knows` itself, with the same edges and weights, so the people named next in line are the ones `who_knows` would rank first once this person is gone, even from another team. Items are ranked by how much depends on them through `DEPENDS_ON`, as in `blast_radius`. Accounts stay in, because an account losing its only owner is exactly the risk. The reply tells three items in full and names the rest.
+
+```cypher
+MATCH (:Person {id: $id})-[mine:OWNS|WORKED_ON|KNOWS]->(s:Service)
+WHERE coalesce(s.scope, 'org_shared') IN $scopes
+WITH s, collect(DISTINCT type(mine)) AS mine
+OPTIONAL MATCH (other:Person)-[:OWNS]->(s)
+WHERE other.id <> $id
+RETURN s.id, s.name, coalesce(s.kind, 'service'), mine, count(other)
+ORDER BY s.name
 ```
 
 **decision_pressure** (is this decision still the last word). The standing decision, followed through `SUPERSEDES`, then the tickets and pull requests on the same service that it does not cite. "Why did we" stays on `decision_trace`.
