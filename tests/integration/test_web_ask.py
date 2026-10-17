@@ -183,3 +183,18 @@ class WebAskTest(unittest.TestCase):
         with mock.patch.object(ask_api, "run_proof", wraps=ask_api.run_proof) as proof:
             self.assertEqual(self.http.get("/api/ask/proof").json(), self.http.get("/api/ask/proof").json())
         self.assertEqual(proof.call_count, 1)
+
+    def test_a_slack_write_command_gets_the_matching_read_and_says_where_the_write_happens(self):
+        ticket = self.ask("ticket: billing exports time out")
+        self.assertEqual((ticket["tool"], ticket["picked_by"], ticket["question"]), ("who_knows", "caller", "ticket: billing exports time out"))
+        self.assertTrue(ticket["notice"].startswith("Filing a ticket writes the graph, so it happens in Slack"))
+        self.assertIn("Arjun Mehta", ticket["answer"])
+        decision = self.ask("decision: retry renewal webhooks somewhere else")
+        self.assertEqual(decision["tool"], "decision_trace")
+        self.assertIn("names the decision it replaces", decision["notice"])
+        self.assertIn("Retry renewal webhooks inside the billing service", decision["answer"])
+        plain = self.ask("why did we decide to move the memory layer off postgres")
+        self.assertEqual((plain["tool"], plain["notice"]), ("decision_trace", ""))
+        _, graph = falkordb_client.connect()
+        self.assertEqual(graph.ro_query("MATCH (t:Ticket) RETURN count(t)").result_set[0][0], 3)
+
