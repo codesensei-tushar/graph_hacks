@@ -7,3 +7,4 @@ anthropic>=1.14.0
 PyJWT[crypto]>=2.8
 # The local demo (scripts/replay_workspace.py) drives the app through Starlette's TestClient, which needs httpx.
 httpx>=0.27
+mcp==2.2.0

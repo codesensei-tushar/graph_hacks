@@ -1,4 +1,4 @@
-"""/healthz, the reserved /mcp path, and the Slack event clock. FalkorDB is mocked."""
+"""/healthz and the Slack event clock. FalkorDB is mocked."""
 
 import unittest
 from unittest import mock
@@ -50,10 +50,6 @@ class HealthzTest(unittest.TestCase):
 
             self.assertEqual(self.client.post("/slack/events?signed=true").status_code, 200)
             self.assertIsNotNone(self.client.get("/healthz").json()["slack_last_event_at"])
-
-    def test_mcp_is_reserved(self):
-        self.assertEqual(self.client.post("/mcp").status_code, 501)
-        self.assertEqual(self.client.get("/mcp/anything").status_code, 501)
 
 
 if __name__ == "__main__":

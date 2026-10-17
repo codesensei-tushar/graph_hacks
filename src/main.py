@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.api import mcp as mcp_api
 from src.api import ops
 from src.api.v1 import github, health, proof, slack, slack_install
 from src.core import scheduler
@@ -74,7 +75,10 @@ async def lifespan(_app: FastAPI):
         threading.Thread(target=_recover, name="brain-recover", daemon=True).start()
     else:
         log.warning("Slack is not configured: set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET, or the OAuth app credentials")
-    yield
+    if not settings.mcp_token:
+        log.warning("MCP is disabled: set MCP_TOKEN to serve the tool catalogue at /mcp")
+    async with mcp_api.session_lifespan():
+        yield
 
 
 app = FastAPI(title="Company Brain", lifespan=lifespan)
@@ -84,3 +88,4 @@ app.include_router(github.router)
 app.include_router(health.router)
 app.include_router(proof.router)
 ops.install(app)
+mcp_api.install(app)
