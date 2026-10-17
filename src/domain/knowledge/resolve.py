@@ -35,6 +35,7 @@ STOPWORDS = frozenset(
         "leaves", "leave", "leaving", "quit", "quits", "quitting", "resigns", "covers", "cover", "takes", "take",
         "over", "only", "one", "nobody", "bus", "factor",
         "i", "m", "im", "am", "joined", "join", "brief", "briefing", "onboard", "onboarding", "team", "teams", "get", "up", "speed",
+        "connects", "bridges", "bridge", "links", "rest", "other", "others", "company", "everyone", "anyone",
     }
 )
 

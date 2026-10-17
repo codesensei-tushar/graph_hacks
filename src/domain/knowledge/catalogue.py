@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, bus_factor, memories
+from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, memories
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 
 _TOOLS: dict[str, ToolSpec] = {}
@@ -69,6 +69,10 @@ def _run_onboarding_brief(args: dict, scopes: list[str]) -> ToolResult:
     from src.domain.knowledge import brief
 
     return brief.onboarding_brief(args["name"], scopes)
+
+
+def _run_connectors(args: dict, scopes: list[str]) -> ToolResult:
+    return bridges.connectors(args["source"], args.get("target") or "", scopes)
 
 
 def _run_path_between(args: dict, scopes: list[str]) -> ToolResult:
@@ -223,6 +227,25 @@ register(
             ["name"],
         ),
         run=_run_onboarding_brief,
+    )
+)
+register(
+    ToolSpec(
+        name="connectors",
+        description=(
+            "Who connects two teams, or one team to the rest: people on one team who own or worked on what another "
+            "team runs, or who are on both, ranked by how many cross-team edges they have, each with the edges that "
+            "make the bridge. Use for questions like who connects Sales and Engineering or who bridges two teams. "
+            "For how two particular things are connected, use path_between."
+        ),
+        args_schema=_schema(
+            {
+                "source": {"type": "string", "description": "The first team named, copied from the question."},
+                "target": {"type": "string", "description": "The second team named, if any, copied from the question."},
+            },
+            ["source"],
+        ),
+        run=_run_connectors,
     )
 )
 register(

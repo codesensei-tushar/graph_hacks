@@ -65,6 +65,12 @@ class RouteTest(unittest.TestCase):
         # Naming no team, it is still a who_knows question.
         self.assertEqual(ask_service.route("what should I know about billing")[0], "who_knows")
 
+    def test_who_connects_teams_is_not_how_two_things_connect(self):
+        for question in ("who connects Sales and Engineering", "who bridges payments and platform", "who links data to sales", "bridges between sales and platform"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("connectors", {"source": question, "target": ""}))
+        self.assertEqual(ask_service.route("how is maya connected to the invoice worker")[0], "path_between")
+
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)
         self.assertEqual(algorithms.depth_in("and 3 hops out"), 3)
