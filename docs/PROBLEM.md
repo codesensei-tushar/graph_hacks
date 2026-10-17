@@ -47,8 +47,10 @@ docs / tickets / chats
 
 ## Out of scope for the first cut
 
-- Real Slack, Jira, or Google Drive connectors
-- Login and multi-tenant graphs
+Written on day one. Since then the Slack and GitHub connectors were built (docs/SLACK.md, docs/GITHUB.md) and installs are per workspace; the rest still holds.
+
+- Jira or Google Drive connectors
+- Login
 - A general chatbot that answers without a graph path
 
 ## Done when

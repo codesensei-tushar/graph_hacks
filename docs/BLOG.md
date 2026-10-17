@@ -75,12 +75,12 @@ The last one is a single pattern: `(:SlackUser)-[:IS]->(:Person)<-[:IS]-(:GitHub
 
 FalkorDB ships graph algorithms as procedures, which means ranking and routing are a `CALL` rather than code we had to write.
 
-- `algo.pageRank('Service', 'DEPENDS_ON')` says which service the most others lean on, the one to worry about first.
-- PageRank over who `AUTHORED` and `REVIEWED` the pull requests touching a service ranks "who knows billing" by structure instead of by counting.
-- `algo.SPpaths` answers "why is Maya connected to the invoice worker": `Maya -[OWNS]-> Auth <-[DEPENDS_ON]- Billing <-[DEPENDS_ON]- Invoice Worker`.
-- `algo.betweenness` finds the connector services, the ones most shortest paths run through.
+- `algo.pageRank('Service', 'DEPENDS_ON')` says which service the most others lean on, the one to worry about first, and the reply adds how many services depend on it.
+- `algo.SPpaths` answers "why is Maya connected to the invoice worker": `Maya -[OWNS]-> Auth <-[DEPENDS_ON]- Billing <-[DEPENDS_ON]- Invoice Worker`, every shortest route considered, the one with the strongest edges shown.
+- `algo.betweenness` names the connector among the services a failure hits, the one most shortest paths run through.
+- Blast radius walks `DEPENDS_ON` to a depth you choose and groups what it finds by hop.
 
-[[Verify which of these four are merged before publishing; drop any that are not.]]
+One thing we tried and dropped: PageRank for people. "Who knows billing" sounded like a ranking problem, but PageRank scores by incoming links and people have almost none; every person came out between 0.011 and 0.015. So people are ranked by a weighted sum of their edges to the service (owning it counts five, writing a pull request three, reviewing two), and the reply shows the reasons: "Ask first: Arjun Mehta (owns it, wrote notebook#52)". The ranking is explainable because it is made of the same edges the path prints.
 
 Three things we learned by running them against FalkorDB 4.22, not by reading about them:
 
@@ -90,7 +90,7 @@ Three things we learned by running them against FalkorDB 4.22, not by reading ab
 
 Blast radius is the one to watch in the video. At depth one, Auth going down takes out the gateway, billing, notifications and search. One hop further it reaches the invoice worker through Billing, and the reply shows the route. A search box cannot do that.
 
-[[Image 5: blast radius at depth one and at depth four, side by side.]]
+[[Image 5: blast radius at one hop and two hops out, side by side.]]
 
 ## What we cut, and why
 
@@ -98,7 +98,7 @@ We did not add vector search, and we want to be clear that this was a choice.
 
 The honest reason is weight: an embedding model would have added about a gigabyte to a slim image a day before the deadline. The better reason is that similarity search is not graph work. The judges were asked to look for work the graph does that the agent could not do without it, and nearest-neighbour text retrieval is what every retrieval demo already has.
 
-So recall follows edges. From the entity a question resolved to, through `MENTIONS`, to the memories that talk about it, then one hop out to the memories about its neighbours, all filtered by what you may read, with FalkorDB's full-text index as the first pass. Semantic recall is the first thing we would add next. FalkorDB has the vector index for it, and the Memory node is already shaped for an `embedding` property. [[Verify that edge-based recall merged; otherwise say "is the next step".]]
+So recall follows edges. From the entity a question resolved to, through `MENTIONS`, to the memories that talk about it, then one hop out to the memories about its neighbours, all filtered by what you may read, with FalkorDB's full-text index as the first pass. A second tool, `recall`, runs the full-text index over what you may read for questions that name no node at all, and returns dated lines and no path. Semantic recall is the first thing we would add next. FalkorDB has the vector index for it, and the Memory node is already shaped for an `embedding` property.
 
 ## One store
 
