@@ -17,6 +17,7 @@
     </a>
     <nav>
       <a href="#ask">Ask</a>
+      <a href="#teams">Teams</a>
       <a href="#how">How it answers</a>
       <a href="#proof">Proof</a>
       <a href="#tools">Tools</a>
@@ -48,6 +49,19 @@
     <div class="answer" id="answer" aria-live="polite">
       <div class="status" id="status"></div>
       <div id="out"></div>
+    </div>
+  </section>
+
+  <section class="block" id="teams">
+    <h2>For every team</h2>
+    <p class="sub">Engineering was first. Sales, support and operations fit the same graph: a renewals process depends on the CRM, a pricing decision supersedes the last one, and the bot answers who owns what and why, with the path, for them too. Each team has a page: its people, what it runs grouped by kind, the decisions that stand and what was said.</p>
+    <ul class="team-cards" id="team-cards"><li class="note">Loading the teams…</li></ul>
+
+    <div class="onboard" id="onboard" hidden>
+      <h3>Onboard your team</h3>
+      <p>Type one line in Slack. The bot shows an Approve card that counts what it will create before anything is written, and the reply cites the edges it wrote.</p>
+      <pre><code>onboard team: Sales | members: @priya @dev | owns: Renewals (process), HubSpot (system), Pricing playbook (playbook) | decision: annual plans only, decided 2026-09-01</code></pre>
+      <p class="note">Kinds: service, system, process, product, account, policy, playbook. Writes merge by id and never delete. A larger team can be imported from a file with the same fields: the team, its members, what it owns (each with a kind and an owner), and its decisions.</p>
     </div>
   </section>
 
@@ -105,6 +119,7 @@
     <p>AI assistance: parts of this project were written with Claude Code (Anthropic). The graph model, the tool catalogue, the scope rules and every query were decided and reviewed by the team.</p>
   </footer>
 </div>
+<script src="/static/graph.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

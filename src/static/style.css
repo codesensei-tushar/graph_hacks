@@ -175,6 +175,31 @@ table.tools td.name { white-space: nowrap; }
 .demo-steps code { background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
 .demo-steps .exp { display: block; color: var(--ink-2); font-size: 0.92rem; }
 
+/* Teams */
+.team-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.team-cards a { display: block; height: 100%; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--ink); text-decoration: none; }
+.team-cards a:hover { border-color: var(--ink-3); }
+.team-cards b { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+.team-cards span { color: var(--ink-2); font-size: 0.92rem; }
+.onboard { margin-top: 18px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; background: var(--surface-2); }
+.onboard h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.onboard p { margin: 0 0 10px; color: var(--ink-2); }
+.onboard pre { margin: 0 0 10px; padding: 10px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+.team-hero { padding-bottom: 4px; }
+.crumb { margin: 0 0 8px; font-size: 0.92rem; }
+.owns-line { margin-top: 6px !important; font-size: 0.9rem !important; }
+.kind-title { font-size: 1rem; margin: 18px 0 6px; color: var(--ink-2); }
+.decisions, .plain { margin: 0; padding: 0; list-style: none; }
+.decisions li { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 0 0 10px; background: var(--surface-2); }
+.decisions p { margin: 0 0 6px; }
+.decisions p:last-child { margin-bottom: 0; }
+.decisions .meta-line { color: var(--ink-2); font-size: 0.92rem; }
+.decisions .replaced { color: var(--ink-2); font-size: 0.92rem; border-left: 2px solid var(--line); padding-left: 8px; }
+.plain li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+a.chip { text-decoration: none; display: inline-block; }
+#graph h3 { font-size: 1rem; margin: 0 0 8px; display: flex; gap: 8px; align-items: baseline; }
+#graph .meta { color: var(--ink-3); font-weight: 500; font-size: 0.9rem; }
+
 footer { margin: 40px 0 30px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 0.9rem; }
 footer p { margin: 4px 0; }
 
