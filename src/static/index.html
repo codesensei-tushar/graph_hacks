@@ -61,7 +61,7 @@
       <h3>Onboard your team</h3>
       <p>Type one line in Slack. The bot shows an Approve card that counts what it will create before anything is written, and the reply cites the edges it wrote.</p>
       <pre><code>onboard team: Sales | members: @priya @dev | owns: Renewals (process), HubSpot (system), Pricing playbook (playbook) | decision: annual plans only, decided 2026-09-01</code></pre>
-      <p class="note">Kinds: service, system, process, product, account, policy, playbook. Writes merge by id and never delete. A larger team can be imported from a file with the same fields: the team, its members, what it owns (each with a kind and an owner), and its decisions.</p>
+      <p class="note">Kinds: service, system, process, product, account, policy, playbook. Writes merge by id and never delete. A larger team imports from a TOML file with the same fields: the team, its members, what it owns (each with a kind and an owner), and its decisions. The guide is <code>docs/ONBOARDING-TEAMS.md</code>, the blank template <code>docs/templates/team.example.toml</code>, and a worked example <code>examples/teams/quillfern-sales.toml</code>.</p>
     </div>
   </section>
 
