@@ -165,14 +165,19 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     named = kinds.capitalized(kinds.subject(service.name, service.kind))
     if service != target:
         parts.append(f"{target.name} is about {kinds.subject(service.name, service.kind)}.")
-    if owners:
-        parts.append(f"{named} is {kinds.owned(service.kind)} {join_names([name for _, name in owners])}.")
-    elif teams:
-        parts.append(f"{named} has no named owner.")
+    run_by = f"the {join_names([name for _, name in teams])} team{'s' if len(teams) > 1 else ''}"
+    if owners and teams and kinds.kind_or_default(service.kind) == "process":
+        # "is run by Priya. Run by the Sales team." stutters; one sentence names both.
+        parts.append(f"{named} is run by {join_names([name for _, name in owners])} for {run_by}.")
     else:
-        parts.append(f"{named} is in the graph, and no owner or team is recorded for it.")
-    if teams:
-        parts.append(f"Run by the {join_names([name for _, name in teams])} team{'s' if len(teams) > 1 else ''}.")
+        if owners:
+            parts.append(f"{named} is {kinds.owned(service.kind)} {join_names([name for _, name in owners])}.")
+        elif teams:
+            parts.append(f"{named} has no named owner.")
+        else:
+            parts.append(f"{named} is in the graph, and no owner or team is recorded for it.")
+        if teams:
+            parts.append(f"Run by {run_by}.")
     if kinds.kind_or_default(service.kind) in ("policy", "playbook"):
         summary = graph.ro_query("MATCH (s:Service {id: $id}) RETURN coalesce(s.summary, '')", {"id": service.id}).result_set
         if summary and summary[0][0].strip():

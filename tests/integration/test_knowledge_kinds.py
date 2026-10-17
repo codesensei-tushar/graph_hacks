@@ -86,7 +86,8 @@ class KindsTest(unittest.TestCase):
         self.assertTrue(ask_service.ask("who owns billing", ORG).answer.startswith("Billing Service is owned by Arjun Mehta."))
         renewals = ask_service.ask("who runs the renewals process", ORG)
         self.assertEqual(renewals.tool, "who_owns")
-        self.assertTrue(renewals.answer.startswith("The Renewals process is run by Priya Shah. Run by the Sales team."), renewals.answer)
+        # One sentence: "is run by Priya Shah. Run by the Sales team." repeated itself.
+        self.assertTrue(renewals.answer.startswith("The Renewals process is run by Priya Shah for the Sales team."), renewals.answer)
         self.assertIn("Priya Shah -[OWNS]-> Renewals", [step.cite() for step in renewals.path])
         self.assertTrue(ask_service.ask("who handles hubspot", ORG).answer.startswith("The HubSpot system is owned by Dev Patel."))
         self.assertTrue(ask_service.ask("who is responsible for enterprise accounts", ORG).answer.startswith("The Enterprise accounts is owned by Dev Patel."))
@@ -101,22 +102,19 @@ class KindsTest(unittest.TestCase):
     def test_blast_radius_reads_by_kind_and_crosses_teams(self):
         hubspot = ask_service.ask("what breaks if hubspot goes down", ORG)
         self.assertEqual(hubspot.tool, "blast_radius")
-        # The connector sentence that may follow comes from sampled betweenness, so it is not pinned here.
-        self.assertTrue(
-            hubspot.answer.startswith(
-                "If the HubSpot system goes down, the Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops). "
-                "Depth 2 reached 2 things that depend on it; nothing new past depth 2."
-            ),
+        self.assertEqual(
             hubspot.answer,
+            "If the HubSpot system goes down, the Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops). "
+            "Depth 2 reached 2 things that depend on it; nothing new past depth 2. "
+            "Among them, the Renewals process is the main connector: 1 of the 2 reaches the HubSpot system through it.",
         )
         self.assertIn("Renewals -[DEPENDS_ON]-> HubSpot", [step.cite() for step in hubspot.path])
         one_hop = algorithms.blast_radius("hubspot", ORG, depth=1)
-        self.assertTrue(
-            one_hop.answer.startswith(
-                "If the HubSpot system goes down, the Renewals process stalls (1 hop). "
-                "1 more depends on it further out (Pricing playbook at depth 2); ask with more hops."
-            ),
+        self.assertEqual(
             one_hop.answer,
+            "If the HubSpot system goes down, the Renewals process stalls (1 hop). "
+            "1 more depends on it further out (Pricing playbook at depth 2); ask with more hops. "
+            "Among them, the Renewals process is the main connector: 1 of the 2 reaches the HubSpot system through it.",
         )
         stalls = ask_service.ask("what stops if renewals is down", ORG)
         self.assertEqual(stalls.tool, "blast_radius")

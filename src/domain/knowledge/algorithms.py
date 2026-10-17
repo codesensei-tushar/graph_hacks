@@ -1,7 +1,10 @@
 """Tools that run a graph algorithm instead of a hand-rolled walk.
 
 ``blast_radius`` follows DEPENDS_ON edges to a depth and reports where the walk
-stopped finding anything new; betweenness names the main connector. ``path_between``
+stopped finding anything new, and names the main connector: the affected service the
+most dependents' shortest routes run through, counted from the routes it walked.
+(FalkorDB's ``algo.betweenness`` samples source nodes with a per-process seed, so its top
+node changed between runs and disagreed with exact betweenness.) ``path_between``
 asks FalkorDB for the shortest routes between two nodes and cites each hop in its true
 direction. ``load_bearing`` ranks services by PageRank over DEPENDS_ON. People are not
 ranked by PageRank anywhere: with almost no incoming edges their scores come out flat,
@@ -154,38 +157,36 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
         parts.append(f"Depth {reached} reached {count} thing{'s' if count != 1 else ''} that depend{'s' if count == 1 else ''} on it; nothing new past depth {saturation}.")
     else:
         parts.append(f"Depth {reached} reached {len(affected)} service{'s' if len(affected) != 1 else ''}; nothing new past depth {saturation}.")
-    connector = _main_connector(graph, list(affected))
-    if connector is not None:
-        # Betweenness is fractional (paths split between equal routes), so the sentence names no number.
-        parts.append(f"Among them, {connector} is the main connector: the most shortest dependency paths run through it.")
+    connectors = main_connectors(shortest, affected)
+    if connectors is not None:
+        connector_ids, through = connectors
+        named = join_names([kinds.subject(affected[node_id][0][0], kind_of[node_id]) for node_id in connector_ids])
+        reach = f"{through} of the {len(shortest)} reach{'es' if through == 1 else ''} {subject} through"
+        if len(connector_ids) == 1:
+            parts.append(f"Among them, {named} is the main connector: {reach} it.")
+        else:
+            parts.append(f"Among them, {named} are the main connectors: {reach} each.")
     result.answer = " ".join(parts)
     return result
 
 
-def _main_connector(graph, service_ids: list[str]) -> str | None:
-    """The top connector by betweenness, named by kind ("the Renewals process"), or None.
+def main_connectors(shortest: dict[str, list[tuple]], affected: dict[str, list[tuple]]) -> tuple[list[str], int] | None:
+    """The affected nodes the most dependents reach the failed one through, and how many, or None.
 
-    Runs over the whole service graph; a timeout drops the sentence, not the answer.
+    Counted from the shortest routes the walk found, out to saturation: a dependent counts
+    once for each affected node on any of its shortest routes. Whole numbers, the same on
+    every run. Nodes tied for the most are all returned, by name.
     """
-    try:
-        rows = _betweenness(graph, service_ids)
-    except Exception as error:  # noqa: BLE001  the sentence is optional; the traversal above is the answer
-        log.warning("[blast_radius] betweenness skipped: %s", error)
+    through: dict[str, int] = {}
+    for routes in shortest.values():
+        # A route's ids run from the dependent to the failed node; the ones between are on its way.
+        on_the_way = {node_id for _name, _length, ids, _names in routes for node_id in ids[1:-1]}
+        for node_id in on_the_way & affected.keys():
+            through[node_id] = through.get(node_id, 0) + 1
+    if not through:
         return None
-    return kinds.subject(rows[0][0], rows[0][2]) if rows else None
-
-
-def _betweenness(graph, service_ids: list[str]) -> list:
-    return graph.ro_query(
-        f"""
-        CALL algo.betweenness({{nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON']}}) YIELD node, score
-        WHERE node.id IN $ids AND score > 0
-        RETURN node.name, score, {kinds.KIND_OF.format(var="node")}
-        ORDER BY score DESC, node.name
-        LIMIT 1
-        """,
-        {"ids": service_ids},
-    ).result_set
+    most = max(through.values())
+    return sorted((node_id for node_id, count in through.items() if count == most), key=lambda node_id: affected[node_id][0][0]), most
 
 
 # --- shortest paths -----------------------------------------------------------------------
