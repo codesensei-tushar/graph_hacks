@@ -50,7 +50,9 @@
       renderTools(data.tools || []);
       if (data.company) companyLine.textContent = `Seeded company: ${data.company}.`;
     } catch (error) {
-      toolsBody.replaceChildren(el("tr", {}, "")).firstChild.append(el("td", { colspan: "3", class: "note" }, "The catalogue could not be loaded."));
+      const row = el("tr");
+      row.append(el("td", { colspan: "3", class: "note" }, "The catalogue could not be loaded."));
+      toolsBody.replaceChildren(row);
     }
   }
 
@@ -261,7 +263,9 @@
     };
 
     const svg = svgEl("svg", { viewBox: `0 0 ${totalWidth} ${totalHeight}`, width: totalWidth, height: totalHeight, role: "img" });
-    svg.append(svgEl("title")).lastChild.textContent = `The path: ${edges.length} edges over ${nodes.length} nodes`;
+    const caption = svgEl("title");
+    caption.textContent = `The path: ${edges.length} edges over ${nodes.length} nodes`;
+    svg.append(caption);
     const defs = svgEl("defs");
     const marker = svgEl("marker", { id: "arrow", viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "9", markerHeight: "9", markerUnits: "userSpaceOnUse", orient: "auto-start-reverse" });
     marker.append(svgEl("path", { d: "M0,0 L10,5 L0,10 z", class: "arrow" }));
@@ -319,7 +323,9 @@
         kind.textContent = kindOf(node.label);
         group.append(kind);
       }
-      group.append(svgEl("title")).lastChild.textContent = node.label ? `${node.name} (${kindOf(node.label)})` : node.name;
+      const tip = svgEl("title");
+      tip.textContent = node.label ? `${node.name} (${kindOf(node.label)})` : node.name;
+      group.append(tip);
       nodeLayer.append(group);
       nodeEls.set(node.id, group);
     }
