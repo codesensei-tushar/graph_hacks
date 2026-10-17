@@ -376,7 +376,7 @@ Hard cap three and a half minutes. This table replaces the round 2 storyboard an
 | 2:35 to 2:43 | Terminal, local replay: B1, the import | "Not only engineering. Sales is one file and one command." |
 | 2:43 to 2:52 | Browser: B2, `/team/sales` | "The same graph: a process is run by someone, a CRM can go down, an account has an owner." |
 | 2:52 to 3:04 | Ask page: B3 | "A CRM outage, traced through the process it feeds." |
-| 3:04 to 3:16 | Ask page: B4 | "And if the person who runs renewals leaves, the graph says what loses its owner and who knows it next." |
+| 3:04 to 3:16 | Ask page: B4 | "And if the person who runs renewals leaves, the graph says what rests on them alone and who is next in line, even from another team." |
 | 3:16 to 3:26 | README: the Mermaid diagram, the deploy URL, the three tracks | Close. |
 
 3:26 with every step in; 3:16 without step 7.
@@ -387,12 +387,12 @@ On the local replay. Hold every reply three seconds.
 
 | Step | Type | Answers with | Read aloud |
 | --- | --- | --- | --- |
-| B1 | The import command from `docs/ONBOARDING-TEAMS.md`, against `http://localhost:8000/ops/import` with the Sales template | `POST /ops/import` | The merge report: what was created. Target until coder B's PR lands; copy the command from the guide exactly |
-| B2 | Open `http://localhost:8000/team/sales` | team page | The groups by kind and "Run by" on the renewals process |
-| B3 | Ask page: `what breaks if hubspot goes down` | `blast_radius` | "If the HubSpot system goes down, the Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops). Depth 2 reached 2 things that depend on it; nothing new past depth 2. Among them, the Renewals process is the main connector: 1 of the 2 reaches the HubSpot system through it." The wording is from #64 and #66; the names are a target until the Sales seed's test pins them |
-| B4 | Ask page: `what if priya shah leaves` | `if_person_leaves` | Target: what loses its owner, then who knows each thing next. Priya Shah runs Renewals in the Sales seed ("The Renewals process is run by Priya Shah for the Sales team."). Exact text when coder A's tool lands |
+| B1 | `curl -X POST http://127.0.0.1:8010/ops/import -H "Authorization: Bearer local-demo-token" --data-binary @examples/teams/quillfern-sales.toml` | `POST /ops/import` | The merge report: 13 nodes and 32 edges created (a second run creates 0). "Not only engineering. Sales is one file and one command." |
+| B2 | Open `http://127.0.0.1:8010/team/sales` | team page | The groups by kind and "Run by" on the renewals process |
+| B3 | Ask page: `what breaks if hubspot goes down` | `blast_radius` | "If the HubSpot system goes down, the Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops). Depth 2 reached 2 things that depend on it; nothing new past depth 2. Among them, the Renewals process is the main connector: 1 of the 2 reaches the HubSpot system through it." Wording from #64 and #66, names from the Sales seed (#67) |
+| B4 | Ask page: `what if priya shah leaves` | `if_person_leaves` | "If Priya Shah leaves, 2 things rest on them alone, ranked by how much depends on each. Renewals process: Priya Shah is the only one running it; next in line: Dev Patel, then Noor Haddad; 1 other depends on it. Pricing playbook: Priya Shah is its only owner; next in line: Noor Haddad, then Tomas Reyes." Point at the last name: Tomas is on Platform, so the next in line for the pricing playbook comes from another team, which the org chart would not show. Pinned by #68 |
 
-Run S1 (`who owns renewals, and who else has worked on it`) and S3 (`why did we change pricing`) on the same instance before the take as checks. They are not on screen.
+Run S1 and S3 on the same instance before the take as checks; they are not on screen. S1, `who owns renewals, and who else has worked on it`: "The Renewals process is run by Priya Shah. Ask first: Priya Shah (owns it), then Dev Patel (worked on it) and Noor Haddad (worked on it)." S3, `why did we change pricing`: starts "Sell annual plans only at renewal." and includes "Decided 1 Sep 2026." and "This replaced *Discount monthly plans at renewal* (decided 2 Mar 2026)".
 
 ### Optional: onboard this project's own launch team, on production
 
@@ -407,7 +407,7 @@ Add only the teammates who actually work on the launch. The kinds are honest: th
 
 ### Before recording, added to the round 3 list
 
-- Local replay for the Sales beat: `scripts/seed_graph.py --company quillfern`, then `scripts/replay_workspace.py`, against the local FalkorDB only, with the Sales team not yet imported. Reset between takes with the same two commands. Never point either at production.
+- Local replay for the Sales beat: follow "Sales, as the demo imports it" in `docs/ONBOARDING-TEAMS.md` up to the import: the fake Slack API, the app on port 8010 with `SEED_COMPANY=quillfern` and `BRAIN_ADMIN_TOKEN=local-demo-token`, then `replay_workspace.py ... --steps history --no-sales`, so Sales is not in the graph yet. B1 is the guide's import command. The replay replaces the graph named in `FALKORDB_GRAPH`, so set it to a scratch graph and never to the shared or the production one. Reset between takes by running the history step again.
 - `LLM_API_KEY` on production is now worth setting (user): since #54 the model really picks, and "picked by the model" on screen is the Track 01 tool-selection signal. Run `scripts/check_model_routing.py` once with the key first. Without a key, record anyway and say "picked by keywords" is on screen.
 - Browser at 1080p, light theme, zoomed so the path lines and the drawing read at video size.
 
