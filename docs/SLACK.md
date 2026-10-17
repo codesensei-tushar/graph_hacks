@@ -140,6 +140,7 @@ The bot answers when you DM it, @mention it, address it by name ("hey company br
 | `remember: <text>` | Saves the text to the current room's scope. |
 | `ticket: <title>` | Posts an Approve/Deny card. Only you can click it, and it expires in 15 minutes. Approving writes a `Ticket` into the graph. |
 | `decision: <what was decided>` | Posts an Approve/Deny card that names the service it concerns and the standing decision it will replace (or that it replaces nothing). Approving writes a `Decision` with the date, the proposer, the channel, and a `SUPERSEDES` edge; the next `why did we ...` answer leads with it and says what it replaced and when. |
+| `onboard team: <name> \| members: @a @b \| owns: Renewals (process), HubSpot (system)` | Posts an Approve/Deny card that lists every person, thing and decision it will create. Approving writes the team through the team importer, in the room's scope, and the reply cites every edge. Members are @mentions resolved through their linked person. In a channel only; see [ONBOARDING-TEAMS.md](ONBOARDING-TEAMS.md). |
 | `what can you see` | Lists the scopes this conversation can read. |
 | `link my account` | Sends you a private one-time link to connect your Slack user to a person in the graph. |
 | `promote @user` / `demote @user` | Admins and owner only. Grants or removes admin. |
