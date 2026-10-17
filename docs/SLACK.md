@@ -228,12 +228,13 @@ What a conversation can read depends on where you ask:
 
 Delayed work (approval expiry, rollout paging, observe batches, reaction spacing, invite waves) runs on `src/core/scheduler.py`, a Redis sorted set polled by one thread, in place of Durable Object alarms.
 
-## What's left for the product: the agent and vector search
+## What is next
 
-The Slack layer from company-brain runs entirely on FalkorDB. Two pieces that matter for the product are not ported yet:
+The Slack layer runs entirely on FalkorDB. Where the product stands:
 
-- **Agent.** company-brain's main answer step is an LLM agent with tools (`computeTurn`). It is not ported yet, because agents come later. Today, answers come from the graph lookups (who owns, decision trace, blast radius) plus full-text search over memories. The plug-in point is `register_turn_agent()` in `src/domain/slack/compute.py`.
-- **Search.** supermemory searched memories with vector (semantic) search. Here that is replaced with FalkorDB's full-text index, which is keyword matching. FalkorDB has vector indexes too, so semantic recall can be added later using an embedding model.
+- **Agent.** Built. `src/domain/knowledge/agent.py` makes one structured model call that picks a tool from the fixed catalogue; `src/domain/slack/agent_turn.py` runs it inside the turn and renders the path. Without a model key the keyword router picks the tool, so every path works offline. The plug-in point is still `register_turn_agent()` in `src/domain/slack/compute.py`.
+- **Search.** Full-text over memories, plus recall that follows `MENTIONS` edges from the entity a question names to the memories about it and its neighbours. Semantic (vector) recall was left out on purpose for the hackathon: an embedding model would have added about a gigabyte to the image, and similarity search is not graph work. FalkorDB has the vector index for it when it is added.
+- **MCP.** The same catalogue over MCP, read-only and `org_shared`, is specified in docs/STRATEGY.md and is the next item.
 
 ## Differences from company-brain
 
@@ -246,8 +247,7 @@ The Slack layer from company-brain runs entirely on FalkorDB. Two pieces that ma
 
 ## Not built
 
-- The LLM agent turn (`compute_turn` falls back to graph tools).
-- MCP and tool connectors, connect buttons, and the connected-tool cross-check.
+- MCP tool connectors, connect buttons, and the connected-tool cross-check (serving our own tools over MCP is a separate item, see above).
 - Access leasing between teammates.
 - Post-turn reflection, research and skills.
 - Billing, trials and telemetry.

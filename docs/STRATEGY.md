@@ -110,7 +110,7 @@ Run against the synthetic company, in Slack, in this order:
 1. `who owns billing, and who else has worked on it` in a public channel. Owner, then people linked by past pull requests, with the path.
 2. `why did we move the memory layer off Postgres`. Decision, author, source doc, source ticket.
 3. Post `we're moving billing retries to the invoice worker, decided in today's sync` in the channel. Ask question 2's equivalent for billing. The answer shows the new decision, says what it superseded, and when.
-4. `what breaks if auth goes down` at depth one, then `and two hops out`. The deeper run surfaces a service the first missed, with the path.
+4. `what breaks if auth goes down, one hop`, then `and two hops out`. The first answer says how many more break further out; the second surfaces the invoice worker with its route. Without a depth word the answer shows everything grouped by hop.
 5. `ticket: billing exports time out`. Approve. `who should look at it` returns the owner and the top-ranked people who know that system.
 6. `who knows the payments gateway`, a system not in the graph. The agent says the graph doesn't know it, and names the nearest match.
 7. Same question from a DM by someone without access to a private repo, then by a linked collaborator. Only the second sees the repo's pull requests.
@@ -154,7 +154,7 @@ Target three minutes, hard cap three and a half. No length limit is published. R
 | 0:30 to 0:55 | Slack, public channel, demo step 1 | Read two path lines aloud. "The answer is the path." |
 | 0:55 to 1:15 | Step 2, the decision trace | "Decision, who proposed and approved it, the RFC and the ticket it cites." |
 | 1:15 to 1:45 | Step 3, post the message that changes the plan, ask again | "A new message changed the plan. The graph holds a new Decision that supersedes the old one, with both dates. Knowledge stays current without deleting history." |
-| 1:45 to 2:10 | Step 4, blast radius for Auth at depth one, then two hops out | "At depth one, four services. Two hops out the graph reaches the invoice worker through Billing and Notifications, and shows the route. A search box could not." |
+| 1:45 to 2:10 | Step 4, `what breaks if auth goes down, one hop`, then `and two hops out` | "At depth one, four services. Two hops out the graph reaches the invoice worker through Billing and Notifications, and shows the route. A search box could not." |
 | 2:10 to 2:30 | Step 5, `ticket:` then Approve, then "who should look at it" | "Writes wait for a human. After approval the ticket is in the graph, and the people are ranked by PageRank over who authored and reviewed what." |
 | 2:30 to 2:45 | Step 6, a system not in the graph | "It says the graph doesn't know it and names the nearest match. It never guesses." |
 | 2:45 to 2:55 | Step 7, DM from a non-collaborator, then from a linked one | "Private repo data shows only to people who can read the repo. The permission check is a graph query too." |

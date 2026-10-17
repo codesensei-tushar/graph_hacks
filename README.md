@@ -21,7 +21,7 @@ If the thing you named is not in the graph, it says so and offers the nearest ma
 - How to run the graph: [docs/SETUP.md](docs/SETUP.md)
 - Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
 - GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
-- What's left for the product (agent, vector search): [docs/SLACK.md#whats-left-for-the-product-the-agent-and-vector-search](docs/SLACK.md#whats-left-for-the-product-the-agent-and-vector-search)
+- What is built and what is next: [docs/SLACK.md#what-is-next](docs/SLACK.md#what-is-next)
 - Production deploy, CI/CD and operations: [docs/DEPLOY.md](docs/DEPLOY.md)
 - Replay the synthetic company for a demo or a test: [docs/SETUP.md](docs/SETUP.md#replay-the-synthetic-company)
 
@@ -39,6 +39,44 @@ uvicorn src.main:app --reload
 The interface is Slack. Create the app from [`slack_app/manifest.yaml`](slack_app/manifest.yaml) and follow [docs/SLACK.md](docs/SLACK.md). Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health). Graph browser: [http://localhost:3000](http://localhost:3000).
 
 ## Graph data model
+
+```mermaid
+flowchart LR
+  subgraph company[Company knowledge, scope org_shared unless written from a room]
+    Team -- PART_OF --> Company
+    Person -- MEMBER_OF --> Team
+    Team -- RUNS --> Service
+    Person -- "OWNS / WORKED_ON / KNOWS" --> Service
+    Service -- DEPENDS_ON --> Service
+    Person -- AUTHORED --> Document
+    Document -- DESCRIBES --> Service
+    Ticket -- ABOUT --> Service
+    Person -- WORKED_ON --> Ticket
+    Person -- "PROPOSED / APPROVED" --> Decision
+    Decision -- ABOUT --> Service
+    Decision -- CITES --> Document
+    Decision -- CITES --> Ticket
+    Chat -- ABOUT --> Decision
+  end
+  subgraph github[GitHub, scope org_shared or github_repo_id]
+    GitHubUser -- IS --> Person
+    GitHubUser -- CAN_READ --> Repo
+    GitHubUser -- "AUTHORED / REVIEWED" --> PullRequest
+    PullRequest -- IN_REPO --> Repo
+    PullRequest -- TOUCHES --> Service
+    PullRequest -- CLOSES --> Ticket
+    GitHubUser -- "OPENED / ASSIGNED" --> Ticket
+  end
+  subgraph slack[Slack and memory, scope per room]
+    SlackUser -- IS --> Person
+    SlackUser -- MEMBER_OF --> Channel
+    SlackUser -- SAID --> Memory
+    Memory -- IN_SCOPE --> Scope
+    Memory -- "HAS_TAG / FILED_UNDER" --> Tag
+    Memory -- MENTIONS --> Service
+    Memory -- MENTIONS --> Decision
+  end
+```
 
 One FalkorDB graph (`company`) holds everything: the seeded company, what Slack and GitHub add at runtime, every memory, and who may read what. Nodes carry `id` and `name`; the tool answers cite them. The Cypher that reads and writes each part is listed in the next section.
 
@@ -97,7 +135,11 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `who_owns` | Who owns a service, and which team runs it | no |
 | `who_knows` | Everyone connected to a service, document or ticket, and through which edge | no |
 | `decision_trace` | Why a decision was made, who proposed and approved it, what it cites | no |
-| `blast_radius` | What stops working if a service goes down | no |
+| `blast_radius` | What stops working if a service goes down, grouped by hop, with the main connector | no |
+| `path_between` | Why two things are connected: the shortest route, each hop cited in its true direction | no |
+| `load_bearing` | Which services the company leans on most, by PageRank, with dependent counts | no |
+| `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
+| `recall` | Memories whose text matches the question, dated, no path | no |
 | `ingest_ticket` | Files a ticket about a service, then answers who should look at it | yes, after Approve |
 
 **Name resolution, before any tool runs.** The question is matched against names, aliases and titles the asker may see. No match means the tool answers that the graph doesn't know the thing, and names the nearest candidates. It never guesses.
@@ -122,7 +164,7 @@ MATCH (team:Team)-[:RUNS]->(service:Service {id: $id})
 RETURN team.id, team.name ORDER BY team.name
 ```
 
-**who_knows** (owner, past work, tickets, pull requests and reviews for one service):
+**who_knows** (owner, past work, tickets, pull requests and reviews for one service). People are ranked by a weighted sum of their edges to the service (owns 5, wrote a pull request 3, worked on, reviewed or assigned 2, knows or opened 1, wrote a document 2), and the reply says "Ask first: Arjun Mehta (owns it, wrote notebook#52)". PageRank is not used for people: it scores by incoming links, people have almost none, and every person comes out between 0.011 and 0.015. The edges that feed the ranking:
 
 ```cypher
 MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {id: $id})
@@ -155,12 +197,60 @@ OPTIONAL MATCH (author:Person)-[:AUTHORED]->(chat)
 RETURN author.name, chat.name, chat.summary
 ```
 
-**blast_radius** (everything that transitively depends on a service). Today the edges are read once and walked breadth-first in Python; the catalogue version walks them in the graph with a capped depth, which is what the depth-one versus depth-four demo shows.
+**blast_radius** (everything that depends on a service, grouped by hop). The walk always runs to the ceiling of six hops so the reply can say where it stopped finding anything new; the depth the asker named is clamped to an integer in Python and applied to the rows. The bound in the query is a constant, never a value from the question. Betweenness names the main connector among the services hit.
 
 ```cypher
-MATCH (child:Service)-[:DEPENDS_ON]->(parent:Service)
-RETURN child.id, child.name, parent.id, parent.name
+MATCH path = (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
+RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name]
+ORDER BY length(path), dependent.name
+
+CALL algo.betweenness({nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON']}) YIELD node, score
+WHERE node.id IN $ids AND score > 0
+RETURN node.name, score ORDER BY score DESC, node.name LIMIT 1
 ```
+
+**path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable; the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
+
+```cypher
+MATCH (a {id: $a}), (b {id: $b})
+CALL algo.SPpaths({sourceNode: a, targetNode: b, relTypes: $rels, relDirection: 'both', maxLen: 6, pathCount: 0})
+YIELD path
+WHERE all(n IN nodes(path) WHERE coalesce(n.scope, 'org_shared') IN $scopes)
+RETURN [i IN range(0, length(path) - 1) | [
+          nodes(path)[i].id, nodes(path)[i].name, labels(nodes(path)[i])[0],
+          type(relationships(path)[i]),
+          nodes(path)[i + 1].id, nodes(path)[i + 1].name, labels(nodes(path)[i + 1])[0],
+          startNode(relationships(path)[i]) = nodes(path)[i]
+       ]] AS hops, length(path)
+```
+
+**load_bearing** (which services the company leans on). PageRank over `DEPENDS_ON`, then how many services depend on each, directly or through others:
+
+```cypher
+CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score
+RETURN node.id, node.name, score ORDER BY score DESC, node.name LIMIT $limit
+
+MATCH (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
+RETURN count(DISTINCT dependent)
+```
+
+**related_memories** (what was said about a thing and its neighbours). Recall follows edges, not embeddings: memories that mention the resolved node, then memories that mention a node one hop away, each branch filtered by the asker's scopes, newest first, each line dated by when it was learned:
+
+```cypher
+MATCH (m:Memory)-[:MENTIONS]->(e {id: $id})
+WHERE m.scope IN $scopes AND NOT coalesce(m.is_forgotten, false)
+OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
+RETURN m.id AS id, m.text AS text, m.scope AS scope, m.created_at AS learned_at, 0 AS hops, e.name AS via, coalesce(a.name, a.id) AS author
+UNION
+MATCH (e {id: $id})-[r]-(n) WHERE n:Service OR n:Document OR n:Ticket OR n:Decision
+MATCH (m:Memory)-[:MENTIONS]->(n)
+WHERE m.scope IN $scopes AND NOT coalesce(m.is_forgotten, false) AND NOT (m)-[:MENTIONS]->(e)
+OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
+RETURN m.id AS id, m.text AS text, m.scope AS scope, m.created_at AS learned_at, 1 AS hops, n.name AS via, coalesce(a.name, a.id) AS author
+ORDER BY hops, learned_at DESC
+```
+
+**recall** (memories whose text matches the question, for questions that name no node) runs the full-text memory search below across the asker's read set and returns dated lines and no path.
 
 **ingest_ticket** (the `ticket:` command; runs through the catalogue after Approve with the room's write scope, then asks `who_knows` about the service):
 
@@ -216,21 +306,3 @@ MATCH (u:GitHubUser {id: $user}), (p:PullRequest {id: $pr}) MERGE (u)-[r:REVIEWE
 MATCH (u:GitHubUser {id: $user}), (r:Repo {id: $repo}) MERGE (u)-[c:CAN_READ]->(r) SET c.user = $user
 ```
 
-**Graph algorithms** (landing this week as tools; each call verified on the `falkordb/falkordb:v4.22.1` image this project runs):
-
-```cypher
--- load_bearing: which service the most others lean on
-CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score
-RETURN node.name, score ORDER BY score DESC LIMIT 5
-
--- path_between: why A is connected to B
-MATCH (a {id: $a}), (b {id: $b})
-CALL algo.SPpaths({sourceNode: a, targetNode: b, relTypes: ['DEPENDS_ON', 'OWNS', 'WORKED_ON', 'TOUCHES', 'AUTHORED', 'IS'], maxLen: 6})
-YIELD path, pathWeight
-RETURN path
-
--- recall, semantic: nearest memories the asker may read
-CALL db.idx.vector.queryNodes('Memory', 'embedding', $k, vecf32($query)) YIELD node, score
-WHERE node.scope IN $scopes
-RETURN node.text, node.scope, node.ts, score
-```
