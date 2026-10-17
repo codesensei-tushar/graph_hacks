@@ -247,16 +247,14 @@ RETURN m.id, coalesce(m.text, m.content, ''), m.ts ORDER BY m.ts DESC LIMIT 1
 MATCH (d:Decision {id: $d}), (m:Memory {id: $m}) MERGE (d)-[:RECORDED_FROM]->(m)
 ```
 
-**blast_radius** (everything that depends on a service, grouped by hop). The walk always runs to the ceiling of six hops so the reply can say where it stopped finding anything new; the depth the asker named is clamped to an integer in Python and applied to the rows. The bound in the query is a constant, never a value from the question. Betweenness names the main connector among the services hit.
+**blast_radius** (everything that depends on a service, grouped by hop). The walk always runs to the ceiling of six hops so the reply can say where it stopped finding anything new; the depth the asker named is clamped to an integer in Python and applied to the rows. The bound in the query is a constant, never a value from the question. Accounts are kept off every route through `$excluded`. The main connector is counted in Python from the shortest routes this one query returns: the affected service that the most dependents reach the failed one through. The count is a whole number, the same on every run, and ties are named together ("Among them, LLM gateway is the main connector: 4 of the 5 reach Claude API through it"). FalkorDB's `algo.betweenness` is not used: it samples source nodes, and on both seeded graphs its top node disagreed with exact betweenness.
 
 ```cypher
 MATCH path = (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
-RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name]
+WHERE all(n IN nodes(path) WHERE NOT coalesce(n.kind, 'service') IN $excluded)
+RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name],
+       coalesce(dependent.kind, 'service')
 ORDER BY length(path), dependent.name
-
-CALL algo.betweenness({nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON']}) YIELD node, score
-WHERE node.id IN $ids AND score > 0
-RETURN node.name, score ORDER BY score DESC, node.name LIMIT 1
 ```
 
 **path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable; the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
