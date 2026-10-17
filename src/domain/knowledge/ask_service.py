@@ -54,6 +54,12 @@ _LEAVES = re.compile(
     r"|\b(?:nobody|no one) else (?:knows|does)\b",
     re.IGNORECASE,
 )
+# Joining a team. "what should I know about billing" names no team and stays on who_knows.
+_BRIEF = re.compile(
+    r"\b(?:just joined|i(?:'m| am) new (?:to|on)|new (?:to|on) the|brief me|onboard me|onboarding brief|up to speed)\b"
+    r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b",
+    re.IGNORECASE,
+)
 
 
 def route(question: str) -> tuple[str, dict]:
@@ -66,6 +72,8 @@ def route(question: str) -> tuple[str, dict]:
     if _LEAVES.search(text):
         # Before blast radius: "what breaks if Arjun leaves" is about a person.
         return "if_person_leaves", {"name": text}
+    if _BRIEF.search(text):
+        return "onboarding_brief", {"name": text}
     if _PRESSURE.search(text):
         return "decision_pressure", {"topic": text}
     if _LOAD_BEARING.search(text):
@@ -341,6 +349,17 @@ def rank_people(path: list[PathStep], target: Entity) -> list[tuple[str, int, st
     return ranked
 
 
+def edges_of(path: list[PathStep], people: list[str]) -> list[PathStep]:
+    """The steps that rank these people, each followed by the step that ties it to the target
+    ("Lena -[WORKED_ON]-> TKT-102", then "TKT-102 -[ABOUT]-> Billing Service")."""
+    steps: list[PathStep] = []
+    for step in path:
+        if step.from_name in people:
+            steps.append(step)
+            steps.extend(bridge for bridge in path if bridge.from_name == step.to_name)
+    return steps
+
+
 def _reason(step: PathStep, target: Entity) -> tuple[str, str]:
     verbs = {"OWNS": "owns", "WORKED_ON": "worked on", "KNOWS": "knows", "AUTHORED": "wrote", "REVIEWED": "reviewed", "OPENED": "opened", "ASSIGNED": "is assigned"}
     verb = verbs.get(step.rel, step.rel.lower().replace("_", " "))
@@ -370,6 +389,13 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
     return bus_factor.if_person_leaves(question, scopes)
 
 
+def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``brief.py``, which reads the team page (and so the ask API). Kept here for the keyword router."""
+    from src.domain.knowledge import brief
+
+    return brief.onboarding_brief(question, scopes)
+
+
 def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
     return algorithms.blast_radius(question, scopes, depth)
 
@@ -385,6 +411,7 @@ _ROUTED = {
     "decision_pressure": lambda args, scopes: decision_pressure(args["topic"], scopes),
     "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
+    "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth")),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
     "who_knows": lambda args, scopes: who_knows(args["name"], scopes),

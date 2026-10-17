@@ -64,6 +64,13 @@ def _run_if_person_leaves(args: dict, scopes: list[str]) -> ToolResult:
     return bus_factor.if_person_leaves(args["name"], scopes)
 
 
+def _run_onboarding_brief(args: dict, scopes: list[str]) -> ToolResult:
+    # Imported here: the brief reads the team page, which imports the ask API, which imports this catalogue.
+    from src.domain.knowledge import brief
+
+    return brief.onboarding_brief(args["name"], scopes)
+
+
 def _run_path_between(args: dict, scopes: list[str]) -> ToolResult:
     return algorithms.path_between(args["source"], args.get("target") or "", scopes)
 
@@ -200,6 +207,22 @@ register(
             ["name"],
         ),
         run=_run_if_person_leaves,
+    )
+)
+register(
+    ToolSpec(
+        name="onboarding_brief",
+        description=(
+            "A brief for someone joining a team, any team: who is on it, what it runs grouped by kind (services, "
+            "systems, processes, playbooks, accounts), its standing decisions and what each replaced, who to ask "
+            "first (who_knows summed over everything the team runs), and its open tickets. Use when someone says "
+            "they just joined a team or asks to be briefed on or brought up to speed on a team."
+        ),
+        args_schema=_schema(
+            {"name": {"type": "string", "description": "The team the question is about, copied from the question."}},
+            ["name"],
+        ),
+        run=_run_onboarding_brief,
     )
 )
 register(
