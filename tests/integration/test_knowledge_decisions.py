@@ -4,6 +4,7 @@ Runs on the fictional Quillfern company in a throwaway graph. Needs FalkorDB on
 localhost:6379 (``docker compose up -d``).
 """
 
+import re
 import unittest
 from unittest import mock
 
@@ -156,6 +157,21 @@ class DecisionsTest(unittest.TestCase):
         result = self._record(decided_at=WHEN + 1)
         self.assertIn("RECORDED_FROM", {step.rel for step in result.path}, result.answer)
         self.assertIn(f"“{said}”", result.answer)
+
+    def test_slack_ts_compare_as_strings_only_in_the_fixed_format(self):
+        # source_message compares ts as strings. That orders like the numbers only while both
+        # sides have ten-digit seconds and six-digit micros, which holds for real Slack ts
+        # (until 2286). Pin the format so a change on either side fails here, not silently.
+        slack_ts = re.compile(r"^\d{10}\.\d{6}$")
+        bounds = [decisions._slack_ts(WHEN / 1000 + 1), decisions._slack_ts(WHEN / 1000 - decisions.SOURCE_WINDOW_SECONDS)]
+        for bound in bounds:
+            self.assertRegex(bound, slack_ts)
+        memory_service.write("moving billing retries to the invoice worker", "org_shared", "UARJUN", "CENG", "1792237199.970000")
+        _, graph = falkordb_client.connect()
+        for (ts,) in graph.query("MATCH (m:Memory) WHERE m.ts IS NOT NULL RETURN m.ts").result_set:
+            self.assertRegex(ts, slack_ts)
+        samples = ["1792237199.970000", "1792237200.000100", "1792237201.000000", "1792236300.000000", "1792237199.999999"]
+        self.assertEqual(sorted(samples), sorted(samples, key=float))
 
     def test_an_old_or_someone_elses_message_is_not_the_source(self):
         memory_service.write("billing alerts are noisy again", "org_shared", "UARJUN", "CENG", f"{WHEN / 1000 - 3600:.6f}")
