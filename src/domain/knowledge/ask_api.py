@@ -270,6 +270,11 @@ def read_tools() -> list[ToolSummary]:
     ]
 
 
+def write_tools() -> list[str]:
+    """The tools that write the graph. They run only in Slack, after an Approve card; the page names them."""
+    return [spec.name for spec in catalogue.list_tools() if spec.needs_approval]
+
+
 @dataclass(frozen=True)
 class Examples:
     company_id: str | None

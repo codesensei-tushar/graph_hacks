@@ -70,6 +70,7 @@ def tools(request: Request):
         "examples": examples.questions,
         "demo": ask_api.demo_steps(examples.company_id),
         "tools": [tool.to_dict() for tool in ask_api.read_tools()],
+        "writes": ask_api.write_tools(),
     }
 
 
