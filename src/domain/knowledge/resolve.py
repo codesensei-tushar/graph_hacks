@@ -32,6 +32,8 @@ STOPWORDS = frozenset(
         "connected", "connect", "related", "between", "hops", "hop", "depth", "depends", "depend", "at", "all",
         "handles", "handle", "responsible", "stops", "stop", "stalls", "happens", "happen", "affected",
         "policy", "policies", "rules",
+        "leaves", "leave", "leaving", "quit", "quits", "quitting", "resigns", "covers", "cover", "takes", "take",
+        "over", "only", "one", "nobody", "bus", "factor",
     }
 )
 

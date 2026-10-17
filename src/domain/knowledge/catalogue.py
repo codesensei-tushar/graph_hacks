@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, memories
+from src.domain.knowledge import algorithms, ask_service, bus_factor, memories
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 
 _TOOLS: dict[str, ToolSpec] = {}
@@ -58,6 +58,10 @@ def _run_working_groups(_args: dict, scopes: list[str]) -> ToolResult:
 
 def _run_blast_radius(args: dict, scopes: list[str]) -> ToolResult:
     return algorithms.blast_radius(args["name"], scopes, args.get("depth"))
+
+
+def _run_if_person_leaves(args: dict, scopes: list[str]) -> ToolResult:
+    return bus_factor.if_person_leaves(args["name"], scopes)
 
 
 def _run_path_between(args: dict, scopes: list[str]) -> ToolResult:
@@ -179,6 +183,23 @@ register(
             ["name"],
         ),
         run=_run_blast_radius,
+    )
+)
+register(
+    ToolSpec(
+        name="if_person_leaves",
+        description=(
+            "What rests on one person alone if they leave: the things they are the only owner of or the only one "
+            "who knows (services, processes, accounts, anything a team owns), the standing decisions only they "
+            "proposed or approved, and the open tickets only they worked on, ranked by how much depends on each. "
+            "Use when the question names a person leaving, quitting, or away, or asks what someone is the only one "
+            "who knows. For a service going down, use blast_radius."
+        ),
+        args_schema=_schema(
+            {"name": {"type": "string", "description": "The person the question is about, copied from the question."}},
+            ["name"],
+        ),
+        run=_run_if_person_leaves,
     )
 )
 register(
