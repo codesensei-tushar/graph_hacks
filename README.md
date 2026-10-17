@@ -9,17 +9,22 @@ Ask it in Slack and it answers from the graph, then prints the edges it walked:
 | You ask | It walks |
 | --- | --- |
 | Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, pull requests and reviews |
-| Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[CITES]-> Document`, and the chat it came from |
+| Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[BASED_ON]-> Document`, the decision it `SUPERSEDES`, and the chat it came from |
 | What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
 | A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
+| What if Priya Shah leaves? | What only they own or know, ranked by what depends on it, and who is next in line by the same edges `who_knows` ranks |
 
 If the thing you named is not in the graph, it says so and offers the nearest matches. It never guesses.
+
+Engineering was first; any team joins the same graph from one TOML file. A `Service` node has a `kind`, so a Sales team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as the billing service, worded for what they are: a process stalls, a playbook no longer applies. The import only merges, and people Slack already knows are matched by email, never duplicated. Every read-only tool is also served over MCP and returns the path it walked. See [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md).
 
 - What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
 - Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
 - Blog post outline: [docs/BLOG.md](docs/BLOG.md)
 - Pitch deck, slide by slide: [docs/PITCH.md](docs/PITCH.md)
+- Site design brief: [docs/DESIGN.md](docs/DESIGN.md)
 - How to run the graph: [docs/SETUP.md](docs/SETUP.md)
+- Onboard any team from one file: [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md)
 - Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
 - GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
 - What is built and what is next: [docs/SLACK.md#what-is-next](docs/SLACK.md#what-is-next)
