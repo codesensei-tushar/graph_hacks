@@ -1,4 +1,4 @@
-"""The agent loop: one model call picks a tool, the tool runs, the reply cites the path.
+"""Choosing a tool: one model call picks from the catalogue, or the keyword router does.
 
 The model never writes a query. It sees the catalogue (tool names, descriptions, and
 argument schemas) and the question, and returns ``{tool, args}``. The choice is checked
@@ -6,23 +6,21 @@ against the registry and the tool's own schema before anything runs. If no model
 configured, the call fails, or the choice is invalid, the keyword router in
 ``ask_service`` picks the tool instead, so every path works with no key.
 
-Tools that write the graph never run here. The turn suspends with a ``TurnApproval``
-and ``execute_approved_action`` runs the tool after the asker approves, with the
-approved write scope, the asker, the channel, and the message time added to the
-arguments the model filled in.
+A tool that writes the graph is accepted from the model only when the question itself
+asks for a write. Thread text goes into the prompt, so a planted message must not be
+able to steer a turn into filing something; the approval card is the second guard.
+
+This module knows nothing about Slack. The turn that renders a reply lives in
+``src/domain/slack/agent_turn.py``.
 """
 
 import json
 import logging
+import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from src.domain.knowledge import ask_service, catalogue
-from src.domain.knowledge.dto import MemoryLine, ToolResult, ToolSpec
-from src.domain.memory.search_brain import search_brain
-from src.domain.memory.writeback import SHARED_TEAM_BRAIN_CONTAINER_TAG, scope_label, slack_memory_container_tag
-from src.domain.slack import format
-from src.domain.slack.compute import TurnApproval, TurnOutcome, TurnRequest, channel_names
+from src.domain.knowledge.dto import ToolSpec
 from src.integrations.llm.model import ModelRequest, ModelUnavailable, generate_object
 
 log = logging.getLogger(__name__)
@@ -30,7 +28,6 @@ log = logging.getLogger(__name__)
 MODEL_PROFILE = "fast"
 THREAD_CONTEXT_MESSAGES = 6
 THREAD_MESSAGE_CHARS = 300
-MEMORY_LINES = 3
 
 SYSTEM_PROMPT = (
     "You route questions about a company to one tool from a fixed catalogue. You never write queries "
@@ -39,6 +36,13 @@ SYSTEM_PROMPT = (
     "when the question refers back to it. Do not invent names. Keep each argument short: the thing "
     "named, not the whole sentence.\n"
     "When unsure which tool fits, pick who_knows."
+)
+
+# The question itself has to ask for a write before a writing tool may be chosen.
+WRITE_INTENT = re.compile(
+    r"^(?:ticket|file ticket|new ticket)\s*[:\-]"
+    r"|\b(?:file|create|open|record|log|note|remember|decided|decide|decision|we're moving|we are moving|going with)\b",
+    re.IGNORECASE,
 )
 
 
@@ -52,9 +56,6 @@ class ToolChoice:
     args: dict
     # "model" when the model picked it, "keywords" when the router did.
     via: str
-
-
-# --- choosing ---------------------------------------------------------------------------
 
 
 def catalogue_schema(specs: list[ToolSpec] | None = None) -> dict:
@@ -94,16 +95,24 @@ def thread_context(thread: list[dict] | None, limit: int = THREAD_CONTEXT_MESSAG
     return "\n".join(lines)
 
 
+def write_intent(question: str) -> bool:
+    return bool(WRITE_INTENT.search(question or ""))
+
+
 def choose_tool(question: str, thread: list[dict] | None = None, specs: list[ToolSpec] | None = None) -> ToolChoice:
     """One structured model call, or the keyword router when the model is unavailable or wrong."""
     specs = catalogue.list_tools() if specs is None else specs
     try:
-        return _choose_with_model(question, thread, specs)
+        choice = _choose_with_model(question, thread, specs)
+        spec = next(candidate for candidate in specs if candidate.name == choice.tool)
+        if spec.needs_approval and not write_intent(question):
+            raise InvalidToolChoice(f"{spec.name} writes the graph but the question does not ask for a write")
+        return choice
     except ModelUnavailable as error:
         log.info("[agent] model unavailable (%s); keyword router", error)
     except InvalidToolChoice as error:
         log.warning("[agent] model choice rejected (%s); keyword router", error)
-    return _choose_with_keywords(question)
+    return choose_with_keywords(question)
 
 
 def _choose_with_model(question: str, thread: list[dict] | None, specs: list[ToolSpec]) -> ToolChoice:
@@ -122,7 +131,7 @@ def _choose_with_model(question: str, thread: list[dict] | None, specs: list[Too
     return ToolChoice(spec.name, validate_args(spec, reply.get("args")), via="model")
 
 
-def _choose_with_keywords(question: str) -> ToolChoice:
+def choose_with_keywords(question: str) -> ToolChoice:
     tool, args = ask_service.route(question)
     if catalogue.get_tool(tool) is None:
         tool, args = "who_knows", {"name": question}
@@ -165,90 +174,3 @@ def validate_args(spec: ToolSpec, args) -> dict:
     if missing:
         raise InvalidToolChoice(f"{spec.name}: missing {', '.join(missing)}")
     return clean
-
-
-# --- the turn ----------------------------------------------------------------------------
-
-
-def answer_turn(request: TurnRequest) -> TurnOutcome:
-    """The ``TurnAgent`` installed through ``register_turn_agent``."""
-    if request.passive_investigation:
-        # Investigating unprompted would need a judgement call; the graph tools only answer questions.
-        return TurnOutcome(silent_conclusion=True)
-    question = " ".join([request.question, *request.live_updates]).strip()
-    choice = choose_tool(question, request.thread)
-    spec = catalogue.get_tool(choice.tool)
-    if spec.needs_approval:
-        return suspend_for_approval(request, spec, choice)
-    result = spec.run(choice.args, request.read_tags)
-    # A refusal stands alone: a memory that happens to match the words would read like a guess next to
-    # "nothing in the graph matches". Tools that answer from memories bring their own dated lines.
-    memories = result.memories or (recall_memories(question, request) if result.found else [])
-    return TurnOutcome(reply=render_reply(result, choice, memories, request.read_tags, channel_names(request.read_tags)))
-
-
-def suspend_for_approval(request: TurnRequest, spec: ToolSpec, choice: ToolChoice) -> TurnOutcome:
-    container = slack_memory_container_tag(request.memory_scope) or SHARED_TEAM_BRAIN_CONTAINER_TAG
-    names = channel_names(request.read_tags + [container])
-    tool_input = {**choice.args, "asker_slack_user_id": request.asker_slack_user_id, "channel_id": request.channel}
-    decided_at = _epoch_seconds(getattr(request.event, "ts", None))
-    if decided_at is not None:
-        tool_input["decided_at"] = decided_at
-    return TurnOutcome(
-        status="suspended",
-        approval=TurnApproval(
-            tool_name=spec.name,
-            tool_input=tool_input,
-            summary=approval_summary(spec, choice.args, request.read_tags, scope_label(container, names)),
-            container_tag=container,
-        ),
-    )
-
-
-def approval_summary(spec: ToolSpec, args: dict, scopes: list[str], visible_to: str) -> str:
-    """What the card says. A tool's preview shows the resolved target, so the asker approves a known write."""
-    if spec.preview is not None:
-        return f"{spec.preview(args, scopes)}. Visible to {visible_to}."
-    what = spec.description.split(". ")[0].rstrip(".")
-    shown = ", ".join(f"{key}: *{value}*" for key, value in args.items() if value not in (None, "", []))
-    return f"{what}. {shown}. Visible to {visible_to}."
-
-
-def recall_memories(question: str, request: TurnRequest) -> list[MemoryLine]:
-    found = search_brain(question, request.memory_scope, trace_id=request.trace_id)
-    return [memory_line(row) for row in (found.get("results") or [])[:MEMORY_LINES]]
-
-
-def memory_line(row: dict) -> MemoryLine:
-    metadata = row.get("metadata") or {}
-    return MemoryLine(
-        text=row.get("memory") or row.get("content") or row.get("text") or "",
-        learned_at=learned_at(row.get("updated_at"), row.get("ts")),
-        author=row.get("author") or metadata.get("author_name") or metadata.get("author_id") or "someone",
-        scope=row.get("container_tag") or row.get("scope") or SHARED_TEAM_BRAIN_CONTAINER_TAG,
-        channel_id=metadata.get("slack_channel_id") or row.get("channel_id"),
-    )
-
-
-def learned_at(updated_at_ms, ts) -> str:
-    """The day a memory was saved, from its ms timestamp or the Slack message ts."""
-    seconds = None
-    if isinstance(updated_at_ms, (int, float)) and not isinstance(updated_at_ms, bool) and updated_at_ms > 0:
-        seconds = updated_at_ms / 1000
-    else:
-        seconds = _epoch_seconds(ts)
-    if not seconds:
-        return ""
-    return datetime.fromtimestamp(seconds, tz=timezone.utc).strftime("%Y-%m-%d")
-
-
-def render_reply(result: ToolResult, choice: ToolChoice, memories: list[MemoryLine], read_tags: list[str], names: dict[str, str]) -> str:
-    return format.format_answer(result.to_dict(), [memory.to_dict() for memory in memories], read_tags, names, chosen_by=choice.via)
-
-
-def _epoch_seconds(ts) -> int | None:
-    try:
-        seconds = int(float(ts))
-    except (TypeError, ValueError):
-        return None
-    return seconds if seconds > 0 else None

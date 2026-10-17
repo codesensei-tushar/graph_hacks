@@ -10,10 +10,10 @@ from src.core import scheduler
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
-from src.domain.knowledge.agent import answer_turn
 from src.domain.memory.memory_service import ensure_indexes
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
 from src.domain.slack import token_install
+from src.domain.slack.agent_turn import answer_turn
 from src.domain.slack.channel_membership import reconcile_channel_membership
 from src.domain.slack.channels import observe, rollout  # noqa: F401  register rollout and observe jobs
 from src.domain.slack.channels import reset as channel_reset
