@@ -36,6 +36,14 @@ python scripts/seed_graph.py
 uvicorn src.main:app --reload
 ```
 
+To see the seven demo answers with no Slack app and no model key, run the synthetic company through the real routes against a local fake of the Slack API. It seeds the fictional Quillfern into a graph of its own and prints every reply with the edges it walked:
+
+```bash
+python scripts/replay_workspace.py --graph company_demo
+```
+
+That is the complete local setup the rules accept in place of a live deployment: Docker, Python 3.11 or newer, and the two commands above. Verified from a clean clone on Python 3.13 with only `requirements.txt` installed.
+
 The interface is Slack. Create the app from [`slack_app/manifest.yaml`](slack_app/manifest.yaml) and follow [docs/SLACK.md](docs/SLACK.md). Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health). Graph browser: [http://localhost:3000](http://localhost:3000).
 
 ## Graph data model
@@ -131,6 +139,8 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 ## Cypher queries the product depends on
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a schema whose `tool` is an enum of the catalogue's names and whose `args` are the tools' argument schemas; the choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
+
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event or a webhook travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string or concatenated Cypher literal in `src/` (32 of them) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH` and `MAX_PATH_LENGTH`, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed and the container settings, labels, relationship types and property names that come from code. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |

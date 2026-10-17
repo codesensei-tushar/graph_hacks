@@ -77,6 +77,8 @@ cp .env.example .env
 
 ## Replay the synthetic company
 
+This is the first thing to run after the graph is up: it needs no Slack app and no model key, and it is what the README's quickstart ends with.
+
 `src/seed/quillfern.py` is a made-up company and `src/seed/quillfern_workspace.py` its scripted Slack history, demo steps, and GitHub repos. The replay plays that script into the app through the real routes, with real request signatures, so the graph ends up the way a used workspace would leave it.
 
 Locally, with nothing but FalkorDB running:
