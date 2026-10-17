@@ -119,6 +119,13 @@ class DecisionsTest(unittest.TestCase):
         self.assertIn("<@UNOBODY>, who is not linked to a person", result.answer)
         self.assertEqual([s for s in result.path if s.rel in ("ABOUT", "SUPERSEDES", "PROPOSED")], [])
 
+    def test_a_decision_about_the_same_service_but_another_thing_replaces_nothing(self):
+        preview = catalogue.get_tool("record_decision").preview({"title": "charge annual plans in local currency", "about": "billing", "decided_at": WHEN}, ORG)
+        self.assertTrue(preview.endswith(", replacing nothing"), preview)
+        result = self._record(title="charge annual plans in local currency", about="billing")
+        self.assertEqual([s for s in result.path if s.rel == "SUPERSEDES"], [])
+        self.assertIn("replacing nothing", result.answer)
+
     def test_a_named_decision_that_is_not_in_the_graph_is_refused_not_guessed(self):
         preview = catalogue.get_tool("record_decision").preview({"title": "move billing retries to the invoice worker", "supersedes": "the espresso rota", "decided_at": WHEN}, ORG)
         self.assertIn("replacing *the espresso rota*, which is not in the graph", preview)
