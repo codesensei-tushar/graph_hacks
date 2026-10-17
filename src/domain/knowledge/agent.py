@@ -181,7 +181,9 @@ def answer_turn(request: TurnRequest) -> TurnOutcome:
     if spec.needs_approval:
         return suspend_for_approval(request, spec, choice)
     result = spec.run(choice.args, request.read_tags)
-    memories = result.memories or recall_memories(question, request)
+    # A refusal stands alone: a memory that happens to match the words would read like a guess next to
+    # "nothing in the graph matches". Tools that answer from memories bring their own dated lines.
+    memories = result.memories or (recall_memories(question, request) if result.found else [])
     return TurnOutcome(reply=render_reply(result, choice, memories, request.read_tags, channel_names(request.read_tags)))
 
 

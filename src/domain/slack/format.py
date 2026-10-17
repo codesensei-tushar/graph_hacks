@@ -2,7 +2,8 @@
 
 from src.domain.memory.writeback import scope_label
 
-MAX_PATH_STEPS = 10
+# Enough for a who_knows answer that spans owners, tickets, pull requests and reviews; the demo's step 7 has 12 edges.
+MAX_PATH_STEPS = 20
 MAX_MEMORY_SNIPPET = 220
 
 HELP_TEXT = "\n".join(
