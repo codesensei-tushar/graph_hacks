@@ -1,0 +1,191 @@
+# Site design brief
+
+The brief for rebuilding the public page at [brain.noobsurd.space](https://brain.noobsurd.space). It is the judges' first impression, so it has to look current and prove the product in the first screen. The page stays what it is today: static HTML, CSS and JS in `src/static/`, served by FastAPI, reading the same public routes. This brief changes how it looks and what it says, not what it does.
+
+Short version: dark-first, one accent, and the live product as the hero: the ask box, real counts and a real slice of the graph. The single big piece of motion is the path being walked, edge by edge, from a real answer. Every number on the page comes from an API call, and no sentence claims more than main does.
+
+The UI session (graph-hacks-34) builds it in five phases: the design system and hero; the ask section with the animated path; proof, every team, how it works, builders and footer; the team pages; then republishing the deck. Coder A adds `/api/graph/stats` and `/api/graph/sample` for the hero.
+
+## 1. What leading product sites do now
+
+Checked on 17 Oct 2026 by loading each home page in headless Chrome at 1440 px.
+
+| Site | What it does | Take | Leave |
+| --- | --- | --- | --- |
+| [Linear](https://linear.app) | Near-black page. A two-line headline, left-aligned, with a muted subline. The real product UI sits directly under the headline as the hero. Further down, statements set in two tones (bright, then muted) and thin-bordered panels | The real product as the hero, not an illustration. Two-tone headlines. Restraint: one typeface, almost no colour | The customer logo wall |
+| [Cursor](https://cursor.com) | A short headline, then the product working inside a window frame on a painted backdrop. Sections alternate text and a framed live panel | Frame the ask box and its path drawing like an app window, so the hero reads as a working tool | The painted backdrop; we have no art to match it |
+| [Supabase](https://supabase.com) | Two-line headline with the second line in the brand green. Then a bento grid of feature cards, each with a small diagram of the feature | A bento grid for "How it works", one principle per card, each with a tiny real diagram (an edge line, a card preview, a refusal) | Feature sprawl; we have five principles, not twenty products |
+| [Modal](https://modal.com) | Black, one neon accent on a single word of the headline, and an animated particle visual. Later sections show node-and-edge diagrams | One accent word in the headline. Node diagrams as the visual language | The decorative particle animation; ours must be a real graph from a real answer |
+| [Vercel](https://vercel.com) | Black, a large centrepiece visual, a white pill as the primary button and a dark ghost button beside it. Product demos sit in framed panels | The button pair: a filled pill for the main action, a ghost button for the second | The event-style centrepiece |
+
+What all five share, and what we copy: a near-black background with one accent, large but quiet sans headings, 1 px borders on slightly lifted panels, generous vertical space, and the product shown working. What we do not copy: logo walls, customer counts, testimonials and "trusted by" strips. We have none, and inventing them is against the rules and against the product's whole claim.
+
+## 2. Positioning and page order, with the copy
+
+The promise, in one line: **Ask how your company works. Every answer shows the path it walked.**
+
+Sections in this order. The copy below is final unless main changes; numbers in `{braces}` are filled from the API at runtime, never typed in.
+
+### 2.1 Hero
+
+- Eyebrow: `Graph Hacks · Track 03 · Company Brain on FalkorDB`
+- Headline, two tones: **Ask how your company works.** then, muted, *Every answer shows the path it walked.*
+- Subline: "People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used."
+- The ask box sits in the hero, with the example chips from `/api/ask/tools` under it: the product is the demo. Asking renders the answer and the walk directly below the hero (2.2). A ghost link **How it works** scrolls to 2.5. Add **Watch the demo** only once the video link exists.
+- Under the box, one quiet line: "It never writes Cypher, never guesses, and never shows you what you cannot read."
+- Live counts from `/api/graph/stats`, in mono with tabular numerals and reserved width: for example **{people}** people · **{services}** things teams run · **{decisions}** decisions · **{edges}** edges. Only counts the API returns; if the call fails, the row is not shown.
+- Right side on desktop, below on mobile: a live slice of the graph from `/api/graph/sample`, laid out deterministically (the same input gives the same picture), with node names on hover and focus. Pulses travel along real edges in their true direction (see 3.4). It is real data from the public scope, never a decorative fake graph.
+
+### 2.2 Live proof: ask the graph
+
+- Eyebrow: `Live`. Heading: **Ask the graph behind this project.**
+- Body: "This page reads the production graph: Company Brain's own services, decisions, pull requests and public chat. Pick a question or write your own. The answer comes back with its path, drawn in the order it was walked."
+- The answer to whatever was asked in the hero's box (max 300 characters, the server's cap), the drawing, then the `A -[REL]-> B` lines. On a deep link (`/?q=...`, which works today) the page asks once on load.
+- Footer under each answer, from the response: "Tool `{tool}` · picked by keywords · read from public channels".
+- Small print: "Public and read-only: public channels only, no model, answers cached for a minute."
+
+### 2.3 Why the graph matters
+
+- Heading: **Take FalkorDB out, and the answers go with it.**
+- Body: "The same questions run twice: once against FalkorDB, once with every graph read returning nothing."
+- Live line from `/api/ask/proof`: "**{collapsed} of {total}** capabilities collapse without the graph." Then: "The one that does not is a refusal. A question about something the graph does not know is refused either way, which is the point."
+- The table from the same call: question, tool, with the graph, without, result. On mobile it becomes one card per question.
+
+### 2.4 Every team
+
+- Heading: **Not only engineering.**
+- Body: "A `Service` node has a kind: a service, a system, a process, a product, an account, a policy or a playbook. A team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as a billing service, in their own words: a process stalls, a playbook no longer applies."
+- Team cards from `/api/teams`: the name, `{members}` people, `{owns}` things, and a chip per kind. Each card links to `/team/{id}`.
+- Onboarding, beside or under the cards: "**One file, written for people who do not write code.** Import it and the team is in the graph. The import only merges and deletes nothing, and people Slack already knows are matched by email, never duplicated." Show 10 to 12 real lines from `docs/templates/team.example.toml` as a code panel, with a link to `docs/ONBOARDING-TEAMS.md`.
+- The bus-factor beat, labelled as coming from the demo company because production has no Sales team: "**Ask what rests on one person.** On the demo company, Quillfern, *what if priya shah leaves* answers: 'Pricing playbook: Priya Shah is its only owner; next in line: Noor Haddad, then Tomas Reyes.' Tomas is on Platform. The next in line comes from another team, by the same edges *who knows* ranks."
+
+### 2.5 How it works
+
+- Heading: **How an answer is made.**
+- Four steps in a row (a column on mobile):
+  1. **Resolve.** "Names in the question are matched against the graph first. No match, no guess: it says what it does not know and names the nearest things it does."
+  2. **Pick a tool.** "A fixed catalogue of hand-written, parameterised Cypher. In Slack a model picks the tool and fills in the arguments; it never writes a query."
+  3. **Walk.** "The tool walks the graph, filtered to what the asker may read."
+  4. **Show the path.** "The reply prints every edge it used, `A -[REL]-> B`. The explanation is the traversal, not a sentence written afterwards."
+- A bento grid of five cards, each with a small real visual:
+  - **It never writes Cypher.** The visual is a tool name with its argument schema.
+  - **It refuses to guess.** The visual is the refusal line with its nearest names.
+  - **Writes wait for a human.** "Filing a ticket or recording a decision shows a card that names the target before anything is written." The visual is a mock of the Approve card's text, labelled as the card's wording.
+  - **Decisions stay current.** "A new decision supersedes the old one; both dates stay, and the answer quotes the message it came from." The visual is `New -[SUPERSEDES]-> Old`.
+  - **Permissions are a graph query.** The visual is `(:SlackUser)-[:IS]->(:Person)<-[:IS]-(:GitHubUser)-[:CAN_READ]->(:Repo)`.
+- The data model as one inline SVG in four colour families, the same grouping as the deck's slide 4: people and teams; what teams run; knowledge (documents, tickets, pull requests, decisions, chat); access (Slack users, GitHub users, channels, repos). Link to the README's "Graph data model".
+
+### 2.6 For builders
+
+- Heading: **The same tools, over MCP.**
+- Body: "Every read-only tool in the catalogue is served at `/mcp` over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, behind a token." The count comes from `/api/ask/tools`: "**{n}** read-only tools".
+- The tool list, rendered from `/api/ask/tools`: name and description, one line each.
+- The client snippet from the README's MCP section, as a code panel.
+- Links: the README's data model and query list, local setup ("`docker compose up -d`, then two commands"), and the repository once it is public.
+
+### 2.7 Footer
+
+- "Built for Graph Hacks. Track 03, Company Brain (primary); also Track 01, Agents That Act on Connected Data, and Track 02, Agent Memory and Coordination."
+- The AI disclosure, word for word from the README.
+- "Synthetic data and this project's own only."
+- Links: repository, README, blog and video when they exist, `/api/health`.
+
+## 3. Visual direction
+
+### 3.1 Palette
+
+Dark is the design target; light is fully supported. The node families keep their meaning everywhere: cobalt is people, orange is what teams run, green is knowledge, grey is everything else. The one accent is cyan, and it means "the walked path": the walk's glow, the primary button and focus rings. Its hue must stay clearly apart from the people colour, which is why people move from sky blue to cobalt.
+
+| Token | Dark | Light |
+| --- | --- | --- |
+| `--bg` | `#0B0D12` | `#F6F4EF` |
+| `--surface` | `#11141B` | `#FCFCFB` |
+| `--surface-2` | `#171B24` | `#F0EEE8` |
+| `--line` | `#252A36` | `#D9D7CF` |
+| `--ink` | `#ECEEF3` | `#14181F` |
+| `--ink-2` | `#A7AEBE` | `#52514E` |
+| `--ink-3` | `#7D8597` | `#6E6C66` |
+| `--path` (accent) | `#2DD4E6` | `#0E8FA6` |
+| `--person` | `#7C8CFF` | `#3B5BDB` |
+| `--service` | `#F0703A` | `#D9541F` |
+| `--knowledge` | `#2EC48C` | `#16946A` |
+| `--other` | `#8B93A7` | `#807E77` |
+
+The values are a starting point; the UI session may tune them.
+
+Check every text pair against WCAG AA (4.5:1 for body, 3:1 for large text) and adjust the muted tones if a pair falls short. Panels are `--surface` with a 1 px `--line` border and a faint top highlight; no heavy shadows.
+
+### 3.2 Type
+
+- Geist Sans for headings and body: headings at weight 600, tight tracking (-0.02em).
+- Geist Mono for the graph's vocabulary: `A -[REL]-> B`, tool names, counts and eyebrow labels.
+- Vendor both as `woff2` in `src/static/fonts/` (SIL Open Font License; add the licence file), about 115 KB together, preloaded. Use `font-display: swap` with a size-adjusted fallback so the swap does not shift the layout. When the deck is republished in phase 5, it moves to the same two faces.
+- Scale: hero 56 to 64 px on desktop and 36 to 40 px at 390 px; section headings 32 to 40 px; body 16 to 18 px with a line height of 1.6.
+
+### 3.3 Layout
+
+- Content max width 1200 px and a 12-column grid. Sections 96 to 128 px apart on desktop, 64 px on mobile.
+- The hero splits copy and live panel 5/7 on desktop and stacks on mobile.
+- At 390 px: 16 px side gutters and no horizontal page scroll. The drawing scrolls inside its own frame, or lays out top to bottom. The proof table turns into cards.
+
+### 3.4 Motion
+
+- One signature motion: **the walk**. When an answer arrives, its edges draw in the order the tool returned them, each line growing from its source node to its target (stroke-dashoffset, about 250 ms per edge, staggered about 90 ms). Each node fades and scales from 0.96 to 1 as it is first reached. The matching `A -[REL]-> B` line lights up at the same moment. A small **Replay the walk** button runs it again.
+- The hero's sample graph: pulses travel along real edges in their true direction, a few at a time. They run only while the hero is in view and the tab is visible, stop after a few cycles or at the first interaction, and never loop forever.
+- Everything else is quiet: 150 to 200 ms fades and slides on hover, focus and section entry. No parallax, no scroll-jacking, no auto-playing video, no decorative animation that does not show a real edge.
+- `prefers-reduced-motion: reduce` turns the walk into an instant draw and turns off every entrance animation.
+- Animate only `transform`, `opacity` and SVG stroke properties, never layout properties.
+
+### 3.5 The graph drawing
+
+- Keep `graph.js`'s layered layout and its semantics: nodes as rounded rectangles in their family colour (a 16 % tint fill with a full-colour stroke), and edges as curves with arrowheads and relationship labels in mono.
+- Add the walk (3.4), a hover state that highlights a node's edges and its path lines, and keyboard focus on nodes with the same highlight.
+- The edge arrow always shows the true direction, as today. Do not straighten or reverse edges for looks.
+
+### 3.6 Dark and light
+
+Default to the operating system's setting, with a toggle in the header that remembers the choice in `localStorage`, wrapped in try/catch so a private window still renders. Keep the existing `data-theme` hooks, so `/team/{id}` follows the same theme.
+
+### 3.7 Accessibility
+
+- Every interactive element is reachable by keyboard and has a visible focus ring in the accent colour.
+- The answer region is an `aria-live="polite"` region.
+- The SVG drawing has a `<title>` and `<desc>`. The `A -[REL]-> B` list stays as the accessible text version of the path.
+- Never use colour as the only signal: node labels name the label ("Service", "Person").
+- Headings run in order, `h1` once. Landmarks: `header`, `main`, `footer`.
+- Tap targets are at least 44 px at 390 px.
+
+## 4. Hard constraints for the builder
+
+1. **No build step and no new Python dependency.** Plain HTML, CSS and ES modules in `src/static/`. A JS library, if one is truly needed, is vendored into `src/static/vendor/` or loaded from cdnjs with an exact version at least two weeks old. Prefer none: the drawing and the walk are a few hundred lines of SVG.
+2. **The same routes:** `/api/ask`, `/api/ask/tools`, `/api/ask/proof`, `/api/teams`, `/api/team/{id}` and the `/team/{id}` page, unchanged, with their caching and rate limits. The only new routes are coder A's `/api/graph/stats` and `/api/graph/sample`. Both read the public scope only (what a public channel reads), so no private-channel memory or private-repo pull request reaches the page, not even as a count. Both are cached and share the per-address limit.
+3. **Request budget.** The limit is 30 requests a minute per address, and answers are cached for 60 seconds. First load makes at most four calls: tools, stats, sample and teams. The proof table loads when it scrolls into view. Nothing polls, retries in a loop, or asks more than one question without a click. A 429 shows a calm "Too many questions from this address; try again in a minute".
+4. **Nothing calls the model from the public page.** It uses the keyword router, as now.
+5. **No fabricated numbers, logos, testimonials or replies.** Every count comes from an API response. A quoted reply is either live or copied from a test that pins it, and labelled with where it comes from. No reference-project names anywhere.
+6. **Copy matches main.** If a sentence in section 2 stops being true, change the sentence, not the facts.
+7. **Performance.** No layout shift: reserve space for every async section with a skeleton of the final size. Page weight under about 300 KB before API JSON, own JS under about 80 KB unminified, at most two font files, no images over 150 KB. Aim for Lighthouse 90 or better on performance and accessibility, mobile profile.
+8. **Works without JavaScript** for everything that is not live: the hero copy, how it works, for builders and the footer render as static HTML. Live sections say "This part needs JavaScript".
+9. **Tests.** The existing page tests stay green, including the guard in `tests/unit/test_static_page.py`. New tests: every section in section 2 is present with its heading; no number in the HTML is hard-coded where section 2 says it comes from the API; the page makes no request outside the routes in point 2 and the vendored files; `/team/{id}` still renders.
+10. **The team page** (`/team/{id}`) adopts the same tokens, type and drawing in the same PR or the next one, so the two pages read as one site.
+
+## 5. Acceptance checklist
+
+The research session reviews each UI PR after it merges, on a local run against the production self-seed and against a Quillfern replay. Headless Chrome at 1440 × 900 and 390 × 844, dark and light, plus a pass with reduced motion. Findings go straight to the UI session.
+
+- [ ] The first screen at 1440 shows the promise, the ask box with its chips, the live counts and the sample graph, with no scrolling.
+- [ ] The sample graph and the counts carry nothing from a private scope (checked against a graph with a private-channel memory and a private repo in it), and the pulses stop as section 3.4 says.
+- [ ] At 390 there is no horizontal page scroll, the hero reads in one screen, and the drawing stays usable.
+- [ ] The walk draws edges in the tool's order, the path lines light up with it, the replay works, and reduced motion draws instantly.
+- [ ] Every number on the page (collapsed of total, tool count, team members and things) matches its API response.
+- [ ] Every example chip answers with a path on the production self-seed; none of them is refused.
+- [ ] The proof section loads only when scrolled to, and its sentence about the refusal is true for the current report.
+- [ ] Team cards link to working `/team/{id}` pages in the same style.
+- [ ] Section 2's copy is on the page as written, or the PR says what changed and why.
+- [ ] Dark and light both pass AA on body text, and focus rings show on every control.
+- [ ] No console errors, and no network requests outside the allowed routes and vendored files.
+- [ ] First load makes four API calls or fewer, and asking twice within a minute serves the cached answer.
+- [ ] No layout shift visible on load; skeletons match the final sizes.
+- [ ] No fabricated numbers, logos or testimonials, and no reference-project names.
+- [ ] `ruff` and the full suite green, with the new page tests.
+</content>
+</invoke>

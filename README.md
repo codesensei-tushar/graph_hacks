@@ -22,6 +22,7 @@ Engineering was first; any team joins the same graph from one TOML file. A `Serv
 - Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
 - Blog post outline: [docs/BLOG.md](docs/BLOG.md)
 - Pitch deck, slide by slide: [docs/PITCH.md](docs/PITCH.md)
+- Site design brief: [docs/DESIGN.md](docs/DESIGN.md)
 - How to run the graph: [docs/SETUP.md](docs/SETUP.md)
 - Onboard any team from one file: [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md)
 - Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
