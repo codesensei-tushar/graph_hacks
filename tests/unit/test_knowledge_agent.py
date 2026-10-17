@@ -45,14 +45,48 @@ class ProbeTools(unittest.TestCase):
 
 
 class SchemaAndValidationTest(ProbeTools):
-    def test_schema_offers_every_tool_and_the_union_of_their_arguments(self):
+    def test_schema_offers_every_tool_and_keeps_the_arguments_out_of_the_grammar(self):
+        """An object with every tool's optional arguments was refused as "Schema is too complex"; args travel as JSON text."""
         schema = agent.catalogue_schema()
         self.assertEqual(set(schema["properties"]["tool"]["enum"]), set(catalogue.tool_names()))
-        args = schema["properties"]["args"]
-        for key in ("name", "topic", "title", "about", "depth", "source", "target", "limit", "query", "k"):
-            self.assertIn(key, args["properties"])
-        self.assertFalse(args["additionalProperties"])
+        self.assertEqual(schema["properties"]["args"]["type"], "string")
+        self.assertNotIn("properties", schema["properties"]["args"])
         self.assertEqual(schema["required"], ["tool", "args"])
+        described = agent.describe_catalogue(catalogue.list_tools())
+        for key in ("name", "topic", "title", "about", "depth", "source", "target", "limit", "query", "k"):
+            self.assertIn(f'"{key}"', described)
+
+    def test_arguments_written_as_json_text_are_parsed_and_validated(self):
+        self.assertEqual(agent.parse_args('{"name": "billing"}'), {"name": "billing"})
+        self.assertEqual(agent.parse_args({"name": "billing"}), {"name": "billing"})
+        for bad in ("billing", "[1, 2]", 3, None):
+            with self.subTest(bad=bad), self.assertRaises(agent.InvalidToolChoice):
+                agent.parse_args(bad)
+        with mock.patch.object(agent, "generate_object", return_value={"tool": "blast_radius", "args": '{"name": "auth", "depth": 9}'}):
+            self.assertEqual(agent.choose_tool("what breaks if auth goes down"), agent.ToolChoice("blast_radius", {"name": "auth", "depth": 6}, "model"))
+        with mock.patch.object(agent, "generate_object", return_value={"tool": "who_owns", "args": "not json"}):
+            self.assertEqual(agent.choose_tool("who owns billing").via, "keywords")
+
+    def test_the_model_schema_carries_no_keywords_the_api_rejects(self):
+        """The structured-output API refused "minimum"/"maximum" on integers, which made every call fail over to keywords."""
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    self.assertNotIn(key, agent._UNSUPPORTED_BY_MODEL)
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(agent.catalogue_schema())
+        depth = agent.model_property(catalogue.get_tool("blast_radius").args_schema["properties"]["depth"])
+        self.assertEqual(depth["type"], "integer")
+        self.assertIn("Between 1 and 6.", depth["description"])
+        self.assertNotIn("minimum", agent.describe_catalogue(catalogue.list_tools()))
+        self.assertIn("Between 1 and 6.", agent.describe_catalogue(catalogue.list_tools()))
+        # The bounds still apply when the reply is validated.
+        self.assertEqual(agent.validate_args(DEPTH_SPEC, {"name": "auth", "depth": 42})["depth"], 6)
 
     def test_shared_argument_names_share_one_schema(self):
         seen: dict[str, dict] = {}

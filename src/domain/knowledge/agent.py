@@ -82,29 +82,68 @@ class ThreadSubject:
     depth: int | None = None
 
 
+# JSON schema keywords the structured-output API rejects. The bounds stay in the ToolSpec
+# for validate_args to clamp against; the model sees them in the description instead.
+_UNSUPPORTED_BY_MODEL = ("minimum", "maximum", "default", "format", "pattern", "minLength", "maxLength", "minItems", "maxItems")
+
+
+def model_property(schema: dict) -> dict:
+    """A property schema the model API accepts, with any bounds moved into the description."""
+    clean = {key: value for key, value in schema.items() if key not in _UNSUPPORTED_BY_MODEL}
+    low, high = schema.get("minimum"), schema.get("maximum")
+    if low is not None or high is not None:
+        bounds = f"Between {low} and {high}." if low is not None and high is not None else f"At least {low}." if low is not None else f"At most {high}."
+        clean["description"] = f"{schema.get('description', '').rstrip()} {bounds}".strip()
+    if isinstance(schema.get("items"), dict):
+        clean["items"] = model_property(schema["items"])
+    return clean
+
+
 def catalogue_schema(specs: list[ToolSpec] | None = None) -> dict:
-    """The JSON schema the model's reply must match: one tool name and that tool's arguments."""
+    """The JSON schema the model's reply must match: a tool name, and that tool's arguments as JSON text.
+
+    Kept deliberately small. The structured-output API rejects bounds on integers, and an
+    object holding the union of every tool's optional arguments is refused as "too
+    complex" once the catalogue passes a dozen tools. Each tool's argument names and types
+    are in the prompt instead (``describe_catalogue``), and ``validate_args`` checks the
+    reply against the chosen tool's own schema before anything runs.
+    """
     specs = catalogue.list_tools() if specs is None else specs
-    properties: dict = {}
-    for spec in specs:
-        for key, schema in spec.args_schema.get("properties", {}).items():
-            properties.setdefault(key, schema)
     return {
         "type": "object",
         "properties": {
             "tool": {"type": "string", "enum": [spec.name for spec in specs]},
-            "args": {"type": "object", "properties": properties, "additionalProperties": False},
+            "args": {
+                "type": "string",
+                "description": "The chosen tool's arguments as one JSON object, using only the argument names listed for that tool.",
+            },
         },
         "required": ["tool", "args"],
         "additionalProperties": False,
     }
 
 
+def parse_args(raw) -> dict:
+    """The model's arguments: a JSON object written as text (or already an object)."""
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str):
+        raise InvalidToolChoice("args must be a JSON object")
+    try:
+        value = json.loads(raw or "{}")
+    except json.JSONDecodeError as error:
+        raise InvalidToolChoice(f"args were not JSON: {error.msg}") from None
+    if not isinstance(value, dict):
+        raise InvalidToolChoice("args must be a JSON object")
+    return value
+
+
 def describe_catalogue(specs: list[ToolSpec]) -> str:
     lines = []
     for spec in specs:
         note = " Writes the graph; the asker approves first." if spec.needs_approval else ""
-        lines.append(f"- {spec.name}: {spec.description}{note}\n  args: {json.dumps(spec.args_schema.get('properties', {}))}")
+        shown = {key: model_property(schema) for key, schema in spec.args_schema.get("properties", {}).items()}
+        lines.append(f"- {spec.name}: {spec.description}{note}\n  args: {json.dumps(shown)}")
     return "\n".join(lines)
 
 
@@ -234,7 +273,7 @@ def _choose_with_model(question: str, thread: list[dict] | None, specs: list[Too
     if named:
         # Real names from the graph, so the model copies one instead of inventing one.
         prompt += "\n\nThings named so far in this thread: " + ", ".join(f"{entity.name} ({entity.label})" for entity in named)
-    prompt += f"\n\nQuestion: {question}\n\nReply with the tool and its arguments."
+    prompt += f"\n\nQuestion: {question}\n\nReply with the tool and its arguments as a JSON object, for example {{\"name\": \"billing\"}}."
     reply = generate_object(
         ModelRequest(profile=MODEL_PROFILE, system=SYSTEM_PROMPT, prompt=prompt, schema=catalogue_schema(specs), max_tokens=400)
     )
@@ -242,7 +281,7 @@ def _choose_with_model(question: str, thread: list[dict] | None, specs: list[Too
     spec = next((candidate for candidate in specs if candidate.name == name), None)
     if spec is None:
         raise InvalidToolChoice(f"unknown tool {name!r}")
-    return ToolChoice(spec.name, validate_args(spec, reply.get("args")), via="model")
+    return ToolChoice(spec.name, validate_args(spec, parse_args(reply.get("args"))), via="model")
 
 
 def choose_with_keywords(question: str) -> ToolChoice:
