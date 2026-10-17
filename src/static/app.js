@@ -4,6 +4,7 @@
   "use strict";
 
   const $ = (selector, root = document) => root.querySelector(selector);
+  const demoSteps = $("#demo-steps");
   const form = $("#ask-form");
   const input = $("#q");
   const button = $("#ask-btn");
@@ -45,6 +46,7 @@
       const response = await fetch("/api/ask/tools");
       const data = await response.json();
       renderChips(data.examples || []);
+      renderDemo(data.demo || []);
       renderTools(data.tools || []);
       if (data.company) companyLine.textContent = `Seeded company: ${data.company}.`;
     } catch (error) {
@@ -60,6 +62,17 @@
       const item = el("li");
       item.append(chip);
       chips.append(item);
+    }
+  }
+
+  function renderDemo(steps) {
+    if (!steps.length) return;
+    demoSteps.replaceChildren();
+    for (const step of steps) {
+      const item = el("li");
+      item.append(el("code", {}, step.prompt));
+      item.append(el("span", { class: "exp" }, step.expect));
+      demoSteps.append(item);
     }
   }
 
@@ -316,10 +329,41 @@
   const bezierMid = (p0, p1, p2, p3) => [0, 1].map((i) => (p0[i] + 3 * p1[i] + 3 * p2[i] + p3[i]) / 8);
   const clip = (text, max) => (text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}…`);
 
+  // --- Proof: the same questions with the graph switched off --------------------------------
+
+  const proofStatus = $("#proof-status");
+  const proofTable = $("#proof-table");
+  const proofBody = $("#proof-body");
+
+  async function loadProof() {
+    try {
+      const response = await fetch("/api/ask/proof");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "The proof did not run.");
+      proofStatus.textContent = `${data.collapsed} of ${data.total} capabilities collapse without FalkorDB.`;
+      proofBody.replaceChildren();
+      for (const row of data.rows || []) {
+        const line = el("tr");
+        line.append(el("td", {}, row.question));
+        const toolCell = el("td", { class: "name" });
+        toolCell.append(el("code", {}, row.tool));
+        line.append(toolCell);
+        line.append(el("td", {}, row.with_graph.found ? `${row.with_graph.steps} edges` : "refused"));
+        line.append(el("td", {}, row.without_graph.found ? `${row.without_graph.steps} edges` : "refused"));
+        line.append(el("td", {}, row.verdict));
+        proofBody.append(line);
+      }
+      proofTable.hidden = false;
+    } catch (error) {
+      proofStatus.textContent = "The proof could not be loaded.";
+    }
+  }
+
   // --- Wiring ------------------------------------------------------------------------------
 
   form.addEventListener("submit", (event) => { event.preventDefault(); ask(input.value); });
   loadTools();
+  loadProof();
   const initial = new URLSearchParams(location.search).get("q");
   if (initial) { input.value = initial; ask(initial); }
 })();

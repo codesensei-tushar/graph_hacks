@@ -9,6 +9,7 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 from fastapi.testclient import TestClient  # noqa: E402
 
 from src.api.v1 import ask as ask_route  # noqa: E402
+from src.api.v1 import proof as proof_route  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
 from src.domain.knowledge import ask_api  # noqa: E402
@@ -120,20 +121,32 @@ class WebAskTest(unittest.TestCase):
         listing = self.http.get("/api/ask/tools").json()
         self.assertEqual((listing["company"], listing["company_name"]), ("quillfern", "Quillfern"))
         self.assertEqual(listing["examples"], ask_api.EXAMPLES["quillfern"])
+        self.assertEqual(listing["demo"], ask_api.DEMO["quillfern"])
         names = [tool["name"] for tool in listing["tools"]]
         self.assertEqual(names[:4], ["who_owns", "who_knows", "decision_trace", "decision_pressure"])
         self.assertIn("blast_radius", names)
         self.assertNotIn("ingest_ticket", names)
         self.assertNotIn("record_decision", names)
 
+    def test_the_public_proof_collapses_without_a_token_and_the_admin_route_stays_shut(self):
+        report = self.http.get("/api/ask/proof")
+        self.assertEqual(report.status_code, 200)
+        body = report.json()
+        self.assertEqual((body["company"], body["collapsed"], body["total"]), ("quillfern", 5, 6))
+        self.assertEqual(body["rows"][-1]["verdict"], "refused both ways")
+        with mock.patch.object(proof_route, "settings", dataclasses.replace(settings, brain_admin_token="")):
+            self.assertEqual(self.http.get("/api/proof").status_code, 503)
+
     def test_the_page_and_its_files_are_served_without_shadowing_the_api(self):
         page = self.http.get("/")
         self.assertEqual(page.status_code, 200)
         self.assertTrue(page.headers["content-type"].startswith("text/html"))
         self.assertIn("Company Brain", page.text)
+        self.assertIn("Take the graph out", page.text)
         self.assertIn("/static/app.js", page.text)
         script = self.http.get("/static/app.js")
         self.assertEqual(script.status_code, 200)
+        self.assertIn("/api/ask/proof", script.text)
         self.assertIn("javascript", script.headers["content-type"])
         self.assertEqual(self.http.get("/static/style.css").status_code, 200)
         self.assertEqual(self.http.get("/static/nope.js").status_code, 404)

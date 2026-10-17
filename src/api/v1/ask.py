@@ -47,5 +47,18 @@ def tools():
         "company": examples.company_id,
         "company_name": examples.company_name,
         "examples": examples.questions,
+        "demo": ask_api.demo_steps(examples.company_id),
         "tools": [tool.to_dict() for tool in ask_api.read_tools()],
     }
+
+
+@router.get("/ask/proof")
+def ask_proof():
+    """The ablation a public page can show: org_shared questions, with the graph and without it.
+
+    ``GET /api/proof`` stays behind the admin token. This route reads the same public
+    slice the ask page already answers, and it writes nothing.
+    """
+    from src.domain.knowledge.proof import run_proof
+
+    return run_proof().to_dict()

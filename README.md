@@ -44,7 +44,7 @@ python scripts/replay_workspace.py --graph company_demo
 
 That is the complete local setup the rules accept in place of a live deployment: Docker, Python 3.11 or newer, and the two commands above. Verified from a clean clone on Python 3.13 with only `requirements.txt` installed.
 
-The interface is Slack. Create the app from [`slack_app/manifest.yaml`](slack_app/manifest.yaml) and follow [docs/SLACK.md](docs/SLACK.md). The same read-only catalogue is also a page at [http://localhost:8000/](http://localhost:8000/), which draws the path behind each answer. Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health). Graph browser: [http://localhost:3000](http://localhost:3000).
+The interface is Slack. Create the app from [`slack_app/manifest.yaml`](slack_app/manifest.yaml) and follow [docs/SLACK.md](docs/SLACK.md). The same read-only catalogue is also a page at [http://localhost:8000/](http://localhost:8000/), which draws the path behind each answer and runs the same questions with the graph switched off. Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health). Graph browser: [http://localhost:3000](http://localhost:3000).
 
 ## Graph data model
 
