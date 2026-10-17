@@ -22,6 +22,8 @@ import hashlib
 import hmac
 import json
 import time
+import urllib.parse
+import urllib.request
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -55,6 +57,55 @@ def _require_app_pointed_at(base_url: str | None) -> None:
             f"the app's Slack client targets {configured!r}, not the fake at {base_url!r}; "
             "set SLACK_API_BASE_URL before anything imports src"
         )
+
+
+class FakeSlackRemote:
+    """The fake Slack API served by ``scripts/fake_slack.py``, seen from a loader in another
+    process. Same calls the replayer makes on an in-process fake; they go over its control
+    endpoints. Replies posted by the app show up here, as they would in Slack."""
+
+    def __init__(self, base_url: str, bot_user_id: str = script.BOT_USER_ID):
+        self.base_url = base_url.rstrip("/")
+        self.bot_user_id = bot_user_id
+        self._clock = int(time.time() * 1_000_000)
+
+    def _call(self, action: str, body: dict | None = None, query: dict | None = None) -> dict:
+        url = f"{self.base_url}/replay/{action}"
+        if query:
+            url += "?" + urllib.parse.urlencode({k: v for k, v in query.items() if v})
+        data = json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(url, data=data, method="POST" if data is not None else "GET", headers={"content-type": "application/json"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode())
+
+    def next_ts(self) -> str:
+        self._clock = max(self._clock + 1_000, int(time.time() * 1_000_000))
+        return f"{self._clock // 1_000_000}.{self._clock % 1_000_000:06d}"
+
+    def say(self, channel: str, user: str, text: str, thread_ts: str | None = None, ts: str | None = None) -> FakeSlackMessage:
+        answer = self._call("say", {"channel": channel, "user": user, "text": text, "thread_ts": thread_ts, "ts": ts})
+        return FakeSlackMessage(channel=channel, ts=answer["ts"], user=user, text=text, thread_ts=thread_ts)
+
+    def open_dm(self, user_id: str) -> None:
+        return None  # the standalone fake opens every scripted user's DM up front
+
+    def messages_in(self, channel: str, thread_ts: str | None = None) -> list[FakeSlackMessage]:
+        rows = self._call("messages", query={"channel": channel, "thread_ts": thread_ts})["messages"]
+        return [
+            FakeSlackMessage(
+                channel=channel,
+                ts=row["ts"],
+                user=row.get("user") or "",
+                text=row.get("text") or "",
+                thread_ts=row.get("thread_ts"),
+                blocks=row.get("blocks"),
+                streaming=bool(row.get("streaming")),
+            )
+            for row in rows
+        ]
+
+    def bot_replies(self, channel: str, thread_ts: str | None = None) -> list[FakeSlackMessage]:
+        return [m for m in self.messages_in(channel, thread_ts) if m.user == self.bot_user_id and not m.streaming]
 
 
 def fake_workspace_from_script() -> FakeSlackWorkspace:
@@ -162,12 +213,13 @@ class WorkspaceReplayer:
         signing_secret: str,
         team_id: str = script.TEAM_ID,
         bot_user_id: str = script.BOT_USER_ID,
-        fake: FakeSlackWorkspace | None = None,
+        fake: "FakeSlackWorkspace | FakeSlackRemote | None" = None,
         fake_base_url: str | None = None,
         ids: dict[str, str] | None = None,
         response_url: str = "https://example.invalid/response",
     ):
-        if fake is not None:
+        if isinstance(fake, FakeSlackWorkspace):
+            # In-process: the app in this process must really target the fake.
             _require_app_pointed_at(fake_base_url)
         self.http = http
         self.signing_secret = signing_secret
@@ -178,6 +230,9 @@ class WorkspaceReplayer:
         self.response_url = response_url
         self.approval_ids: list[str] = []
         self._last_ask: dict[str, str] = {}
+        # Against a running instance the events route answers at once and the turn runs
+        # afterwards, so replies are awaited; in-process they are there when the POST returns.
+        self.reply_timeout = 20.0 if isinstance(fake, FakeSlackRemote) else 0.0
 
     # --- plumbing --------------------------------------------------------------------------
 
@@ -223,6 +278,29 @@ class WorkspaceReplayer:
             return []
         return [reply_text(m) for m in self.fake.bot_replies(channel) if m.ts > ts and not is_approval_card(m)]
 
+    def _bot_messages(self, channel: str, thread_ts: str | None = None, after_ts: str | None = None) -> int:
+        """Bot messages in a thread (cards included), or in a channel after ``after_ts``."""
+        if self.fake is None:
+            return 0
+        rows = self.fake.bot_replies(channel, thread_ts) if thread_ts else [m for m in self.fake.bot_replies(channel) if after_ts is None or m.ts > after_ts]
+        return len(rows)
+
+    def _await_bot(self, channel: str, *, thread_ts: str | None = None, after_ts: str | None = None, before: int = 0) -> None:
+        """Wait until the bot has said something new in the thread (or DM), or the timeout passes."""
+        deadline = time.time() + self.reply_timeout
+        while self._bot_messages(channel, thread_ts, after_ts) <= before:
+            if time.time() >= deadline:
+                return
+            time.sleep(0.25)
+
+    def _await_card(self, channel: str) -> str | None:
+        deadline = time.time() + self.reply_timeout
+        while True:
+            approval_id = self.last_approval_id(channel)
+            if approval_id is not None or time.time() >= deadline:
+                return approval_id
+            time.sleep(0.25)
+
     def last_approval_id(self, channel: str) -> str | None:
         """The approval id on the newest Approve button the bot posted in ``channel``."""
         if self.fake is None:
@@ -253,7 +331,11 @@ class WorkspaceReplayer:
         }
         if thread_ts:
             event["thread_ts"] = thread_ts
+        expect_reply = bool(thread_ts) or channel.startswith("D")
+        before = self._bot_messages(channel, thread_ts, ts) if expect_reply else 0
         status = self.send_event(event)
+        if expect_reply:
+            self._await_bot(channel, thread_ts=thread_ts, after_ts=ts, before=before)
         replies = self.replies(channel, thread_ts) if thread_ts else self.replies_after(channel, ts)
         return Replayed(message, channel, ts, thread_ts, status, replies)
 
@@ -267,9 +349,12 @@ class WorkspaceReplayer:
         if thread_ts:
             event["thread_ts"] = thread_ts
         before = len(self.replies(channel, thread_ts)) if thread_ts else 0
+        before_bot = self._bot_messages(channel, thread_ts or ts)
         status = self.send_event(event)
         if thread_ts is None:
             self._last_ask[channel] = ts
+        # A reply or a card: a write command answers with a card, which is not a reply.
+        self._await_bot(channel, thread_ts=thread_ts or ts, before=before_bot)
         replies = self.replies(channel, thread_ts or ts)[before:]
         return Replayed(message, channel, ts, thread_ts or ts, status, replies)
 
@@ -292,7 +377,7 @@ class WorkspaceReplayer:
     def approve(self, message: WorkspaceMessage) -> Replayed:
         channel, user = self._id(message.channel), self._id(message.user)
         thread_ts = self._last_ask.get(channel)
-        approval_id = self.last_approval_id(channel)
+        approval_id = self._await_card(channel)
         if approval_id is None:
             return Replayed(message, channel, None, thread_ts, 0)
         self.approval_ids.append(approval_id)
@@ -305,7 +390,10 @@ class WorkspaceReplayer:
             "response_url": self.response_url,
         }
         before = len(self.replies(channel, thread_ts)) if thread_ts else 0
+        before_bot = self._bot_messages(channel, thread_ts) if thread_ts else 0
         status = self._post("/slack/interactions", urlencode({"payload": json.dumps(payload)}).encode(), "application/x-www-form-urlencoded")
+        if thread_ts:
+            self._await_bot(channel, thread_ts=thread_ts, before=before_bot)
         replies = self.replies(channel, thread_ts)[before:] if thread_ts else []
         return Replayed(message, channel, None, thread_ts, status, replies)
 
