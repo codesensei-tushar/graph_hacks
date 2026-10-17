@@ -79,18 +79,19 @@ FalkorDB ships graph algorithms as procedures, which means ranking and routing a
 
 - `algo.pageRank('Service', 'DEPENDS_ON')` says which service the most others lean on, the one to worry about first, and the reply adds how many services depend on it.
 - `algo.SPpaths` answers "why is Maya connected to the invoice worker": `Maya -[OWNS]-> Auth <-[DEPENDS_ON]- Billing <-[DEPENDS_ON]- Invoice Worker`, every shortest route considered, the one with the strongest edges shown.
-- `algo.betweenness` names the connector among the services a failure hits, the one most shortest paths run through.
-- Blast radius walks `DEPENDS_ON` to a depth you choose and groups what it finds by hop.
+- `algo.labelPropagation` finds who actually works together, from the services people own or work on, and says where that cuts across the org chart.
+- Blast radius walks `DEPENDS_ON` to a depth you choose, groups what it finds by hop, and names the connector: the service that most of the routes it printed pass through.
 
 One thing we tried and dropped: PageRank for people. "Who knows billing" sounded like a ranking problem, but PageRank scores by incoming links and people have almost none; every person came out between 0.011 and 0.015. So people are ranked by a weighted sum of their edges to the service (owning it counts five, writing a pull request three, reviewing two), and the reply shows the reasons: "Ask first: Arjun Mehta (owns it, wrote notebook#52)". The ranking is explainable because it is made of the same edges the path prints.
 
-Three things we learned by running them against FalkorDB 4.22, not by reading about them:
+Four things we learned by running them against FalkorDB 4.22, not by reading about them:
 
 1. **A parameter is not accepted as a variable-length bound.** `MATCH p=(s)<-[:DEPENDS_ON*1..$depth]-(d)` fails. We clamp the depth to an integer in Python and build the literal. The "no model string reaches a query" rule still holds, because only a validated integer is interpolated.
 2. **`algo.SPpaths` follows outgoing edges by default.** A route from a person to a service returned nothing until we passed `relDirection: 'both'`, because `OWNS` and `DEPENDS_ON` point different ways.
-3. **The documented `algo.CDLP` is not registered on that build.** `algo.labelPropagation` is, and does the same job.
+3. **The documented `algo.CDLP` is not registered on that build.** `algo.labelPropagation` is, and does the same job. It gave the same clusters in separate processes and across a server restart.
+4. **`algo.betweenness` is sampled.** Its scores, and even its top node, change with the sampling seed, and the default seed changes when the server restarts. On both of our seeded companies it named a different main connector than an exact Brandes count over the same edges; on the synthetic company it said Billing where the exact answer is Auth. A reply that says "the main connector" must not change between two runs, and must not be wrong. So blast radius counts the routes it already prints and names the service most of them pass through, which anyone can check against the path.
 
-Blast radius is the one to watch in the video. At depth one, Auth going down takes out the gateway, billing, notifications and search. One hop further it reaches the invoice worker through Billing, and the reply shows the route. A search box cannot do that.
+Blast radius is the one to watch. On the synthetic company, at depth one, Auth going down takes out the gateway, billing, notifications and search. One hop further it reaches the invoice worker through Billing, and the reply shows the route. A search box cannot do that.
 
 ![Blast radius on the ask page at one hop, then two hops out: the depth in the path header changes, and the invoice worker appears through Billing and Notifications.](images/05-blast-radius.png)
 

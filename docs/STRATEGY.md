@@ -69,10 +69,10 @@ Checked on 17 Oct against the local `falkordb/falkordb:v4.22.1` container by run
 | Feature | Call that worked | Notes |
 | --- | --- | --- |
 | PageRank | `CALL algo.pageRank('Label', 'REL') YIELD node, score` | Positional arguments; `null` means all |
-| Betweenness | `CALL algo.betweenness({nodeLabels: [...], relationshipTypes: [...]}) YIELD node, score` | Config map form. Positional form returned nothing |
+| Betweenness | `CALL algo.betweenness({nodeLabels: [...], relationshipTypes: [...]}) YIELD node, score` | Config map form. Positional form returned nothing. **Sampled**: the scores and the top node change with `samplingSeed`, and the default seed changes across server restarts. On both seeded graphs the default names a different top node than exact Brandes over the same edges (Quillfern exact: Auth 2.5, Billing 2.0; FalkorDB: Billing 5.0, Auth 2.5). Used in no answer since round 6 |
 | Shortest paths | `CALL algo.SPpaths({sourceNode: a, targetNode: c, relTypes: ['REL'], maxLen: 5}) YIELD path, pathWeight` | Bind the nodes with `MATCH` first |
 | Components | `CALL algo.WCC({nodeLabels: [...]}) YIELD node, componentId` | |
-| Communities | `CALL algo.labelPropagation({nodeLabels: [...]}) YIELD node, communityId` | `algo.CDLP` from the docs is **not registered** on this build |
+| Communities | `CALL algo.labelPropagation({nodeLabels: [...]}) YIELD node, communityId` | `algo.CDLP` from the docs is **not registered** on this build. Deterministic: `working_groups` gave the same clusters in separate client processes, on a fresh server and after a restart |
 | Vector index | `CREATE VECTOR INDEX FOR (m:Memory) ON (m.embedding) OPTIONS {dimension: N, similarityFunction: 'cosine'}` | Store with `vecf32([...])`; a plain list is not indexed |
 | Vector query | `CALL db.idx.vector.queryNodes('Memory', 'embedding', k, vecf32([...])) YIELD node, score` | The index does not filter. Apply the scope filter in Cypher after `YIELD` |
 | Full-text | `db.idx.fulltext.createNodeIndex` / `queryNodes` | Already used by `search_brain.py` |
@@ -83,7 +83,7 @@ Checked on 17 Oct against the local `falkordb/falkordb:v4.22.1` container by run
 | Load-bearing services | `CALL algo.pageRank('Service', 'DEPENDS_ON')` | Quillfern: Postgres 0.113, Auth 0.086, Graph Store 0.049, the same order as transitive dependents |
 | Edge direction in a path | `UNWIND range(0, length(path)-1) AS i ... startNode(relationships(path)[i]) = nodes(path)[i]` | With `relDirection: 'both'` an edge can be walked backwards; cite the true arrow |
 | Memory expansion | `(:Memory)-[:MENTIONS]->(e)` then `(e)-[]-(n)` and `(:Memory)-[:MENTIONS]->(n)`, as two `UNION` branches with the scope filter in each, `ORDER BY` after the union | Verified with three hand-made memories: private-channel memory hidden from `org_shared`, visible with that channel in the read set; one-hop rows via the neighbour's name |
-| Connectors | `CALL algo.betweenness({nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON']})` | Quillfern: Auth 3.5, Billing 3.0, Notification 0.5 |
+| Connectors | Counted from the routes `blast_radius` walked; `connectors` is an exact Cypher bridge query | Decided in round 6, not `algo.betweenness`: the sampled algorithm named the wrong connector (row above), and a counted route can be checked against the printed path |
 | Depth truth | `*1..N` literal, `RETURN DISTINCT d.name, min(length(p))` | Quillfern: Auth at depth one reaches API Gateway, Billing, Notification, Search; depth two adds Invoice Worker; nothing new after. The contrast is one versus two, not one versus four |
 | Also registered | `algo.AStar`, `algo.BFS`, `algo.HarmonicCentrality`, `algo.SSpaths`, `algo.MSF`, `algo.maxFlow`, `db.idx.vector.queryRelationships` | |
 
@@ -132,7 +132,7 @@ Probed on the local `v4.22.1` container; each line changed a tool's design.
 | `algo.SPpaths` defaults to `relDirection: 'outgoing'`; mixed routes return nothing | `path_between` passes `relDirection: 'both'` |
 | `graph.ro_query` rejects writes | Every read tool runs through it; say so in the README and the video |
 | The module runs with `TIMEOUT 1000` ms and `RESULTSET_SIZE 10000` | Fine at demo size. Keep algorithm calls filtered by label and type |
-| `algo.betweenness` on a five-service chain scores Auth 4.0, Billing 2.0, the rest 0 | A "connector" sentence in `blast_radius` answers is one query away |
+| `algo.betweenness` on a five-service chain scores Auth 4.0, Billing 2.0, the rest 0 | A "connector" sentence in `blast_radius` answers is one query away (superseded in round 6: the algorithm is sampled, see the feature table) |
 
 ### Competitors
 
@@ -148,7 +148,7 @@ Decision: cut item 4 from the must-ship list, build `related_memories` instead, 
 
 ### Video storyboard
 
-Target three minutes, hard cap three and a half. No length limit is published. Record on 18 Oct morning IST so there is an afternoon to redo it.
+Superseded by the consolidated storyboard in round 6. Target three minutes, hard cap three and a half. No length limit is published. Record on 18 Oct morning IST so there is an afternoon to redo it.
 
 | Time | Shot | Say |
 | --- | --- | --- |
@@ -324,6 +324,98 @@ Blog, one paragraph in "What we built": "We started with engineering because the
 
 Submission description, one added sentence: "Any team onboards the same way; the demo adds Sales with one command."
 
+## Round 6: the video, end to end (17 Oct, evening)
+
+Short version: record steps 1 to 8 in Slack on production as scripted, then cut to a local replay of the synthetic company for the Sales beat in the browser, which ends on one new move, `if_person_leaves`. One storyboard below replaces the round 2 table and the round 5 beat. Replies marked "target" become exact when the test that pins them lands; the script follows the tests.
+
+### Since round 5
+
+| PR | What it changes for the video or the copy |
+| --- | --- |
+| #50 | A decision recorded from Slack is `RECORDED_FROM` the asker's message and quotes it. Step 3's voice-over and the blog say so |
+| #53 | The public ask routes have a one-minute cache, a question cap and a per-address rate limit, so the ask page is safe to show and link |
+| #54 | The model's tool choice works for the first time: before it, every model call failed and every turn fell back to keywords. 14 of 14 demo questions now route as scripted. The footer reads "picked by the model" only if `LLM_API_KEY` is set on production |
+| #56, #64 | `kind` on `Service`. Replies are worded by kind ("stalls", "no longer applies", "is affected"); accounts never appear in a blast radius. Services and systems keep their text byte for byte |
+| #57, #61 | A public page per team at `/team/<id>`, grouped by kind. Its suggested questions are only ones that answer with a path |
+| #62 | The README injection audit counts 44 Cypher literals and names the kind clause and the team page's row limits |
+
+### Where the Sales beat runs
+
+The dev Slack workspace is wired to production, and production holds this project's own graph. Onboarding a synthetic Sales team there would write invented people into the real graph, and re-pointing the Slack app's event URL mid-recording is fragile. So the Sales beat runs in the terminal and the browser against a local replay of the synthetic company, the same setup the blog images were taken with. Production stays clean.
+
+The `onboard team:` Slack command stays on coder B's list straight after the importer and the Sales seed. Onboarding more teams is a product feature; the importer alone needs a terminal and an admin token. The video just does not depend on it.
+
+### The one new move: `if_person_leaves`
+
+Coder A is adding three any-team tools. One goes on screen:
+
+- **`if_person_leaves`, on screen.** "What if the person who runs renewals leaves" is a question every team asks. The answer is short, made of edges the path prints (`OWNS`, `WORKED_ON`, `AUTHORED` and `REVIEWED` to `TOUCHES`), and the successors are ranked by `who_knows` itself without the leaver, so "who takes over" agrees with "who knows". Accounts count, because an account losing its owner is exactly the Sales story. The reply is capped at the lead and three items, then "And N more", so it reads in ten seconds.
+- **`onboarding_brief`, not on screen.** It covers what the team page already shows, and a long reply cannot be read in the time.
+- **`connectors`, not on screen.** It overlaps step 8 of the Quillfern script and the connector sentence in blast radius.
+
+All three are read-only catalogue tools, so MCP serves them with no extra work. The README tool list names them; the video does not.
+
+Router phrasings: "what if X leaves", "what happens if X leaves", "who covers for X", "who takes over from X". A name not in the graph gets `resolve.describe_miss` verbatim, quoting only the name.
+
+### Storyboard, consolidated
+
+Hard cap three and a half minutes. This table replaces the round 2 storyboard and the round 5 storyboard line.
+
+| Time | Shot | Say |
+| --- | --- | --- |
+| 0:00 to 0:12 | Title over the FalkorDB Browser showing production's graph | "Agents see pieces. Company Brain puts people, services, docs, tickets, decisions and chat in one FalkorDB graph and answers by walking it." |
+| 0:12 to 0:22 | Browser: Memory layer with its `DEPENDS_ON`, `OWNS` and `TOUCHES` edges, and a Memory with `MENTIONS` | "Slack and GitHub feed it live. Every memory carries the scope of the room it was said in." |
+| 0:22 to 0:45 | Slack, production, recording step 1 | "The answer is the path." |
+| 0:45 to 1:00 | Step 2 | "Decision, author, sources, and the conversation it came from." |
+| 1:00 to 1:20 | Step 3 | "Knowledge stays current without deleting history." |
+| 1:20 to 1:45 | Steps 4 and 4b | "Three hops. A search box could not." |
+| 1:45 to 2:05 | Steps 5, 5b and 5c | "Writes wait for a human. The card named the target before the write." |
+| 2:05 to 2:15 | Step 6 | "It says what it does not know, and never guesses." |
+| 2:15 to 2:25 | Steps 7 and 7b. Cut if the private test repo and `link github` are not done | "The permission check is a graph query too." |
+| 2:25 to 2:35 | Terminal, step 8, the proof route on production | "Take FalkorDB out and nothing answers." |
+| 2:35 to 2:43 | Terminal, local replay: B1, the import | "Not only engineering. Sales is one file and one command." |
+| 2:43 to 2:52 | Browser: B2, `/team/sales` | "The same graph: a process is run by someone, a CRM can go down, an account has an owner." |
+| 2:52 to 3:04 | Ask page: B3 | "A CRM outage, traced through the process it feeds." |
+| 3:04 to 3:16 | Ask page: B4 | "And if the person who runs renewals leaves, the graph says what loses its owner and who knows it next." |
+| 3:16 to 3:26 | README: the Mermaid diagram, the deploy URL, the three tracks | Close. |
+
+3:26 with every step in; 3:16 without step 7.
+
+### The Sales beat, literal
+
+On the local replay. Hold every reply three seconds.
+
+| Step | Type | Answers with | Read aloud |
+| --- | --- | --- | --- |
+| B1 | The import command from `docs/ONBOARDING-TEAMS.md`, against `http://localhost:8000/ops/import` with the Sales template | `POST /ops/import` | The merge report: what was created. Target until coder B's PR lands; copy the command from the guide exactly |
+| B2 | Open `http://localhost:8000/team/sales` | team page | The groups by kind and "Run by" on the renewals process |
+| B3 | Ask page: `what breaks if hubspot goes down` | `blast_radius` | "If the HubSpot system goes down, the Renewals process stalls (1 hop) and the Pricing playbook no longer applies (2 hops). Depth 2 reached 2 things that depend on it; nothing new past depth 2." The wording is from #64; the names are a target until the Sales seed's test pins them |
+| B4 | Ask page: `what if <the renewals owner> leaves` | `if_person_leaves` | Target: what loses its owner, then who knows each thing next. Exact text when coder A's tool lands |
+
+Run S1 (`who owns renewals, and who else has worked on it`) and S3 (`why did we change pricing`) on the same instance before the take as checks. They are not on screen.
+
+### Optional: onboard this project's own launch team, on production
+
+A fallback if the local segment cannot be recorded, or a bonus in step 7's slot if the private repo is not ready. It shows the command live on the real graph, with real data and nothing invented. It depends on coder B's `onboard team:` command; check the exact syntax against that PR before recording.
+
+| Step | Type | Answers with | Read aloud |
+| --- | --- | --- | --- |
+| L1 | `@Company Brain onboard team: launch \| members: @Tushar \| owns: Hackathon submission (process), Demo video (product), Blog post (product), Recording script (playbook)` (syntax is a target) | approval card | The card's preview of what it will create. Click Approve. "Onboarding is a write, so it waits for a human too." |
+| L2 | `@Company Brain who runs the hackathon submission` | `who_owns` | "The Hackathon submission process is run by Tushar. Run by the Launch team." Checked on the production seed with these nodes added by hand; coder A may reword the second sentence |
+
+Add only the teammates who actually work on the launch. The kinds are honest: the recording script in this file is literally a playbook. The nodes stay in production's graph after the video, which is fine because they are true.
+
+### Before recording, added to the round 3 list
+
+- Local replay for the Sales beat: `scripts/seed_graph.py --company quillfern`, then `scripts/replay_workspace.py`, against the local FalkorDB only, with the Sales team not yet imported. Reset between takes with the same two commands. Never point either at production.
+- `LLM_API_KEY` on production is now worth setting (user): since #54 the model really picks, and "picked by the model" on screen is the Track 01 tool-selection signal. Run `scripts/check_model_routing.py` once with the key first. Without a key, record anyway and say "picked by keywords" is on screen.
+- Browser at 1080p, light theme, zoomed so the path lines and the drawing read at video size.
+
+### Copy to settle when coder B's PRs land
+
+- The landing page (`src/static/index.html`) and `docs/PITCH.md` already show an `onboard team:` example. It must match the command's final syntax.
+- The blog's "Onboarding Sales took one command and one Approve" is true only once `onboard team:` ships. The video shows the importer, so "one file and one command" is the safe wording until then.
+
 ## Specs for items 6 and 7
 
 Written for coder A to build straight after the D slice. Domain logic stays in `src/domain/`, routes stay thin, nothing here needs a model key.
@@ -356,7 +448,7 @@ From the track briefs on the hackathon page. The same build enters all three; th
 | Track 01 focus | What we show | Copy line |
 | --- | --- | --- |
 | Multi-hop reasoning | `blast_radius` at a chosen depth, `path_between` over `algo.SPpaths` | "Depth is a parameter; the route comes back with the answer." |
-| Graph queries and algorithms as agent tools | The catalogue, PageRank for load-bearing services, betweenness for connectors | "Ranking and routing are a `CALL`, not code." |
+| Graph queries and algorithms as agent tools | The catalogue, PageRank for load-bearing services, `algo.SPpaths` for routes, label propagation for working groups | "Ranking and routing are a `CALL`, not code." |
 | Tool selection through MCP | Live: the eight read-only tools at `/mcp` behind `MCP_TOKEN`, same schemas, same cited results | "The same catalogue over MCP, read-only, `org_shared`." |
 | Actions based on what the graph shows | Tickets filed after approval, routed to the people the graph ranks | "It acts, after a human clicks Approve on a card that names the target." |
 | Explainable results | Path lines, the picked-by footer, the proof route | "Explanation is the traversal." |
