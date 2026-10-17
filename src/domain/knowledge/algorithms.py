@@ -71,7 +71,12 @@ def depth_in(question: str) -> int | None:
 
 
 def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
-    """What stops working if a service goes down, following DEPENDS_ON for ``depth`` hops."""
+    """What stops working if a service goes down, following DEPENDS_ON for ``depth`` hops.
+
+    Services and systems that depend on it are listed together by hop, in the same words
+    whatever else hangs off it; a process, product or playbook gets its own clause with its
+    own verb ("the Renewals process stalls (1 hop)").
+    """
     _, graph = connect()
     resolution = resolve.resolve_name(question, ("Service",), scopes, graph=graph)
     if not resolution.found:
@@ -82,7 +87,7 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
     if kinds.kind_or_default(target.kind) in kinds.NOT_DEPENDABLE:
         return ToolResult(
             tool="blast_radius",
-            answer=f"{kinds.capitalized(subject)} is an {target.kind}: nothing depends on it. Ask who owns it or who knows it instead.",
+            answer=f"{target.name} is an {target.kind}: nothing depends on it. Ask who owns it or who knows it instead.",
             candidates=resolution.candidate_names(),
         )
 
@@ -119,42 +124,63 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
             for index in range(len(ids) - 1):
                 result.add(PathStep(names[index], "DEPENDS_ON", names[index + 1], from_id=ids[index], to_id=ids[index + 1], from_label="Service", to_label="Service"))
 
-    by_hop: dict[int, list[str]] = {}
+    stops: dict[int, list[str]] = {}
+    clauses: list[tuple[int, str, str]] = []
     for dep_id, routes in affected.items():
         name, length, _ids, _names = routes[0]
-        by_hop.setdefault(length, []).append(kinds.listed(name, kind_of[dep_id]))
-    listed = ", ".join(f"{join_names(sorted(names))} ({hop} hop{'s' if hop > 1 else ''})" for hop, names in sorted(by_hop.items()))
-    parts = [f"If {subject} {kinds.down(target.kind)}, these stop with it: {listed}."]
-    beyond = [(kinds.listed(routes[0][0], kind_of[dep_id]), routes[0][1]) for dep_id, routes in shortest.items() if routes[0][1] > reached]
+        kind = kind_of[dep_id]
+        if kinds.kind_or_default(kind) in kinds.GOES_DOWN:
+            stops.setdefault(length, []).append(kinds.listed(name, kind))
+        else:
+            clauses.append((length, name, f"{kinds.subject(name, kind)} {kinds.down(kind)} ({length} hop{'s' if length > 1 else ''})"))
+    lead = f"If {subject} {kinds.down(target.kind)}"
+    parts = []
+    if stops:
+        listed = ", ".join(f"{join_names(sorted(names))} ({hop} hop{'s' if hop > 1 else ''})" for hop, names in sorted(stops.items()))
+        parts.append(f"{lead}, these stop with it: {listed}.")
+    if clauses:
+        effects = join_names([clause for _length, _name, clause in sorted(clauses)])
+        parts.append(f"{kinds.capitalized(effects)}." if stops else f"{lead}, {effects}.")
+    beyond = [(kinds.listed(routes[0][0], kind_of[dep_id]), routes[0][1], kind_of[dep_id]) for dep_id, routes in shortest.items() if routes[0][1] > reached]
     if beyond:
-        further = join_names([f"{name} at depth {length}" for name, length in sorted(beyond, key=lambda row: (row[1], row[0]))])
-        parts.append(f"{len(beyond)} more break{'s' if len(beyond) == 1 else ''} further out ({further}); ask with more hops.")
+        further = join_names([f"{name} at depth {length}" for name, length, _kind in sorted(beyond, key=lambda row: (row[1], row[0]))])
+        count = len(beyond)
+        if all(kinds.kind_or_default(kind) in kinds.GOES_DOWN for _name, _length, kind in beyond):
+            parts.append(f"{count} more break{'s' if count == 1 else ''} further out ({further}); ask with more hops.")
+        else:
+            parts.append(f"{count} more depend{'s' if count == 1 else ''} on it further out ({further}); ask with more hops.")
+    elif clauses:
+        count = len(affected)
+        parts.append(f"Depth {reached} reached {count} thing{'s' if count != 1 else ''} that depend{'s' if count == 1 else ''} on it; nothing new past depth {saturation}.")
     else:
         parts.append(f"Depth {reached} reached {len(affected)} service{'s' if len(affected) != 1 else ''}; nothing new past depth {saturation}.")
     connector = _main_connector(graph, list(affected))
     if connector is not None:
-        name, score = connector
-        parts.append(f"Among them, {name} is the connector: {score:g} shortest dependency paths run through it.")
+        # Betweenness is fractional (paths split between equal routes), so the sentence names no number.
+        parts.append(f"Among them, {connector} is the main connector: the most shortest dependency paths run through it.")
     result.answer = " ".join(parts)
     return result
 
 
-def _main_connector(graph, service_ids: list[str]) -> tuple[str, float] | None:
-    """The top connector by betweenness, or None. Runs over the whole service graph; a timeout drops the sentence, not the answer."""
+def _main_connector(graph, service_ids: list[str]) -> str | None:
+    """The top connector by betweenness, named by kind ("the Renewals process"), or None.
+
+    Runs over the whole service graph; a timeout drops the sentence, not the answer.
+    """
     try:
         rows = _betweenness(graph, service_ids)
     except Exception as error:  # noqa: BLE001  the sentence is optional; the traversal above is the answer
         log.warning("[blast_radius] betweenness skipped: %s", error)
         return None
-    return (rows[0][0], float(rows[0][1])) if rows else None
+    return kinds.subject(rows[0][0], rows[0][2]) if rows else None
 
 
 def _betweenness(graph, service_ids: list[str]) -> list:
     return graph.ro_query(
-        """
-        CALL algo.betweenness({nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON']}) YIELD node, score
+        f"""
+        CALL algo.betweenness({{nodeLabels: ['Service'], relationshipTypes: ['DEPENDS_ON']}}) YIELD node, score
         WHERE node.id IN $ids AND score > 0
-        RETURN node.name, score
+        RETURN node.name, score, {kinds.KIND_OF.format(var="node")}
         ORDER BY score DESC, node.name
         LIMIT 1
         """,

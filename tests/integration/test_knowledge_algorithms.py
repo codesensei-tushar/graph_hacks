@@ -87,9 +87,11 @@ class AlgorithmToolsTest(unittest.TestCase):
     def test_the_main_connector_comes_from_betweenness(self):
         result = algorithms.blast_radius("auth", ORG)
         # The connector is one of the affected services, never the one that went down.
-        self.assertRegex(result.answer, r"Among them, Billing Service is the connector: [\d.]+ shortest dependency paths run through it\.")
-        self.assertNotIn("Auth Service is the connector", result.answer)
-        self.assertIsNotNone(algorithms._main_connector(falkordb_client.connect()[1], ["billing-service"]))
+        self.assertIn("Among them, Billing Service is the main connector: the most shortest dependency paths run through it.", result.answer)
+        self.assertNotIn("Auth Service is the main connector", result.answer)
+        # Betweenness is fractional; no score is printed as if it were a count of paths.
+        self.assertNotRegex(result.answer, r"\d+\.\d+")
+        self.assertEqual(algorithms._main_connector(falkordb_client.connect()[1], ["billing-service"]), "Billing Service")
         self.assertIsNone(algorithms._main_connector(falkordb_client.connect()[1], ["legacy-ftp"]))
 
     def test_a_leaf_has_no_dependents_and_an_unknown_service_is_refused(self):
