@@ -9,9 +9,9 @@ own prefix, so neither shadows ``/healthz``, ``/api/*``, ``/slack/*``, ``/github
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.api import console_web
 from src.api.v1 import ask, explorer, graph, teams
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
@@ -24,19 +24,19 @@ router = APIRouter(tags=["web"], include_in_schema=False)
 
 @router.get("/")
 def index():
-    return FileResponse(INDEX, media_type="text/html", headers={"Cache-Control": "no-cache"})
+    return console_web.public_page(INDEX)
 
 
 @router.get("/team/{team_id}")
 def team(team_id: str):
     # The page fetches /api/team/<id> itself and says so when the team is not in the graph.
-    return FileResponse(TEAM, media_type="text/html", headers={"Cache-Control": "no-cache"})
+    return console_web.public_page(TEAM)
 
 
 @router.get("/explore")
 def explore():
     # The page reads ?node=<id> itself and fetches /api/explore; an unknown node gets the nearest names there.
-    return FileResponse(EXPLORER, media_type="text/html", headers={"Cache-Control": "no-cache"})
+    return console_web.public_page(EXPLORER)
 
 
 def install(app: FastAPI) -> None:
