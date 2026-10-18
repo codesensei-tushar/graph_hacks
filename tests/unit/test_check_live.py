@@ -1,9 +1,11 @@
 """The live smoke check's pass/fail decision, on canned responses: no network, no server."""
 
+import json
 import re
 import unittest
 import urllib.parse
 from pathlib import Path
+from unittest import mock
 
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
@@ -33,6 +35,35 @@ def _fake(overrides: dict[str, tuple[int, dict | None]] | None = None):
         return 200, None
 
     return fetch, asked
+
+
+class _Response:
+    """What urlopen hands back: canned JSON, or a read that raises ``error`` as a slow server's does."""
+
+    def __init__(self, payload: dict | None, error: OSError | None = None):
+        self.status, self.payload, self.error = 200, payload, error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self) -> bytes:
+        if self.error:
+            raise self.error
+        return json.dumps(self.payload).encode()
+
+
+def _urlopen(failures: dict[str, OSError]):
+    """``urlopen`` over ``_fake()``'s server, where a path in ``failures`` raises its error mid-read."""
+    fetch, _ = _fake()
+
+    def urlopen(request, timeout):
+        path = request.full_url.removeprefix("http://check.test")
+        return _Response(fetch(path)[1], failures.get(path))
+
+    return urlopen
 
 
 class CheckLiveTest(unittest.TestCase):
@@ -67,6 +98,19 @@ class CheckLiveTest(unittest.TestCase):
         self.assertEqual(asked, ["/api/graph/stats"])
         self.assertEqual([check.ok for check in checks], [False])
         self.assertIn("HTTP 0", header)
+
+    def test_a_slow_or_dropped_read_fails_its_line_and_the_rest_still_run(self):
+        slow = "/api/ask?" + urllib.parse.urlencode({"q": "what if arjun mehta leaves"})
+        failures = {slow: TimeoutError("The read operation timed out"), "/api/team/payments": ConnectionResetError()}
+        with mock.patch.object(check_live.urllib.request, "urlopen", _urlopen(failures)):
+            _, checks = check_live.run(check_live.http_fetch("http://check.test"))
+        self.assertEqual(len(checks), len(CHIPS) + len(check_live.README_QUESTIONS) + len(check_live.README_PAGES))
+        self.assertEqual(
+            [check.line() for check in checks if not check.ok],
+            ["FAIL  readme: what if arjun mehta leaves  ->  HTTP 0 timeout", "FAIL  page: /api/team/payments  ->  HTTP 0"],
+        )
+        with mock.patch.object(check_live.urllib.request, "urlopen", _urlopen({"/api/team/payments": ConnectionResetError()})):
+            self.assertEqual(check_live.http_fetch("http://check.test")("/api/team/payments"), (0, {"error": "ConnectionResetError"}))
 
     def test_no_chips_listed_is_a_failure(self):
         fetch, _ = _fake({"/api/ask/tools": (200, {"examples": []})})
