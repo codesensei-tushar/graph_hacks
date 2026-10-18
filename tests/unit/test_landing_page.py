@@ -157,7 +157,9 @@ class WeightTest(unittest.TestCase):
         page = own_js + sum((STATIC / name).stat().st_size for name in ("index.html", *STYLESHEETS)) + sum(
             (STATIC / "fonts" / name).stat().st_size for name in fonts
         )
-        self.assertLess(page, 300 * 1024)
+        # Raised from 300 KB with the risk grid, the explore affordances and the builders section (architecture
+        # diagram, quick start, live catalogue); the woff2 fonts are most of it. DESIGN.md 3.x says the same.
+        self.assertLess(page, 320 * 1024)
 
 
 class TeamPageTest(unittest.TestCase):

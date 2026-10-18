@@ -346,9 +346,6 @@ code { font-variant-ligatures: none; }
 }
 .hero-foot .lede { max-width: 30em; font-size: var(--fs-sm); line-height: 1.55; color: var(--ink-2); margin: 0; }
 .hero-foot .btn-ghost { min-height: 36px; font-size: var(--fs-sm); border-radius: 8px; }
-.text-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--ink); font-weight: 500; font-size: var(--fs-md); text-decoration: none; }
-.text-link span { transition: transform var(--fast) var(--ease); }
-.text-link:hover span { transform: translateX(3px); }
 
 /* Live counts: mono, tabular, and their width reserved before the numbers arrive. */
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 14px 0 0; padding: 0 4px; }
@@ -773,7 +770,8 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 /* A proof row's tool name links here; the card it lands on is lit. */
 .tool-card:target { border-color: var(--path); box-shadow: 0 0 0 3px var(--glow); }
 .tool-name { color: var(--path-ink); font-size: var(--fs-sm); font-weight: 500; }
-.tool-does { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+/* The whole first sentence, never cut mid-word; the full description is the card's title. */
+.tool-does { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.5; }
 .tool-args { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: auto 0 0; }
 .tool-args .label { font: 400 var(--fs-xs) var(--mono); color: var(--ink-3); }
 .tool-args code { padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: var(--fs-xs); color: var(--ink-2); }
