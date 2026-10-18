@@ -58,7 +58,7 @@ def for_the_asker(choice: ToolChoice, question: str, request: TurnRequest) -> To
     if choice.tool == "what_changed":
         if choice.args.get("person"):
             return choice
-        person = asker_person(request.asker_slack_user_id)
+        person = asker_person_ref(request.asker_slack_user_id)
         return ToolChoice(choice.tool, {**choice.args, "person": person}, choice.via) if person else choice
     keys = [key for key in _PERSON_ARGS.get(choice.tool, ()) if key in choice.args and (key == "name" or _FIRST_PERSON.search(str(choice.args[key])))]
     if not keys or (choice.tool != "find" and not _FIRST_PERSON.search(str(choice.args.get("name") or ""))):
@@ -68,15 +68,6 @@ def for_the_asker(choice: ToolChoice, question: str, request: TurnRequest) -> To
         return choice
     person = asker_person_ref(request.asker_slack_user_id)
     return ToolChoice(choice.tool, {**choice.args, **{key: person for key in keys}}, choice.via) if person else choice
-
-
-def asker_person(slack_user_id: str | None) -> str | None:
-    """The name of the person a Slack user is, through the workspace's IS link."""
-    if not slack_user_id:
-        return None
-    _, graph = connect()
-    rows = graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.name LIMIT 1", {"id": slack_user_id}).result_set
-    return rows[0][0] if rows else None
 
 
 def asker_person_ref(slack_user_id: str | None) -> str | None:

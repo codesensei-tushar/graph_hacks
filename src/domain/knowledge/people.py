@@ -17,6 +17,7 @@ Every answer about an unlinked user carries ``unlinked_hint``: how an admin link
 """
 
 import re
+import time
 from dataclasses import dataclass
 
 from src.domain.knowledge import resolve
@@ -97,28 +98,36 @@ def _users(graph, scopes: list[str], ids: list[str] | None = None) -> list[_User
         {"scopes": list(scopes), "ids": ids},
     ).result_set
     asserted = _admin_asserted()
-    return [_User(*row[:6], verified=row[7] != "admin" and (row[2], row[6]) not in asserted) for row in rows]
+    # When the mappings cannot be read, no email counts as the tool's own: nothing merges (fail closed).
+    return [_User(*row[:6], verified=asserted is not None and row[7] != "admin" and (row[2], row[6]) not in asserted) for row in rows]
 
 
-def _admin_asserted() -> set[tuple[str, str]]:
+# The admin mappings, read once per request: a question resolves people several times in a second.
+_ASSERTED_TTL = 5.0
+_asserted_cache: tuple[float, set[tuple[str, str]] | None] = (0.0, None)
+
+
+def _admin_asserted() -> set[tuple[str, str]] | None:
     """(source, external id) of every user whose email an admin asserted (``CONNECTOR_*_PEOPLE``): that
-    email links them to a person, but is not one the tool reported, so it never merges identities."""
+    email links them to a person, but is not one the tool reported, so it never merges identities.
+    None when the installs cannot be read."""
+    global _asserted_cache
+    now = time.monotonic()
+    if _asserted_cache[1] is not None and now - _asserted_cache[0] < _ASSERTED_TTL:
+        return _asserted_cache[1]
     try:
         from src.connectors import registry  # the installs hold the mapping; read late, the registry imports the connectors
 
-        installs = [install for _connector, install in registry.all_installs()]
+        found: set[tuple[str, str]] = set()
+        for _connector, install in registry.all_installs():
+            for pair in install.get_list("people"):
+                external_id, _, email = str(pair).partition("=")
+                if email.strip():
+                    found.add((install.source, external_id.strip()))
     except Exception:
-        return set()
-    found: set[tuple[str, str]] = set()
-    for install in installs:
-        try:
-            pairs = install.get_list("people")
-        except Exception:
-            continue
-        for pair in pairs:
-            external_id, _, email = str(pair).partition("=")
-            if email.strip():
-                found.add((install.source, external_id.strip()))
+        _asserted_cache = (0.0, None)
+        return None
+    _asserted_cache = (now, found)
     return found
 
 
@@ -199,7 +208,12 @@ def resolve_person(text: str, scopes: list[str], graph) -> Resolution:
         return person
     account = resolve.resolve_name(text, (ACCOUNT,), scopes, graph=graph)
     if account.found:
-        return Resolution(query=account.query, entity=shown(graph, account.entity, scopes), candidates=_others(graph, account.candidates, scopes))
+        entity = shown(graph, account.entity, scopes)
+        namesakes = _namesakes(graph, account.entity, entity, scopes)
+        if namesakes:
+            # Two users named alike that are not one identity: neither is picked; both are offered.
+            return Resolution(query=account.query, candidates=[Candidate(other, other.name) for other in [entity, *namesakes]], reason="ambiguous")
+        return Resolution(query=account.query, entity=entity, candidates=_others(graph, account.candidates, scopes))
     by_first = _by_first_name(graph, text, scopes) if not person.candidates else None
     if by_first is not None:
         return Resolution(query=text, entity=by_first)
@@ -214,6 +228,20 @@ def resolve_person(text: str, scopes: list[str], graph) -> Resolution:
             known.add(entity.id)
             person.candidates.append(Candidate(entity, candidate.via))
     return person
+
+
+def _namesakes(graph, account: Entity, entity: Entity, scopes: list[str]) -> list[Entity]:
+    """Other readable, unlinked users with the same name as ``account`` that are not its identity, as shown."""
+    mine = set(identity_ids(graph, entity, scopes)) if entity.label == ACCOUNT else set()
+    name = _bare(account.name).lower()
+    found: list[Entity] = []
+    for user in _users(graph, scopes):
+        if user.id == account.id or user.id in mine or user.person_id or _bare(user.name).lower() != name:
+            continue
+        other = shown(graph, Entity(user.id, user.name, ACCOUNT), scopes)
+        if other.id != entity.id and other not in found:
+            found.append(other)
+    return found
 
 
 def _others(graph, candidates: list[Candidate], scopes: list[str]) -> list[Candidate]:

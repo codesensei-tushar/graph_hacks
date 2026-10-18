@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, coordination, fallback, find, kinds, memories, resolve, ticket_status
+from src.domain.knowledge import algorithms, bridges, coordination, coverage, fallback, find, kinds, memories, resolve, ticket_status
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -292,6 +292,9 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
         # ticket itself, before the people and decision routes that would only list who knows it. A key
         # that is no readable ticket ("billing for q3-2026") falls through to the route below it.
         return "ticket_status", {"name": text}
+    if tickets and ticket_status.asks_about_a_titled_ticket(text):
+        # "what's blocking the postgres upgrade": a ticket by its title; no title match falls through.
+        return "ticket_status", {"name": text}
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
@@ -479,6 +482,7 @@ def who_knows(question: str, scopes: list[str], context: str | None = None) -> T
         return fallback.before_refusing(question, scopes, _miss("who_knows", resolution))
     result = knowers(graph, resolution.entity, scopes)
     result.candidates = resolution.candidate_names()
+    result.answer += coverage.note_for(graph, scopes, result.path)
     return result
 
 
