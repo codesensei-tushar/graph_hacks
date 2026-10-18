@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, kinds, memories, resolve
+from src.domain.knowledge import algorithms, bridges, coordination, kinds, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -60,6 +60,15 @@ _BRIEF = re.compile(
     r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b",
     re.IGNORECASE,
 )
+# A change and the people it should reach: "who should know about notebook#45", "who else should
+# review it", "who should we loop in". After the decision and memory routes, so "who needs to know
+# why we moved off postgres" stays a decision question; before blast radius and owners, which share
+# its words. A ticket is asked about, not changed: "who should I ping about TKT-101" stays on who_knows.
+_SHOULD_KNOW = re.compile(
+    r"\bwho (?:else )?(?:should|needs to) (?:know|review|be told|hear)\b|\bwho should (?:i|we) (?:loop in|tell|ping)\b",
+    re.IGNORECASE,
+)
+_TICKET_ID = re.compile(r"\b[a-z]{2,}-\d+\b", re.IGNORECASE)
 # People between teams. "how is maya connected to the invoice worker" is a path question.
 _CONNECTORS = re.compile(r"\bwho (?:connects|bridges|links)\b|\b(?:bridges?|connectors?|go-betweens?) between\b", re.IGNORECASE)
 
@@ -91,6 +100,8 @@ def route(question: str) -> tuple[str, dict]:
         return "related_memories", {"name": text}
     if _RECALL.search(text):
         return "recall", {"query": text}
+    if _SHOULD_KNOW.search(text) and not _TICKET_ID.search(text):
+        return "who_should_know", {"name": text}
     if _BLAST.search(text):
         args = {"name": text}
         depth = algorithms.depth_in(text)
@@ -418,6 +429,7 @@ _ROUTED = {
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth")),
+    "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
     "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
     "path_between": lambda args, scopes: algorithms.path_between(args["source"], args.get("target") or "", scopes),
