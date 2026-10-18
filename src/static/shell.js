@@ -23,3 +23,15 @@
   if (dark && dark.addEventListener) dark.addEventListener("change", label);
   label();
 })();
+
+// Phones: the section links fold behind the Menu button render() adds; a link, Escape or a tap outside closes it.
+(() => {
+  const top = document.querySelector(".top");
+  const toggle = document.getElementById("nav-toggle");
+  if (!top || !toggle) return;
+  const set = (open) => { top.toggleAttribute("data-nav-open", open); toggle.setAttribute("aria-expanded", String(open)); };
+  toggle.addEventListener("click", () => set(!top.hasAttribute("data-nav-open")));
+  top.addEventListener("click", (event) => { if (event.target.closest("nav a")) set(false); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") set(false); });
+  document.addEventListener("click", (event) => { if (!top.contains(event.target)) set(false); });
+})();
