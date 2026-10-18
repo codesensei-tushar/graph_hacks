@@ -203,8 +203,10 @@ class Rows(list):
 
     A cached ``Rows`` is shared by every question until the graph changes, so it is read-only."""
 
-    def __init__(self, rows=()) -> None:
+    def __init__(self, rows=(), graph: str | None = None) -> None:
         super().__init__(rows)
+        # The graph the rows came from: its rows' keys are reused across loads (``_row_keys``).
+        self._graph = graph
         self._lock = threading.Lock()
         self._keys: list | None = None
         self._first: dict[str, list[int]] | None = None
@@ -215,7 +217,7 @@ class Rows(list):
     def keys(self) -> list[tuple[Entity, str, tuple[str, ...], int]]:
         with self._lock:
             if self._keys is None:
-                self._keys = _build_keys(self)
+                self._keys = _build_keys(self, _keys_memo(self._graph, len(self)))
         return self._keys
 
     def by_first_word(self) -> dict[str, list[int]]:
@@ -353,6 +355,7 @@ def clear_rows_cache() -> None:
     with _cache_lock:
         _part_cache.clear()
         _rows_cache.clear()
+        _row_keys_memo.clear()
 
 
 def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> Rows:
@@ -380,7 +383,7 @@ def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> Rows:
             for scope in label_scopes:
                 parts[(label, scope)] = read.get((label, scope), [])
                 _store(_part_cache, (name, label, scope), generation, parts[(label, scope)])
-    rows = Rows(row for _node, row in sorted((item for part in parts.values() for item in part), key=lambda item: item[0]))
+    rows = Rows((row for _node, row in sorted((item for part in parts.values() for item in part), key=lambda item: item[0])), graph=name)
     _store(_rows_cache, (name, labels, wanted), generation, rows)
     return rows
 
@@ -660,24 +663,53 @@ def _keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int
     return rows.keys() if isinstance(rows, Rows) else _build_keys(rows)
 
 
-def _build_keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int]]:
-    first_names: dict[str, int] = {}
-    for row in rows:
-        if row.label == "Person":
-            words = tokens(row.name)
-            if words:
-                first_names[words[0]] = first_names.get(words[0], 0) + 1
+# Each graph's rows' own keys, by the row's value (every field): after a write the rows are read
+# again, and only a row that changed or is new is tokenised again. Exact, since a changed row is
+# a different key. Bounded: when it outgrows the graph's rows it is started over.
+_row_keys_memo: dict[str, dict] = {}
+
+
+def _keys_memo(graph: str | None, size: int) -> dict | None:
+    if graph is None:
+        return None
+    with _cache_lock:
+        memo = _row_keys_memo.setdefault(graph, {})
+        if len(memo) > 4 * size + 1000:
+            memo = _row_keys_memo[graph] = {}
+        return memo
+
+
+def _row_keys(row: EntityRow) -> tuple[Entity, list, set, list[str]]:
+    """One row's own keys (name, aliases, title), the word tuples among them, and its name's words."""
+    entity = Entity(row.id, row.name, row.label, row.kind)
+    seen: set[tuple[str, ...]] = set()
     keys = []
+    for text, kind in ((row.name, 0), *((alias, 1) for alias in row.aliases.split(",")), (row.title, 3)):
+        words = tuple(tokens(text))
+        if words and words not in seen:
+            seen.add(words)
+            keys.append((entity, text.strip(), words, kind))
+    return entity, keys, seen, (tokens(row.name) if row.label == "Person" else [])
+
+
+def _build_keys(rows: list[EntityRow], memo: dict | None = None) -> list[tuple[Entity, str, tuple[str, ...], int]]:
+    own = []
     for row in rows:
-        entity = Entity(row.id, row.name, row.label, row.kind)
-        seen: set[tuple[str, ...]] = set()
-        for text, kind in ((row.name, 0), *((alias, 1) for alias in row.aliases.split(",")), (row.title, 3)):
-            words = tuple(tokens(text))
-            if words and words not in seen:
-                seen.add(words)
-                keys.append((entity, text.strip(), words, kind))
+        cached = memo.get(row) if memo is not None else None
+        if cached is None:
+            cached = _row_keys(row)
+            if memo is not None:
+                memo[row] = cached
+        own.append(cached)
+    first_names: dict[str, int] = {}
+    for row, (_entity, _keys, _seen, name_words) in zip(rows, own):
+        if row.label == "Person" and name_words:
+            first_names[name_words[0]] = first_names.get(name_words[0], 0) + 1
+    keys = []
+    for row, (entity, row_keys, seen, name_words) in zip(rows, own):
+        keys.extend(row_keys)
         if row.label == "Person":
-            words = tokens(row.name)
+            words = name_words
             if words and len(words[0]) >= 3 and first_names.get(words[0]) == 1 and (words[0],) not in seen:
                 keys.append((entity, words[0].capitalize(), (words[0],), 2))
     return keys
