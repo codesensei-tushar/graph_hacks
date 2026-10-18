@@ -166,3 +166,32 @@ class FakeApiTest(unittest.TestCase):
         self.pick("member")
         self.assertEqual(self.http.post("/console/api/teams/import", json={"file": sales}, headers=self.csrf).status_code, 403)
         self.assertEqual(len(self.http.get("/console/api/teams").json()["teams"]), 3)
+
+    def test_people_unlinked_and_link_in_the_onboarding_shapes(self):
+        # docs/CONSOLE.md "## People" (#190): no emails anywhere, at most 5 suggestions, admins only.
+        fixture = json.loads((FIXTURES / "people.json").read_text())
+        self.assertEqual(set(fixture), {"unlinked", "people"})
+        for account in fixture["unlinked"]:
+            self.assertEqual(set(account), {"id", "name", "source", "items", "suggestions"})
+            self.assertIn(account["source"], {"jira", "hubspot"})
+            self.assertLessEqual(len(account["suggestions"]), 5)
+            for suggestion in account["suggestions"]:
+                self.assertEqual(set(suggestion), {"person_id", "name", "reason"})
+                self.assertIn(suggestion["reason"], {"same_name", "same_email_domain"})
+        self.assertNotIn("@", json.dumps(fixture))
+        self.pick("default")
+        listed = self.http.get("/console/api/people/unlinked").json()
+        account = listed["unlinked"][0]
+        person = account["suggestions"][0]["person_id"]
+        linked = self.http.post("/console/api/people/link", json={"external_user_id": account["id"], "person_id": person}, headers=self.csrf)
+        self.assertEqual(linked.status_code, 200)
+        self.assertEqual(set(linked.json()), {"ok", "external_user_id", "person", "changed"})
+        self.assertEqual(set(linked.json()["person"]), {"id", "name"})
+        self.assertNotIn(account["id"], [a["id"] for a in self.http.get("/console/api/people/unlinked").json()["unlinked"]])
+        by_email = self.http.post("/console/api/people/link", json={"external_user_id": console_fake.LINKED_BY_EMAIL, "person_id": person}, headers=self.csrf)
+        self.assertEqual(by_email.status_code, 409)
+        self.assertEqual(self.http.post("/console/api/people/link", json={"external_user_id": "nope", "person_id": person}, headers=self.csrf).status_code, 404)
+        self.pick("member")
+        self.assertEqual(self.http.get("/console/api/people/unlinked").status_code, 403)
+        self.pick("linked")
+        self.assertEqual(self.http.get("/console/api/people/unlinked").json()["unlinked"], [])
