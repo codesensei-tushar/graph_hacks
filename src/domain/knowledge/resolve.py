@@ -227,14 +227,14 @@ class Rows(list):
 
     def words(self) -> dict[str, set[str]]:
         """Every token of a name, alias or title, under each form ``same_word`` can meet it by."""
+        keys = self.keys()
         with self._lock:
             if self._words is None:
                 words: dict[str, set[str]] = {}
-                for row in self:
-                    for text in (row.name, row.aliases, row.title):
-                        for token in tokens(text):
-                            for form in _forms(token):
-                                words.setdefault(form, set()).add(token)
+                # Every token of a name, alias or title is a word of one of the keys.
+                for token in {token for _entity, _key, key_words, _kind in keys for token in key_words}:
+                    for form in _forms(token):
+                        words.setdefault(form, set()).add(token)
                 self._words = words
         return self._words
 
