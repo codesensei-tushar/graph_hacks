@@ -414,6 +414,8 @@ Hard cap three and a half minutes. This table replaces the round 2 storyboard an
 
 3:26 with every step in; 3:16 without step 7.
 
+The step numbers above are the self-seed script's. On Quillfern production, use "Recording script, Quillfern on production (draft)": step 4 is one hop, then two (say "Two hops. A search box could not."), step 5 is the card, the write and `who should look at it` in one, and step 7 is the replay's two DM replies in the terminal.
+
 ### The Sales beat, literal
 
 On the local replay. Hold every reply three seconds.
