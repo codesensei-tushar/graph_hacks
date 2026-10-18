@@ -34,7 +34,9 @@ _WIDER_THAN_OWNER = re.compile(r"\b(?:else|also|worked|works|knows?|reviewed|tou
 _LOAD_BEARING = re.compile(
     r"\b(?:load[- ]bearing|most (?:critical|depended|important|central)|single point of failure|pagerank|central services?)\b", re.IGNORECASE
 )
-_PATH = re.compile(r"\b(?:connected|connection|path between|related to|linked to|link between|how does .+ reach|route (?:from|between))\b", re.IGNORECASE)
+_PATH = re.compile(
+    r"\b(?:connected|connection|path between|related to|linked to|link between|how does .+ reach|route (?:from|between)|what connects)\b", re.IGNORECASE
+)
 _RELATED_MEMORIES = re.compile(
     r"\b(?:memories|notes|chats?|conversations?|discussions?) (?:about|on|mentioning|around)\b|\bwhat (?:have|has) (?:we|people|anyone) said about\b",
     re.IGNORECASE,
@@ -47,17 +49,22 @@ _DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
 _PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
 _GROUPS = re.compile(r"\b(?:working groups?|de facto teams?|who (?:actually )?works together|work clusters?)\b", re.IGNORECASE)
 # A person leaving, not a service failing. "who is the only one who knows billing" names a
-# service and stays on who_knows; "what is Arjun the only one who knows" names a person.
+# service and stays on who_knows; "what is Arjun the only one who knows" names a person, and so
+# does "the bus factor on arjun"; "the bus factor for billing" names a service and stays on who_knows.
 _LEAVES = re.compile(
-    r"\b(?:leaves|leaving|quits?|quitting|resigns?|on leave|hit by a bus|bus factor|covers? for|takes? over (?:from|for))\b"
+    r"\b(?:leaves|leaving|quits?|quitting|resigns?|on leave|hit by a bus|bus factor(?! for\b)|covers? for|takes? over (?:from|for))\b"
     r"|\bwhat\b.*\bthe only (?:one|person) who knows\b"
     r"|\b(?:nobody|no one) else (?:knows|does)\b",
     re.IGNORECASE,
 )
-# Joining a team. "what should I know about billing" names no team and stays on who_knows.
+# Joining a team, or asking what a team is. "what should I know about billing" names no team and
+# stays on who_knows. "what does the payments team own" is the team, not Billing Service, which the
+# graph also knows as "payments"; the brief names its people and everything it runs.
 _BRIEF = re.compile(
     r"\b(?:just joined|i(?:'m| am) new (?:to|on)|new (?:to|on) the|brief me|onboard me|onboarding brief|up to speed)\b"
-    r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b",
+    r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b"
+    r"|\bwhat (?:does|do) (?:the )?\w+(?: \w+)? team (?:own|run|do|work on|handle)\b"
+    r"|\bwho(?:'s| is| are)? (?:on|in) (?:the )?\w+(?: \w+)? team\b|\bmembers of (?:the )?\w+(?: \w+)? team\b",
     re.IGNORECASE,
 )
 # A change and the people it should reach: "who should know about notebook#45", "who else should

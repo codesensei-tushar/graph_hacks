@@ -109,6 +109,19 @@ class RouteTest(unittest.TestCase):
         # A document stays on who_should_know here; the tool answers it as who_knows (integration test).
         self.assertEqual(ask_service.route("who should review the billing runbook")[0], "who_should_know")
 
+    def test_questions_judges_type_route_to_the_tool_that_answers_them(self):
+        # A team, not Billing Service, which the graph also knows as "payments".
+        for question in ("what does the payments team own", "who is on the platform team", "who's in the data team", "members of the payments team"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("onboarding_brief", {"name": question}))
+        self.assertEqual(ask_service.route("what connects sara and the invoice worker")[0], "path_between")
+        # The bus factor for a service is who knows it; on a person it is that person leaving.
+        self.assertEqual(ask_service.route("who is the bus factor for billing")[0], "who_knows")
+        self.assertEqual(ask_service.route("what's the bus factor on arjun")[0], "if_person_leaves")
+        # "who owns billing" and "who connects payments and platform" are unchanged.
+        self.assertEqual(ask_service.route("who owns billing")[0], "who_owns")
+        self.assertEqual(ask_service.route("who connects payments and platform")[0], "connectors")
+
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)
         self.assertEqual(algorithms.depth_in("and 3 hops out"), 3)

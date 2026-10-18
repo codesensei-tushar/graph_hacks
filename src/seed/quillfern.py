@@ -144,7 +144,7 @@ DECISIONS = [
         "id": "decision-memory-off-postgres",
         "name": "Move the memory layer off Postgres",
         "summary": "Store notebook links in the graph store instead of Postgres join tables, because multi-hop lookups timed out.",
-        "aliases": "memory layer off postgres, graph store migration, why move memory",
+        "aliases": "memory layer off postgres, off postgres, graph store, graph store migration, why move memory",
         "proposer": "kofi",
         "approver": "tomas",
         "about": "memory-layer",

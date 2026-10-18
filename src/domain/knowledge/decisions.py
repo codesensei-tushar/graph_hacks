@@ -42,6 +42,8 @@ _STOPWORDS = {
     "the", "and", "for", "with", "from", "into", "about", "that", "this", "move", "moving",
     "keep", "use", "using", "our", "all", "service", "services", "will", "now", "off", "onto",
 }
+# A question that asks for a decision outright, so a service it names can stand for that service's decision.
+_ASKS_FOR_A_DECISION = re.compile(r"\b(?:decisions?|decided)\b", re.IGNORECASE)
 
 
 # --- time ----------------------------------------------------------------------------------
@@ -293,9 +295,37 @@ def _headline(decision: DecisionRow) -> str:
     return f"{decision.name}. {_sentence(decision.summary)}" if _has_summary(decision) else f"{decision.name}."
 
 
+def _named_decision(graph, question: str, scopes: list[str]) -> resolve.Resolution:
+    """The decision a question names. One that asks for "the decision" about a service and
+    names no decision gets that service's standing decision, when it has exactly one.
+
+    Only a question that says "decision" falls back: "why is billing slow" is not asking for
+    the billing retries decision, and is refused as before.
+    """
+    resolution = resolve.resolve_name(question, ("Decision",), scopes, graph=graph)
+    if resolution.found or not _ASKS_FOR_A_DECISION.search(question):
+        return resolution
+    service = resolve.resolve_name(question, ("Service",), scopes, graph=graph)
+    if not service.found:
+        return resolution
+    rows = graph.ro_query(
+        f"""
+        MATCH (d:Decision)-[:ABOUT]->(:Service {{id: $id}})
+        WHERE {SCOPED.format(var="d")}
+        RETURN d.id
+        """,
+        {"id": service.entity.id, "scopes": scopes},
+    ).result_set
+    standing = {current.id: current for (decision_id,) in rows if (current := current_decision(graph, decision_id, scopes))}
+    if len(standing) == 1:
+        (only,) = standing.values()
+        return resolve.Resolution(query=question, entity=Entity(only.id, only.name, "Decision"))
+    return resolution
+
+
 def decision_trace(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
-    resolution = resolve.resolve_name(question, ("Decision",), scopes, graph=graph)
+    resolution = _named_decision(graph, question, scopes)
     if not resolution.found:
         return ToolResult(
             tool="decision_trace",
@@ -349,7 +379,7 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
     the decision still holds.
     """
     _, graph = connect()
-    resolution = resolve.resolve_name(question, ("Decision",), scopes, graph=graph)
+    resolution = _named_decision(graph, question, scopes)
     if not resolution.found:
         return ToolResult(
             tool="decision_pressure",
