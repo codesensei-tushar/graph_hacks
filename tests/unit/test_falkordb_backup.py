@@ -63,6 +63,7 @@ def test_cypher_identifiers_are_backquoted():
 class FakeGCS(BaseHTTPRequestHandler):
     received: list = []
     corrupt = False
+    status = 200
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers["Content-Length"]))
@@ -70,7 +71,9 @@ class FakeGCS(BaseHTTPRequestHandler):
         FakeGCS.received.append((self.path.split("?")[0], query, self.headers["Authorization"], body))
         md5 = hashlib.md5(body + (b"x" if FakeGCS.corrupt else b"")).digest()
         reply = json.dumps({"name": query["name"][0], "md5Hash": base64.b64encode(md5).decode()}).encode()
-        self.send_response(200)
+        if FakeGCS.status != 200:
+            reply = json.dumps({"error": {"code": FakeGCS.status, "message": "The specified\nbucket is odd."}}).encode()
+        self.send_response(FakeGCS.status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(reply)))
         self.end_headers()
@@ -85,7 +88,7 @@ def gcs(monkeypatch):
     server = HTTPServer(("127.0.0.1", 0), FakeGCS)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    FakeGCS.received, FakeGCS.corrupt = [], False
+    FakeGCS.received, FakeGCS.corrupt, FakeGCS.status = [], False, 200
     monkeypatch.setattr(backup, "UPLOAD_URL", f"http://127.0.0.1:{server.server_port}/upload/storage/v1/b/{{bucket}}/o")
     yield FakeGCS
     server.shutdown()
@@ -107,3 +110,35 @@ def test_upload_fails_when_gcs_stored_something_else(gcs, tmp_path):
     rdb.write_bytes(b"REDIS0011")
     with pytest.raises(backup.BackupError, match="does not match"):
         backup.upload("bkt", "x.rdb", str(rdb), "application/octet-stream", "tok")
+
+
+@pytest.mark.parametrize(
+    ("status", "error", "says"),
+    [
+        (404, backup.BucketMissing, "does not exist yet"),
+        (403, backup.BackupError, "roles/storage.objectCreator"),
+        (500, backup.BackupError, "HTTP 500: The specified bucket is odd."),
+    ],
+)
+def test_a_failed_upload_is_one_line_saying_what_to_do(gcs, tmp_path, status, error, says):
+    gcs.status = status
+    rdb = tmp_path / "x.rdb"
+    rdb.write_bytes(b"REDIS0011")
+    with pytest.raises(error) as raised:
+        backup.upload("bkt", "x.rdb", str(rdb), "application/octet-stream", "tok")
+    assert says in str(raised.value) and "\n" not in str(raised.value)
+
+
+def test_until_the_bucket_exists_the_nightly_run_skips_with_exit_0(monkeypatch, capsys):
+    def missing(_args):
+        raise backup.BucketMissing("gs://bkt does not exist yet")
+
+    monkeypatch.setattr(backup, "run_backup", missing)
+    assert backup.main(["backup", "--bucket", "bkt"]) == 0
+    assert capsys.readouterr().err.strip() == "[falkordb-backup] skipped: gs://bkt does not exist yet"
+
+    def broken(_args):
+        raise backup.BackupError("HTTP 403 writing")
+
+    monkeypatch.setattr(backup, "run_backup", broken)
+    assert backup.main(["backup", "--bucket", "bkt"]) == 1
