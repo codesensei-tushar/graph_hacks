@@ -9,8 +9,10 @@ questions for the seeded company.
 Every route here is public. A question is counted: each client (``X-Real-IP``, which nginx
 sets) gets about ``ask_api.RATE_LIMIT`` a minute with bursts of ``ask_api.RATE_BURST``, then a
 429 with ``Retry-After``; a question over ``ask_api.MAX_QUESTION_CHARS`` characters is a 400.
-The catalogue and the proof are the same for every visitor and are cached in the domain for a
-minute, so they are not counted and go out with ``Cache-Control`` for that minute (``cached``).
+A question whose graph query runs past FalkorDB's timeout is a 503 that says so
+(``tool_guard.TIMEOUT_REPLY``), never a 500. The catalogue and the proof are the same for
+every visitor and are cached in the domain for a minute, so they are not counted and go out
+with ``Cache-Control`` for that minute (``cached``).
 """
 
 import secrets
@@ -19,7 +21,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from src.core.config import settings
-from src.domain.knowledge import ask_api
+from src.domain.knowledge import ask_api, tool_guard
 
 router = APIRouter(prefix="/api", tags=["ask"])
 
@@ -38,6 +40,11 @@ def _denial(request: Request) -> JSONResponse | None:
 def cached(payload: dict) -> JSONResponse:
     """A public read the domain keeps for a minute: browsers and nginx may keep it as long."""
     return JSONResponse(payload, headers={"Cache-Control": ask_api.CACHE_CONTROL})
+
+
+def timed_out(error: tool_guard.ToolTimedOut) -> JSONResponse:
+    """A graph query ran out of time: the sentence for the asker, as a 503, not a 500."""
+    return JSONResponse({"error": str(error), "timed_out": True}, status_code=503)
 
 
 def _throttled(request: Request) -> JSONResponse | None:
@@ -59,9 +66,12 @@ def ask(request: Request, q: str = "", tool: str | None = None, model: bool = Fa
     if model and (denied := _denial(request)):
         return denied
     try:
-        answer = ask_api.answer_question(q, tool=tool, use_model=model)
+        with tool_guard.guard("ask", q):
+            answer = ask_api.answer_question(q, tool=tool, use_model=model)
     except (ask_api.ToolRefused, ask_api.QuestionTooLong) as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)
+    except tool_guard.ToolTimedOut as error:
+        return timed_out(error)
     return answer.to_dict()
 
 
