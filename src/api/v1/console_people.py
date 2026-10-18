@@ -42,6 +42,16 @@ PUBLIC_DOMAINS = frozenset(
         "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "gmx.com", "gmx.de", "yandex.com", "mail.com", "zoho.com",
     }
 )
+# Apps and bots are not people. Jira gives Atlassian's own app accounts (Automation for Jira and
+# the like) accountIds under 557058:, and an account_type or is_bot property, when a connector
+# stores one, says so outright; the names are a last resort for app accounts outside that prefix.
+JIRA_APP_PREFIX = "557058:"
+APP_NAMES = frozenset({"automation for jira", "jira automation", "jira service management widget", "atlassian assist", "system"})
+_NOT_A_BOT = f"""
+    NOT coalesce(u.is_bot, false) AND NOT toLower(coalesce(u.account_type, '')) IN ['app', 'bot', 'customer']
+    AND NOT (u.source = 'jira' AND u.external_id STARTS WITH '{JIRA_APP_PREFIX}')
+    AND NOT toLower(coalesce(u.name, '')) IN $app_names
+"""
 
 
 def _name_key(name) -> str:
@@ -58,16 +68,16 @@ def unlinked() -> dict:
     people; and every person, for a manual pick. Runs in the org's context."""
     _, graph = connect()
     accounts = graph.ro_query(
-        """
+        f"""
         MATCH (u:ExternalUser)
-        WHERE u.source IN $sources AND NOT (u)-[:IS]->(:Person)
+        WHERE u.source IN $sources AND NOT (u)-[:IS]->(:Person) AND {_NOT_A_BOT}
         OPTIONAL MATCH (u)-[r]->(n)
         WHERE type(r) <> 'CAN_READ'
         RETURN u.id, u.name, u.source, u.email, count(DISTINCT n) AS items
         ORDER BY items DESC, u.name, u.id
         LIMIT $limit
         """,
-        {"sources": list(SOURCES), "limit": MAX_UNLINKED},
+        {"sources": list(SOURCES), "limit": MAX_UNLINKED, "app_names": sorted(APP_NAMES)},
     ).result_set
     people = graph.ro_query("MATCH (p:Person) WHERE p.name IS NOT NULL RETURN p.id, p.name, p.email ORDER BY p.name, p.id").result_set
     by_name: dict[str, list] = {}
@@ -98,11 +108,11 @@ def link(user_id: str, person_id: str, actor: str) -> dict:
     """Link the account to the person, as an admin-asserted mapping. Runs in the org's context."""
     _, graph = connect()
     rows = graph.query(
-        "MATCH (u:ExternalUser {id: $id}) WHERE u.source IN $sources OPTIONAL MATCH (u)-[r:IS]->(p:Person) RETURN r.via, p.id",
-        {"id": user_id, "sources": list(SOURCES)},
+        f"MATCH (u:ExternalUser {{id: $id}}) WHERE u.source IN $sources AND {_NOT_A_BOT} OPTIONAL MATCH (u)-[r:IS]->(p:Person) RETURN r.via, p.id",
+        {"id": user_id, "sources": list(SOURCES), "app_names": sorted(APP_NAMES)},
     ).result_set
     if not rows:
-        raise LinkRefused(404, "no such Jira or HubSpot account")
+        raise LinkRefused(404, "no such Jira or HubSpot account (apps and bots are not linked)")
     person = graph.query("MATCH (p:Person {id: $id}) RETURN p.name", {"id": person_id}).result_set
     if not person:
         raise LinkRefused(404, "no such person")

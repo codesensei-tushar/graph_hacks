@@ -72,6 +72,8 @@ class ConsolePeopleTest(unittest.TestCase):
                 (self.jira, "a2", "Robin Vale", "robin@dayone.example"),
                 (self.jira, "a3", "Gee", "gee@gmail.com"),
                 (self.jira, "a4", "Sam O.", "sam@dayone.example"),  # linked by email
+                (self.jira, "557058:f58131cb-b67d-43c7-b30d-6b58d40bd077", "Automation for Jira", ""),  # an Atlassian app
+                (self.jira, "app2", "Jira Automation", ""),
             ):
                 connector_graph.upsert_user(install, ExternalUser(id=install.user_id(user_id), source=install.source, external_id=user_id, name=name, email=email))
             container = self.hubspot.container_id("crm")
@@ -98,7 +100,7 @@ class ConsolePeopleTest(unittest.TestCase):
         body = self.client.get("/console/api/people/unlinked").json()
         self.assertNotIn("@", str(body), "no email, not even a domain, is returned")
         rows = {row["name"]: row for row in body["unlinked"]}
-        self.assertEqual(sorted(rows), ["Gee", "Paula O", "Paula Ortiz", "Robin Vale"], "Sam is linked by email already")
+        self.assertEqual(sorted(rows), ["Gee", "Paula O", "Paula Ortiz", "Robin Vale"], "Sam is linked by email already; apps are not people")
         self.assertEqual(rows["Paula Ortiz"]["suggestions"], [{"person_id": "paula-ortiz", "name": "Paula Ortiz", "reason": "same_name"}])
         self.assertEqual(
             rows["Robin Vale"]["suggestions"],
@@ -134,6 +136,11 @@ class ConsolePeopleTest(unittest.TestCase):
         self.assertEqual(self._link(self.jira.user_id("a4"), "paula-ortiz").status_code, 409, "an email link is not overridden")
         self.assertEqual(self._link("jira:nope:user:x", "paula-ortiz").status_code, 404)
         self.assertEqual(self._link(self.paula_jira, "nobody").status_code, 404)
+        app = self.jira.user_id("557058:f58131cb-b67d-43c7-b30d-6b58d40bd077")
+        self.assertEqual(self._link(app, "paula-ortiz").status_code, 404, "an app is never linked")
+        _rows(self.x.ref(), "MATCH (u:ExternalUser {id: $id}) SET u.is_bot = true RETURN count(u)", id=self.jira.user_id("a3"))
+        unlinked = [row["name"] for row in self.client.get("/console/api/people/unlinked").json()["unlinked"]]
+        self.assertNotIn("Gee", unlinked, "is_bot hides it")
         self.assertEqual(self._link(self.paula_jira, "").status_code, 400)
         self.assertEqual(self.client.post("/console/api/people/link", content="x", headers={**self.headers, "content-type": "text/plain"}).status_code, 415)
 

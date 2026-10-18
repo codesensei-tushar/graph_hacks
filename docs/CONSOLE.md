@@ -190,7 +190,8 @@ Jira often hides emails, so many synced accounts link to no person. `src/api/v1/
 - `GET /console/api/people/unlinked`: `{unlinked: [{id, name, source: "jira"|"hubspot", items,
   suggestions: [{person_id, name, reason: "same_name"|"same_email_domain"}]}], people: [{id, name}]}`.
   At most 500 accounts, most active first; at most 5 suggestions each; public mail domains suggest
-  nobody. No email or domain is ever returned.
+  nobody. No email or domain is ever returned. Apps and bots are left out (`is_bot`, `account_type`
+  app/bot/customer, Jira accountIds under `557058:`, "Automation for Jira") and cannot be linked.
 - `POST /console/api/people/link` (JSON, CSRF) `{external_user_id, person_id}`: writes
   `(:ExternalUser)-[:IS {via: "admin", by, at}]->(:Person)` and moves the account's OWNS/WORKED_ON
   onto the person. Audited as `people.link`. 200 `{ok, external_user_id, person: {id, name}, changed}`;
