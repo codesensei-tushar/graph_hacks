@@ -5,6 +5,7 @@
 | installation              | created / deleted                       | backfill the repos / drop them       |
 | installation_repositories | added / removed                         | backfill / drop those repos          |
 | pull_request              | any                                     | upsert, with changed files on change |
+| pull_request              | opened / reopened / ready_for_review    | then the Slack heads-up (alerts.py)  |
 | pull_request_review       | submitted / edited / dismissed          | upsert the review                    |
 | issues                    | deleted / anything else                 | delete / upsert the ticket           |
 
@@ -13,13 +14,15 @@ Anything else is acknowledged and ignored.
 
 import logging
 
-from src.domain.github import backfill, ingest, repos
+from src.domain.github import alerts, backfill, ingest, repos
 from src.integrations.github.client import client_for
 
 log = logging.getLogger(__name__)
 
 # Actions that can change which files a pull request touches.
 _FILE_ACTIONS = {"opened", "reopened", "synchronize", "edited", "ready_for_review"}
+# Actions after which a pull request may need to reach people who weren't on it.
+_ALERT_ACTIONS = {"opened", "reopened", "ready_for_review"}
 
 
 def handle_github_event(event: str, payload: dict) -> str:
@@ -61,6 +64,8 @@ def handle_github_event(event: str, payload: dict) -> str:
         if action in _FILE_ACTIONS:
             files = client_for(int(installation_id)).list_pull_request_files(repo["full_name"], pr["number"])
         ingest.upsert_pull_request(repo, pr, files=files)
+        if action in _ALERT_ACTIONS:
+            _alert(repo, pr)
         return "pull_request"
 
     if event == "pull_request_review":
@@ -78,3 +83,12 @@ def handle_github_event(event: str, payload: dict) -> str:
         return "issue"
 
     return "ignored"
+
+
+def _alert(repo: dict, pr: dict) -> None:
+    """The Slack heads-up, after ingest and never in its way: a failure is logged and the event still counts as handled."""
+    try:
+        outcome = alerts.alert_pull_request(repo, pr)
+        log.info("[github] coordination alert repo=%s pr=%s outcome=%s", repo.get("full_name"), pr.get("number"), outcome)
+    except Exception:
+        log.exception("[github] coordination alert failed repo=%s pr=%s", repo.get("full_name"), pr.get("number"))

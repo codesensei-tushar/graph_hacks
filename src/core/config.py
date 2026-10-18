@@ -19,6 +19,8 @@ class Settings:
     falkordb_password: str = field(default_factory=lambda: os.getenv("FALKORDB_PASSWORD", ""))
     # Seed the company graph on startup when it's empty. Local development only; off in production.
     seed_on_startup: bool = field(default_factory=lambda: os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"))
+    # Post a heads-up to the Slack home channel when a new public pull request reaches people who weren't on it.
+    coordination_alerts: bool = field(default_factory=lambda: os.getenv("COORDINATION_ALERTS", "").lower() in ("1", "true", "yes"))
     # Which seed the startup seed and POST /ops/seed load: company_brain (ourselves) or quillfern (the demo company).
     seed_company: str = field(default_factory=lambda: os.getenv("SEED_COMPANY", "") or "company_brain")
 

@@ -2,6 +2,7 @@
 
     (:GitHubUser)-[:AUTHORED]->(:PullRequest)-[:IN_REPO]->(:Repo)
     (:GitHubUser)-[:REVIEWED {state}]->(:PullRequest)
+    (:GitHubUser)-[:REVIEW_REQUESTED]->(:PullRequest)    asked to review; GitHub drops it once they do
     (:PullRequest)-[:TOUCHES]->(:Service)       changed files under Service.paths
     (:PullRequest)-[:CLOSES]->(:Ticket)         "closes #12" in the description
     (:GitHubUser)-[:OPENED|ASSIGNED]->(:Ticket)-[:IN_REPO]->(:Repo)
@@ -106,6 +107,19 @@ def upsert_pull_request(repo: dict, pr: dict, files: list[dict] | None = None, r
             "MATCH (u:GitHubUser {id: $user}), (p:PullRequest {id: $pr}) MERGE (u)-[:AUTHORED]->(p)",
             {"user": author, "pr": node_id},
         )
+
+    # Who is asked to review, kept in step with GitHub. A payload without the list leaves the edges alone.
+    if pr.get("requested_reviewers") is not None:
+        requested = [upsert_github_user(user) for user in pr["requested_reviewers"] if user.get("id")]
+        graph.query(
+            "MATCH (u:GitHubUser)-[r:REVIEW_REQUESTED]->(:PullRequest {id: $pr}) WHERE NOT u.id IN $ids DELETE r",
+            {"pr": node_id, "ids": requested},
+        )
+        for user_id in requested:
+            graph.query(
+                "MATCH (u:GitHubUser {id: $user}), (p:PullRequest {id: $pr}) MERGE (u)-[:REVIEW_REQUESTED]->(p)",
+                {"user": user_id, "pr": node_id},
+            )
 
     if files is not None:
         services = services_for_paths([item["filename"] for item in files if item.get("filename")])
