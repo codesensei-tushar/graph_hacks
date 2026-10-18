@@ -228,12 +228,28 @@
     bannerBox.replaceWith(box);
   }
 
+  // Accounts from this connection that no person owns yet: a line that leads to People.
+  async function unlinkedNote() {
+    if (!C.isAdmin(me)) return;
+    try {
+      const data = await C.api("GET", "/console/api/people/unlinked");
+      const count = ((data && data.unlinked) || []).filter((account) => account.id.startsWith(`${id}:user:`)).length;
+      if (!count) return;
+      const note = $("#unlinked-note");
+      note.replaceChildren(`${C.plural(count, "account here is", "accounts here are")} not linked to a person yet. `, el("a", { href: "/console/people" }, "Link people →"));
+      note.hidden = false;
+    } catch (error) {
+      /* the note is a hint; without it the page is complete */
+    }
+  }
+
   async function start() {
     try {
       me = await C.boot();
     } catch (error) {
       return;
     }
+    unlinkedNote();
     if (C.takeParam("connected")) C.banner(bannerBox, "Connected. The first sync has started; this page updates as it runs.", "ok");
     const error = C.takeParam("error");
     if (error) C.banner(bannerBox, ...C.notice(error));
