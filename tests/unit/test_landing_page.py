@@ -266,3 +266,26 @@ class RiskMapTest(unittest.TestCase):
         self.assertLess(scripts.index("/static/riskmap.js"), scripts.index("/static/app.js"))
         self.assertIn("/static/riskmap.css", [resource.split("?")[0] for resource in resources])
         self.assertIn("window.RiskMap = { render };", (STATIC / "riskmap.js").read_text())
+
+
+class TypeScaleTest(unittest.TestCase):
+    """One type scale and three weights: every size in style.css is a token, an em value or a clamp."""
+
+    def setUp(self):
+        self.css = (STATIC / "style.css").read_text()
+
+    def test_every_font_size_is_a_token_an_em_value_or_a_clamp(self):
+        stray = []
+        for declaration in re.findall(r"font(?:-size)?:\s*([^;}]*)", self.css):
+            if declaration.startswith(('"Geist', "inherit")) or "clamp(" in declaration or "var(--fs-" in declaration:
+                continue
+            if re.search(r"\d(?:px|rem)\b", declaration) and declaration != "16px/1.6 var(--font)":
+                stray.append(declaration)
+        self.assertEqual(stray, [])
+        for token in ("--fs-xs", "--fs-sm", "--fs-md", "--fs-base", "--fs-lg", "--fs-xl"):
+            self.assertIn(f"{token}:", self.css)
+
+    def test_weights_are_400_500_and_600_plus_the_hero_headline(self):
+        weights = set(re.findall(r"font-weight:\s*(\d{3})\b", self.css)) | set(re.findall(r"font:\s*(\d{3})\s", self.css))
+        self.assertLessEqual(weights, {"100", "400", "420", "500", "600"})  # 100 is the @font-face range
+        self.assertNotIn("700", weights)
