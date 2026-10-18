@@ -24,7 +24,7 @@ We entered Track 03, and Tracks 01 and 02 with the same build, because the agent
 
 Four groups of nodes share one graph.
 
-- **The company.** Company, Team, Person, Service, Document, Ticket, Decision, Chat. Services point at each other with `DEPENDS_ON`. People point at services with `OWNS`, `WORKED_ON` and `KNOWS`. Decisions point at what they `CITE`.
+- **The company.** Company, Team, Person, Service, Document, Ticket, Decision, Chat. Services point at each other with `DEPENDS_ON`. People point at services with `OWNS`, `WORKED_ON` and `KNOWS`. Decisions point at what they are `BASED_ON`.
 - **Slack.** SlackWorkspace, SlackUser, Channel, and the membership edges that record who is in which private channel.
 - **Memory.** Memory nodes in a Scope, tagged into a topic tree, with `MENTIONS` edges into the company nodes they talk about.
 - **GitHub.** Repo, GitHubUser, PullRequest. A pull request `TOUCHES` the services whose paths it changed, and a GitHubUser `IS` a Person once the accounts are linked.
@@ -39,7 +39,7 @@ This is the design decision the rest of the post hangs on.
 
 The model does not write queries. It picks a tool from a fixed catalogue and fills in arguments. Each tool is a `ToolSpec`: a name, a description the model reads, a JSON schema for the arguments, and a `run(args, scopes)` function with a hand-written, parameterised traversal behind it. Each tool returns a `ToolResult`: a short answer and a list of `PathStep`s, the exact edges it walked, which the reply prints as `Arjun Mehta -[OWNS]-> Billing Service`.
 
-The loop is one structured call to Claude Haiku, on the cheapest profile we have. The reply has to match a small schema: `tool` is an enum of the catalogue's names, and `args` is that tool's arguments as JSON text, with each tool's argument names, types and bounds listed in the prompt. We check the choice against the registry, drop arguments the tool did not declare, clamp integers to their bounds and insist on the required ones. If there is no API key, the call fails, or the choice is invalid, a keyword router picks the tool instead. Every reply ends with the tool's name and whether the model or the keywords picked it, so the trace is on the screen, not in a log. Tools that write the graph never run from the loop. The turn suspends with an Approve/Deny card whose text is the tool's own preview of what it will write, with the target already resolved: "File a ticket titled *Billing exports time out*, linked to *Billing Service*". The write runs only after the asker approves, and the ticket command accepts `about <service>` when the title alone would be a guess.
+The loop is one structured call to Claude Haiku, on the cheapest profile we have. The reply has to match a small schema: `tool` is an enum of the catalogue's names, and `args` is that tool's arguments as JSON text, with each tool's argument names, types and bounds listed in the prompt. We check the choice against the registry, drop arguments the tool did not declare, clamp integers to their bounds and insist on the required ones. If there is no API key, the call fails, or the choice is invalid, a keyword router picks the tool instead. Every reply ends with the tool's name and whether the model or the keywords picked it, so the trace is on the screen, not in a log. Tools that write the graph never run from the loop. The turn suspends with an Approve/Deny card whose text is the tool's own preview of what it will write, with the target already resolved: "File a ticket titled *billing exports time out* in the company graph, linked to *Billing Service*". The write runs only after the asker approves, and the ticket command accepts `about <service>` when the title alone would be a guess.
 
 Before any tool runs, the name in the question is resolved against the graph. A name resolves only when a node's name, alias or title appears in the question as a whole phrase, within the asker's scopes; the longest phrase wins. Two different nodes named side by side count as one unknown thing, not two answers. If nothing resolves, the tool returns `found = false` with up to three candidates, and the reply says exactly what the graph does know:
 
@@ -51,7 +51,7 @@ Two things fall out of this. No model-generated string ever reaches a query, so 
 
 Without a model key, a keyword router picks the tool instead, and every path still works. The test suite never calls a model.
 
-That fallback also hid a bug from us. A one-off script that sends the fourteen demo questions to the model found every call failing: the structured-output API rejects `minimum` and `maximum` on integers, and once those were gone it refused a schema holding the union of every tool's arguments as too complex. Every turn had quietly fallen back to keywords, and the footer reading "picked by keywords" was the only sign. That is why the schema is now a tool name plus the arguments as text, still validated against the chosen tool's own schema before anything runs. All fourteen questions now route as the recording script expects, and the footer says which picker answered, so a silent fallback shows on screen.
+That fallback also hid a bug from us. A one-off script that sends the fourteen demo questions to the model found every call failing: the structured-output API rejects `minimum` and `maximum` on integers, and once those were gone it refused a schema holding the union of every tool's arguments as too complex. Every turn had quietly fallen back to keywords, and the footer reading "picked by keywords" was the only sign. That is why the schema is now a tool name plus the arguments as text, still validated against the chosen tool's own schema before anything runs. All twenty-five questions it now sends route as the recording script expects, and the footer says which picker answered, so a silent fallback shows on screen.
 
 ![The refusal on the ask page: nothing in the graph matches “payments gateway” as one thing, the nearest names, and no path.](images/03-refusal.png)
 
@@ -98,7 +98,7 @@ FalkorDB ships graph algorithms as procedures, which means ranking and routing a
 - `algo.labelPropagation` finds who actually works together, from the services people own or work on, and says where that cuts across the org chart.
 - Blast radius walks `DEPENDS_ON` to a depth you choose, groups what it finds by hop, and names the connector: the service that most of the routes it printed pass through.
 
-One thing we tried and dropped: PageRank for people. "Who knows billing" sounded like a ranking problem, but PageRank scores by incoming links and people have almost none; every person came out between 0.011 and 0.015. So people are ranked by a weighted sum of their edges to the service (owning it counts five, writing a pull request three, reviewing two), and the reply shows the reasons: "Ask first: Arjun Mehta (owns it, wrote notebook#52)". The ranking is explainable because it is made of the same edges the path prints.
+One thing we tried and dropped: PageRank for people. "Who knows billing" sounded like a ranking problem, but PageRank scores by incoming links and people have almost none; every person came out between 0.011 and 0.015. So people are ranked by a weighted sum of their edges to the service (owning it counts five, writing a pull request three, reviewing two), and the reply shows the reasons: "Ask first: Arjun Mehta (owns it, reviewed notebook#52, wrote the Billing runbook)". The ranking is explainable because it is made of the same edges the path prints.
 
 Four things we learned by running them against FalkorDB 4.22, not by reading about them:
 
@@ -131,7 +131,7 @@ Take FalkorDB out and nothing answers. Not "answers worse". Nothing. We made tha
 
 The rules ask for this, and it deserves a real paragraph rather than a footnote.
 
-Claude Code wrote a large share of the code and the docs, in several sessions that coordinated through pull requests. The team decided the graph model, the tool catalogue, the scope rules and the demo, read every query that went in, and checked every claim about FalkorDB behaviour in this post by running it against the database. The three gotchas above were found that way. [[Team: one or two sentences on what you would do differently.]]
+Claude Code wrote a large share of the code and the docs, in several sessions that coordinated through pull requests. The team decided the graph model, the tool catalogue, the scope rules and the demo, read every query that went in, and checked every claim about FalkorDB behaviour in this post by running it against the database. The four gotchas above were found that way. [[Team: one or two sentences on what you would do differently.]]
 
 ## What's next
 

@@ -34,7 +34,7 @@ Ask in a channel or a DM. New messages, pull requests and tickets land in the gr
 | Group | Nodes | Edges |
 | --- | --- | --- |
 | The company | Team, Person, Service (with a kind), Document, Ticket, Decision, Chat | `OWNS` · `DEPENDS_ON` · `SUPERSEDES` |
-| Slack | Workspace, SlackUser, Channel, and who is in which private channel | `IS` · `MEMBER_OF` |
+| Slack | SlackWorkspace, SlackUser, Channel, and who is in which private channel | `IS` · `MEMBER_OF` |
 | Memory | Dated memories in the scope of the room they were said in, tagged into a topic tree | `SAID` · `MENTIONS` |
 | GitHub | Repo, GitHubUser, PullRequest, linked to the services whose code changed | `AUTHORED` · `TOUCHES` |
 
@@ -117,7 +117,7 @@ Each team gets a page: its people, what it runs grouped by kind, the decisions t
 POST /ops/import  sales.toml   →   13 nodes, 32 edges created.  Again: 0.
 ```
 
-(If the `onboard team:` Slack command ships before the deck is exported, swap this block for its exact syntax from that PR; until then the slide shows only what is on main.)
+Or one line in Slack: `onboard team: Sales | members: @priya @dev | owns: Renewals (process), HubSpot (system), Pricing playbook (playbook) | decision: annual plans only, decided 2026-09-01`. The Approve card counts what it will create before anything is written, and the team goes in through the same importer.
 
 **Sales, onboarded on the synthetic company.** Final: these are the replies the replay and import tests pin.
 
