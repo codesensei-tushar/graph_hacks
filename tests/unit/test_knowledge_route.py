@@ -353,6 +353,46 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
             with self.subTest(question=question):
                 self.assertEqual(ask_service.route(question), ("ticket_status", {"name": question}))
 
+    def test_crm_questions_go_to_find_on_accounts(self):
+        account = {"label": "Service", "kind": "account"}
+        cases = {
+            "show me our customers": {**account, "status": "customer"},
+            "who are our customers": {**account, "status": "customer"},
+            "open opportunities": {**account, "state": "open", "status": "opportunity"},
+            "deals in contract sent": {**account, "stage": "contract sent"},
+            "which deals are in contract sent?": {**account, "stage": "contract sent"},
+            "show me the sales pipeline": {**account, "stage": "open"},
+            "open deals": {**account, "stage": "open"},
+            "which deals are closed won": {**account, "stage": "closed won"},
+            "deals in closed lost": {**account, "stage": "closed lost"},
+            "list accounts": account,
+            "which accounts are closed": {**account, "state": "closed"},
+        }
+        for question, args in cases.items():
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("find", args))
+        # A CRM word inside another question never takes it over.
+        kept = {
+            "what pipeline runs the nightly export": "who_owns",
+            "pipeline failures": "who_knows",
+            "which customers depend on billing": "blast_radius",
+            "what customers are affected if billing goes down": "blast_radius",
+            "why did we drop deals in the free tier": "decision_trace",
+            "who handles deals at enterprise scale": "who_owns",
+            "how do deals at risk get escalated": "who_knows",
+            "customers complained about refunds": "who_knows",
+            "accounts payable process": "who_knows",
+            "accounts team": "who_knows",
+            "my accounts": "who_knows",
+            "show me the pipeline": "who_knows",
+        }
+        for question, tool in kept.items():
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+        # Named things stay where they were.
+        self.assertEqual(ask_service.route("who owns the enterprise accounts")[0], "who_owns")
+        self.assertEqual(ask_service.route("list the services in payments"), ("find", {"label": "Service", "team": "payments"}))
+
     def test_other_ticket_questions_keep_their_tools(self):
         cases = {
             "who knows about TKT-102": "who_knows",
