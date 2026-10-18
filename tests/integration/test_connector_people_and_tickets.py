@@ -160,6 +160,28 @@ class ConnectorPeopleAndTicketsTest(unittest.TestCase):
         blocker = _ask("what blocks PAY-13")
         self.assertTrue(blocker.answer.startswith("Nothing you can read blocks PAY-13."), blocker.answer)
         self.assertIn("It blocks PAY-11", blocker.answer)
+        # The ticket as the blocker leads with what it blocks.
+        for question in ("what does PAY-13 block", "is PAY-13 blocking anything", "what is PAY-13 blocking"):
+            with self.subTest(question=question):
+                self.assertTrue(_ask(question).answer.startswith("PAY-13 blocks PAY-11 (“Refund export drops the currency”, open)."), _ask(question).answer)
+        self.assertTrue(_ask("is PAY-11 blocking anything").answer.startswith("PAY-11 blocks nothing you can read."))
+
+    def test_a_word_number_token_that_is_no_ticket_falls_through(self):
+        for question in ("who is working on the billing service for q3-2026", "what is the status of Billing Service after the utf-8 fix", "what is gpt-4"):
+            with self.subTest(question=question):
+                self.assertNotEqual(_ask(question).tool, "ticket_status")
+        self.assertTrue(_ask("who is working on the billing service for q3-2026").found)
+        self.assertIn("Billing Service", _ask("what is the status of Billing Service after the utf-8 fix").answer)
+
+    def test_an_assignee_the_asker_cannot_read_is_said_so(self):
+        _, graph_ = falkordb_client.connect()
+        graph_.query(
+            "CREATE (:ExternalUser {id: 'jira:hidden:user', name: 'Hidden Helper', source: 'jira', scope: 'slack_channel_CSECRET'})"
+            "-[:ASSIGNED]->(:Ticket {id: 'TKT-950', name: 'TKT-950', title: 'Public cleanup'})"
+        )
+        result = _ask("what is TKT-950")
+        self.assertIn("TKT-950 is “Public cleanup”: open, the assignee isn't visible to you.", result.answer)
+        self.assertNotIn("Hidden Helper", _text(result))
 
     def test_who_knows_a_ticket_leads_with_title_status_and_assignee(self):
         result = ask_service.who_knows("who knows about PAY-11", SLACK)
