@@ -106,6 +106,19 @@ def _run_risk_map(_args: dict, scopes: list[str]) -> ToolResult:
     return risk_map.risk_map(scopes)
 
 
+def _run_team_dependencies(args: dict, scopes: list[str]) -> ToolResult:
+    # org_health reads decisions, which registers into this catalogue on import.
+    from src.domain.knowledge import org_health
+
+    return org_health.team_dependencies(args.get("name"), scopes, args.get("direction"))
+
+
+def _run_decision_health(args: dict, scopes: list[str]) -> ToolResult:
+    from src.domain.knowledge import org_health
+
+    return org_health.decision_health(args.get("name"), scopes)
+
+
 def _run_person_profile(args: dict, scopes: list[str]) -> ToolResult:
     # person_profile reads decisions, which registers into this catalogue on import.
     from src.domain.knowledge import person_profile
@@ -452,6 +465,41 @@ register(
             ["name"],
         ),
         run=_run_person_profile,
+    )
+)
+register(
+    ToolSpec(
+        name="team_dependencies",
+        description=(
+            "Which teams depend on which, through what they run: cross-team DEPENDS_ON links, mutual dependencies, "
+            "and a company view. For one service's dependents use blast_radius."
+        ),
+        args_schema=_schema(
+            {
+                "name": {"type": "string", "description": "The team the question is about, copied from the question. Leave it out for the whole company."},
+                "direction": {
+                    "type": "string",
+                    "enum": ["dependents", "dependencies"],
+                    "description": "dependents: the teams that depend on this one (the default). dependencies: what this team needs from other teams.",
+                },
+            },
+            [],
+        ),
+        run=_run_team_dependencies,
+    )
+)
+register(
+    ToolSpec(
+        name="decision_health",
+        description=(
+            "Audit of standing decisions: no evidence, no approver, two standing decisions about the same thing, uncited "
+            "later work, age, plus what replaced what. For one decision, use decision_pressure or decision_trace."
+        ),
+        args_schema=_schema(
+            {"name": {"type": "string", "description": "A service or team to narrow the audit to, copied from the question. Leave it out for every decision."}},
+            [],
+        ),
+        run=_run_decision_health,
     )
 )
 register(

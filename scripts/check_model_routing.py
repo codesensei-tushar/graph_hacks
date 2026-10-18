@@ -81,6 +81,9 @@ QUESTIONS = [
     # Risk across every team, not one person leaving or one service failing.
     ("risk 1", "what are our riskiest services", "risk_map", None),
     ("risk 2", "where are we one person away from an outage", "risk_map", None),
+    # Company-level reads across teams and across decisions.
+    ("org 1", "which teams depend on platform", "team_dependencies", None),
+    ("org 2", "which decisions are stale", "decision_health", None),
     # reading_list: what to read before a change, and the neighbour it must not take.
     ("read 1", "what should I read before touching the invoice worker", "reading_list", None),
     ("read 2", "which docs describe the auth service", "reading_list", None),

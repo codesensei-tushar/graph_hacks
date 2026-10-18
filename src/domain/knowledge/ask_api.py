@@ -56,6 +56,7 @@ EXAMPLES: dict[str, list[str]] = {
         "who knows about refunds",
         "who is Arjun Mehta",
         "what changed this week",
+        "which teams depend on platform",
         "who knows the payments gateway",
     ],
     "company-brain": [
