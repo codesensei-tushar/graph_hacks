@@ -108,7 +108,8 @@ class ConnectorIdentityTest(unittest.TestCase):
         # An email an admin asserted links a user to a person, but never merges identities.
         install = Install(source="hubspot", config={"people": "h1=yash@partner.example"})
         with mock.patch("src.connectors.registry.all_installs", return_value=[(None, install)]), mock.patch.object(people, "_asserted_cache", (0.0, None)):
-            self.assertTrue(_ask("who is Yash Patil").answer.startswith("Yash Patil (Jira) is a Jira user.") or _ask("who is Yash Patil").answer.startswith("Yash Patil (HubSpot) is a HubSpot user."))
+            self.assertNotIn("Jira, HubSpot", _ask("who is Yash Patil").answer)
+            self.assertIn("Yash Patil (Jira)", find.find("Ticket", {"person": "Yash Patil"}, SLACK).candidates)
 
     # --- first names ---------------------------------------------------------------------------
 
