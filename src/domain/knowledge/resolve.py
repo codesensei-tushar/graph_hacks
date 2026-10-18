@@ -14,10 +14,13 @@ count. Ingestion code that only needs a best guess for classification uses ``bes
 """
 
 import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
-from src.db.falkordb_client import connect
+from src.db import falkordb_client
+from src.db.falkordb_client import DarkGraph, connect
 from src.domain.knowledge.kinds import SERVICE_KINDS, kind_or_default
 
 ORG_SHARED = "org_shared"
@@ -179,25 +182,178 @@ def _edits(a: str, b: str, ceiling: int) -> int:
     return previous[-1]
 
 
-def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> list[EntityRow]:
+class Rows(list):
+    """``load_rows``'s answer: the rows, with their match keys and word indexes worked out once.
+
+    A cached ``Rows`` is shared by every question until the graph changes, so it is read-only."""
+
+    def __init__(self, rows=()) -> None:
+        super().__init__(rows)
+        self._lock = threading.Lock()
+        self._keys: list | None = None
+        self._first: dict[str, list[int]] = {}
+        self._real: dict[str, list[int]] = {}
+        self._near: dict[tuple[str, int], list[int]] = {}
+        self._words: dict[str, set[str]] | None = None
+
+    def keys(self) -> list[tuple[Entity, str, tuple[str, ...], int]]:
+        self._index()
+        return self._keys
+
+    def by_first_word(self) -> dict[str, list[int]]:
+        self._index()
+        return self._first
+
+    def by_real_word(self) -> dict[str, list[int]]:
+        self._index()
+        return self._real
+
+    def by_first_letter_and_length(self) -> dict[tuple[str, int], list[int]]:
+        """Keys by each real word's first letter and length: where a ``near_word`` typo can be."""
+        self._index()
+        return self._near
+
+    def words(self) -> dict[str, set[str]]:
+        """Every token of a name, alias or title, under each form ``same_word`` can meet it by."""
+        with self._lock:
+            if self._words is None:
+                words: dict[str, set[str]] = {}
+                for row in self:
+                    for text in (row.name, row.aliases, row.title):
+                        for token in tokens(text):
+                            for form in _forms(token):
+                                words.setdefault(form, set()).add(token)
+                self._words = words
+        return self._words
+
+    def _index(self) -> None:
+        with self._lock:
+            if self._keys is not None:
+                return
+            keys = _build_keys(self)
+            first: dict[str, list[int]] = {}
+            real: dict[str, list[int]] = {}
+            near: dict[tuple[str, int], list[int]] = {}
+            for position, (_entity, _key, key_words, _kind) in enumerate(keys):
+                for form in _forms(key_words[0]):
+                    first.setdefault(form, []).append(position)
+                real_words = [word for word in key_words if len(word) >= 4 and word not in STOPWORDS]
+                for form in {form for word in real_words for form in _forms(word)}:
+                    real.setdefault(form, []).append(position)
+                for bucket in {(word[0], len(word)) for word in real_words}:
+                    near.setdefault(bucket, []).append(position)
+            self._keys, self._first, self._real, self._near = keys, first, real, near
+
+
+def _forms(word: str) -> set[str]:
+    """The word and the shorter words ``same_word`` may equate it with ("payments" ~ "payment",
+    "matches" ~ "match"). Two words can be the same only if their forms meet."""
+    forms = {word}
+    if len(word) - 1 >= 4:
+        forms.add(word[:-1])
+    if word.endswith("es") and len(word) - 2 >= 4:
+        forms.add(word[:-2])
+    return forms
+
+
+def _lookup(index: dict[str, list[int]], words) -> list[int]:
+    """Positions of the keys whose indexed word may be the same as one of ``words``, in key order."""
+    return sorted({position for word in words for form in _forms(word) for position in index.get(form, ())})
+
+
+# Rows by (graph, label, scope) and assembled Rows by (graph, labels, scopes), each with the graph
+# generation it was read at. A user's own channel scopes add small entries beside the shared
+# org_shared and org_internal ones. Both are LRUs with a size cap.
+ROWS_CACHE_MAX = 256
+_cache_lock = threading.Lock()
+_part_cache: OrderedDict = OrderedDict()
+_rows_cache: OrderedDict = OrderedDict()
+_LABEL = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _cached(cache: OrderedDict, key, generation):
+    with _cache_lock:
+        hit = cache.get(key)
+        if hit is None or hit[0] != generation:
+            return None
+        cache.move_to_end(key)
+        return hit[1]
+
+
+def _store(cache: OrderedDict, key, generation, value) -> None:
+    with _cache_lock:
+        cache[key] = (generation, value)
+        cache.move_to_end(key)
+        while len(cache) > ROWS_CACHE_MAX:
+            cache.popitem(last=False)
+
+
+def clear_rows_cache() -> None:
+    with _cache_lock:
+        _part_cache.clear()
+        _rows_cache.clear()
+
+
+def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> Rows:
+    """Every visible node of these labels as rows to match names against, in node order.
+
+    Kept per graph generation (``falkordb_client.generation``): read again only after a write
+    changed the graph. A dark graph's empty rows are never kept."""
+    labels = tuple(labels)
+    wanted = tuple(sorted(set(scopes)))
+    name = None if isinstance(graph, DarkGraph) else getattr(graph, "name", None)
+    generation = falkordb_client.generation(name) if isinstance(name, str) else None
+    if generation is None:
+        return Rows(row for _node, row in sorted(_read_rows(graph, {label: wanted for label in labels})["all"], key=lambda item: item[0]))
+    rows = _cached(_rows_cache, (name, labels, wanted), generation)
+    if rows is not None:
+        return rows
+    parts = {(label, scope): _cached(_part_cache, (name, label, scope), generation) for label in labels for scope in wanted}
+    missing: dict[str, tuple[str, ...]] = {}
+    for (label, scope), part in parts.items():
+        if part is None:
+            missing[label] = (*missing.get(label, ()), scope)
+    if missing:
+        read = _read_rows(graph, missing)
+        for label, label_scopes in missing.items():
+            for scope in label_scopes:
+                parts[(label, scope)] = read.get((label, scope), [])
+                _store(_part_cache, (name, label, scope), generation, parts[(label, scope)])
+    rows = Rows(row for _node, row in sorted((item for part in parts.values() for item in part), key=lambda item: item[0]))
+    _store(_rows_cache, (name, labels, wanted), generation, rows)
+    return rows
+
+
+def _read_rows(graph, wanted: dict[str, tuple[str, ...]]) -> dict:
+    """One label scan per label (UNION ALL), never an all-node scan. Each row comes back as
+    ``(node order, EntityRow)``, by ``(label, scope)`` and all together under "all"."""
     # A synced item (Jira, HubSpot; it has ``external_id``) is matched by its handle only, never its
     # title: hundreds of free-text titles would match every question and make every word "known".
-    rows = graph.ro_query(
-        f"""
-        MATCH (n)
-        WHERE labels(n)[0] IN $labels AND n.name IS NOT NULL AND {SCOPED.format(var="n")}
-        RETURN n.id, n.name, labels(n)[0], coalesce(n.aliases, ''),
-               CASE WHEN n.external_id IS NULL THEN coalesce(n.title, '') ELSE '' END, n.kind
-        """,
-        {"labels": list(labels), "scopes": scopes},
-    ).result_set
-    return [
-        EntityRow(
-            id=row[0], name=row[1], label=row[2], aliases=row[3] or "", title=row[4] or "",
-            kind=kind_or_default(row[5]) if row[2] == "Service" else None,
+    parts, params = [], {}
+    for index, (label, scopes) in enumerate(wanted.items()):
+        if not _LABEL.fullmatch(label):
+            raise ValueError(f"bad label {label!r}")
+        params[f"scopes{index}"] = list(scopes)
+        parts.append(
+            f"""
+            MATCH (n:{label})
+            WHERE labels(n)[0] = '{label}' AND n.name IS NOT NULL AND coalesce(n.scope, '{ORG_SHARED}') IN $scopes{index}
+            RETURN ID(n) AS node, coalesce(n.scope, '{ORG_SHARED}') AS scope, n.id AS id, n.name AS name, '{label}' AS label,
+                   coalesce(n.aliases, '') AS aliases, CASE WHEN n.external_id IS NULL THEN coalesce(n.title, '') ELSE '' END AS title,
+                   n.kind AS kind
+            """
         )
-        for row in rows
-    ]
+    out: dict = {"all": []}
+    if not parts:
+        return out
+    for node, scope, node_id, node_name, label, aliases, title, kind in graph.ro_query(" UNION ALL ".join(parts), params).result_set:
+        row = EntityRow(
+            id=node_id, name=node_name, label=label, aliases=aliases or "", title=title or "",
+            kind=kind_or_default(kind) if label == "Service" else None,
+        )
+        out.setdefault((label, scope), []).append((node, row))
+        out["all"].append((node, row))
+    return out
 
 
 def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: list[str] | None = None, graph=None) -> Resolution:
@@ -205,17 +361,20 @@ def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: li
     if graph is None:
         _, graph = connect()
     scopes = scopes or [ORG_SHARED]
-    return resolve_rows(text, load_rows(graph, labels, scopes), labels, known=_graph_words(graph, scopes))
+    rows = load_rows(graph, labels, scopes)
+    return resolve_rows(text, rows, labels, known=_graph_words(graph, scopes, rows if tuple(labels) == DEFAULT_LABELS else None))
 
 
-def _graph_words(graph, scopes: list[str]):
-    """Whether a word is in any visible node's name, alias, or title. Loaded on first use only."""
-    words: set[str] = set()
+def _graph_words(graph, scopes: list[str], rows: Rows | None = None):
+    """Whether a word is in any visible node's name, alias, or title. Loaded on first use only,
+    and not at all when the caller already holds every label's rows."""
+    held = [rows]
 
     def known(word: str) -> bool:
-        if not words:
-            words.update(token for row in load_rows(graph, DEFAULT_LABELS, scopes) for text in (row.name, row.aliases, row.title) for token in tokens(text))
-        return any(same_word(word, token) for token in words)
+        if held[0] is None:
+            held[0] = load_rows(graph, DEFAULT_LABELS, scopes)
+        words = held[0].words()
+        return any(same_word(word, token) for form in _forms(word) for token in words.get(form, ()))
 
     return known
 
@@ -349,6 +508,10 @@ def _trailing(words: list[str], match: _Match) -> list[str]:
 
 
 def _keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int]]:
+    return rows.keys() if isinstance(rows, Rows) else _build_keys(rows)
+
+
+def _build_keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int]]:
     first_names: dict[str, int] = {}
     for row in rows:
         if row.label == "Person":
@@ -375,7 +538,11 @@ def _kept_matches(text: str, rows: list[EntityRow], labels: tuple[str, ...]) -> 
     words = tokens(text)
     rank = {label: index for index, label in enumerate(labels)}
     found: list[_Match] = []
-    for entity, key, key_words, kind in _keys(rows):
+    held = rows if isinstance(rows, Rows) else Rows(rows)
+    keys = held.keys()
+    # Only a key whose first word is the same as one of the question's can match.
+    for position in _lookup(held.by_first_word(), set(words)):
+        entity, key, key_words, kind = keys[position]
         size = len(key_words)
         for start in range(len(words) - size + 1):
             if all(same_word(words[start + offset], key_words[offset]) for offset in range(size)):
@@ -409,7 +576,15 @@ def _fuzzy_candidates(text: str, rows: list[EntityRow]) -> list[Candidate]:
     if not named_words:
         return []
     scored: list[tuple[float, Candidate]] = []
-    for entity, key, key_words, kind in _keys(rows):
+    held = rows if isinstance(rows, Rows) else Rows(rows)
+    keys = held.keys()
+    # Only keys sharing a word with what was named (same_word), or holding one of the same first
+    # letter and nearly the same length (near_word), can qualify.
+    near = held.by_first_letter_and_length()
+    possible = set(_lookup(held.by_real_word(), named_words))
+    possible.update(position for word in named_words for size in range(len(word) - 2, len(word) + 3) for position in near.get((word[0], size), ()))
+    for position in sorted(possible):
+        entity, key, key_words, kind = keys[position]
         real_words = [word for word in key_words if len(word) >= 4 and word not in STOPWORDS]
         # A shared word, or a misspelt one: "biling" is one edit from "billing", "invoce" from "invoice".
         if not any(same_word(word, key_word) or near_word(word, key_word) for word in named_words for key_word in real_words):
