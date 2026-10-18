@@ -4,8 +4,9 @@
     .venv/bin/python scripts/seed_jira.py --env-file ~/.config/company-brain/connectors.env --apply   # write it
 
 Reads CONNECTOR_JIRA_BASE_URL, CONNECTOR_JIRA_EMAIL and CONNECTOR_JIRA_API_TOKEN from the
-environment, or from ``--env-file`` (values already in the environment win). Nothing it
-reads is printed except display names, project keys and issue keys.
+environment, or from ``--env-file`` (values already in the environment win). It prints the
+site, display names, project and issue keys and titles, never an email or the token, and a
+failure is one line without a traceback.
 
 Everything here is invented (the hackathon's synthetic-data rule) and lines up with the
 Quillfern seed (``src/seed/quillfern.py``): two company-managed projects whose components
