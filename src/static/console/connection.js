@@ -39,6 +39,9 @@
     const body = $("#containers");
     body.replaceChildren();
     const containers = connection.containers || [];
+    // The column shows once the API says who can read each container (its readers field).
+    const visibility = containers.some((c) => "readers" in c);
+    $("#vis-col").hidden = !visibility;
     $("#containers-title").textContent = source.nouns[0].toUpperCase() + source.nouns.slice(1);
     $("#containers-col").textContent = source.noun[0].toUpperCase() + source.noun.slice(1);
     const done = containers.filter((c) => c.backfilled).length;
@@ -47,7 +50,7 @@
       : `No ${source.nouns} chosen yet, so nothing is being read.`;
     if (!containers.length) {
       const row = el("tr");
-      row.append(el("td", { colspan: "4", class: "dim" }, `Choose ${source.nouns} to start syncing.`));
+      row.append(el("td", { colspan: "5", class: "dim" }, `Choose ${source.nouns} to start syncing.`));
       body.append(row);
       return;
     }
@@ -59,9 +62,18 @@
       const state = el("td", { class: "state" });
       const tone = container.last_error ? "error" : container.backfilled ? "ok" : "busy";
       state.append(el("span", { class: `sdot ${tone}`, "aria-hidden": "true" }), container.last_error ? "Failed" : container.backfilled ? "Up to date" : "Backfilling");
-      if (container.capped) state.append(el("span", { class: "dim" }, " · newest kept"));
+      // A container keeps at most its newest items (sync.MAX_ITEMS_PER_CONTAINER); say how many of how many.
+      if (container.capped) {
+        const of = Number.isFinite(container.available) ? ` of ${C.fmt(container.available)}` : "";
+        state.append(el("span", { class: "dim" }, ` · keeping the newest ${C.fmt(container.items)}${of}`));
+      }
       if (container.last_error) state.append(el("span", { class: "err" }, container.last_error));
       row.append(state);
+      // Who can read what came from it: everyone in the company, or the N people the tool lets read it.
+      if (visibility) {
+        const readers = container.readers;
+        row.append(el("td", { class: readers === null || readers === undefined ? "" : "restricted" }, readers === null || readers === undefined ? "Company-wide" : `Restricted: ${C.plural(readers, "reader", "readers")}`));
+      }
       row.append(el("td", { class: "num" }, C.fmt(container.items)));
       row.append(el("td", { class: "dim when" }, container.last_fetch_at ? C.ago(container.last_fetch_at) : "Not yet"));
       body.append(row);
