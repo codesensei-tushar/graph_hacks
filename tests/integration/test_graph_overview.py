@@ -69,13 +69,13 @@ class GraphOverviewTest(unittest.TestCase):
         # The private service, the private and the forgotten memory and the private repo's pull request are not counted.
         self.assertEqual(
             stats["labels"],
-            {"Person": 9, "Team": 4, "Service": 13, "Document": 4, "Ticket": 3, "Decision": 5, "PullRequest": 1, "Memory": 1, "Chat": 1},
+            {"Person": 9, "Team": 4, "Service": 13, "Document": 4, "Ticket": 3, "Decision": 5, "PullRequest": 1, "Memory": 7, "Chat": 1},
         )
         self.assertEqual(stats["nodes"], sum(stats["labels"].values()))
         self.assertEqual(stats["kinds"], {"service": 9, "system": 1, "process": 1, "account": 1, "playbook": 1})
-        # Quillfern and Sales have 100 edges between public nodes, two of them the seeded chat's AUTHORED and
-        # ABOUT; the public memory and pull request add one each.
-        self.assertEqual(stats["edges"], 102)
+        # Quillfern and Sales have 115 edges between public nodes: two are the seeded chat's AUTHORED and
+        # ABOUT, 15 the seeded memories' MENTIONS. The public memory and pull request here add one each.
+        self.assertEqual(stats["edges"], 117)
         self.assertEqual(stats["rels"], 15)
         self.assertEqual(stats["tools"], len(ask_api.read_tools()))
 

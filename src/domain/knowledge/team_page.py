@@ -369,7 +369,7 @@ def _recent_memories(graph, params: dict) -> list[TeamMemory]:
         WHERE {SCOPED.format(var="s")} AND m.scope IN $scopes AND NOT coalesce(m.is_forgotten, false)
         OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
         RETURN m.id, m.text, m.created_at, m.ts, s.name, coalesce(a.name, a.id, 'someone')
-        ORDER BY coalesce(m.created_at, 0) DESC LIMIT {MEMORY_LIMIT * 4}
+        ORDER BY coalesce(m.created_at, 0) DESC, s.name LIMIT {MEMORY_LIMIT * 4}
         """,
         params,
     ).result_set

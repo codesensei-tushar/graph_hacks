@@ -239,14 +239,15 @@ def reset_memory_registry() -> int:
 
 
 def _link_mentions(graph, memory_id: str, text: str, scopes: list[str]) -> None:
-    for node_id in _mentioned_ids(graph, text, scopes):
+    for node_id in mentioned_ids(graph, text, scopes):
         graph.query(
             "MATCH (m:Memory {id: $memory}), (n {id: $node}) MERGE (m)-[:MENTIONS]->(n)",
             {"memory": memory_id, "node": node_id},
         )
 
 
-def _mentioned_ids(graph, text: str, scopes: list[str]) -> list[str]:
+def mentioned_ids(graph, text: str, scopes: list[str]) -> list[str]:
+    """The services, documents, tickets and decisions in ``scopes`` that ``text`` names, by name or alias."""
     rows = graph.query(
         """
         MATCH (n)

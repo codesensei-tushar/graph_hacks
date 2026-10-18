@@ -87,7 +87,7 @@ A plan changes in a channel: `decision: move billing retries to the invoice work
 | Question | Call | Reply |
 | --- | --- | --- |
 | What breaks if auth goes down | `DEPENDS_ON*1..6` | API Gateway, Billing, Notification and Search at one hop, Invoice Worker at two. Billing and Notification are the main connectors, a tie, counted from the routes walked. |
-| Which services are load-bearing | `algo.pageRank` | Postgres carries the most weight (PageRank 0.13): 6 services depend on it directly or through others. |
+| Which services are load-bearing | `algo.pageRank` | Postgres carries the most weight (the highest PageRank): 6 services depend on it directly or through others. |
 | How is Maya connected to the invoice worker | `algo.SPpaths` | Maya Ortiz → Auth Service → Billing Service → Invoice Worker, each hop cited in the direction the edge points. |
 | Who actually works together | `algo.labelPropagation` | Arjun, Lena and Tomas share Billing Service, though the org chart puts Tomas on Platform. |
 

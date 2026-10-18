@@ -25,6 +25,8 @@ class MemoryToolsTest(unittest.TestCase):
         for patch in cls._patches:
             patch.start()
         seed.reset_and_seed(quillfern)
+        # Only the memories written here: the seed's own would change every count below.
+        falkordb_client.connect()[1].query("MATCH (m:Memory) DETACH DELETE m")
         memory_service.write("billing retries now go through the invoice worker, decided in sync", "org_shared", "UBO", "CPUB", "1700000100.000100")
         memory_service.write("auth session refresh bug is back after the rotation change", "org_shared", "UBO", "CPUB", "1700000200.000100")
         memory_service.write("private: billing export job was moved to the night window", PRIVATE, "UAL", "GPRIV1", "1700000300.000100")

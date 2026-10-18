@@ -83,10 +83,10 @@ class JudgeQuestionsTest(unittest.TestCase):
         self.assertFalse(self._ask("what decisions have we made about postgres").found)
 
     def test_a_refusal_quotes_only_what_was_named(self):
-        # No thread on the page, so a follow-up names nothing; recall quotes the thing, not "say billing".
+        # No thread on the page, so a follow-up names nothing; recall quotes the thing, not "say gateway".
         follow_up = self._ask("and two hops out")
         self.assertEqual((follow_up.found, follow_up.answer), (False, "I can't tell what that refers to. Name a service, document, or ticket."))
-        self.assertEqual(self._ask("what did anyone say about billing").answer, "Nothing in the memories I can read mentions “billing”.")
+        self.assertEqual(self._ask("what did anyone say about the gateway").answer, "Nothing in the memories I can read mentions “gateway”.")
 
     def test_the_graph_store_alias_on_the_decision_does_not_take_the_service(self):
         owner = self._ask("who owns the graph store")

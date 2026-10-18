@@ -172,3 +172,53 @@ CHATS = [{
     "author": "kofi",
     "about": "decision-memory-off-postgres",
 }]
+
+# Public-channel messages the bot kept as memories, in the shape Slack ingest writes them:
+# org_shared, SAID by the speaker's Slack user, MENTIONS what the text names. The first four
+# are the replay's #engineering history, which the replay no longer posts, so the seed and
+# the replay tell one story. ``slack_user`` is the speaker's id in quillfern_workspace.USERS.
+# said_at is milliseconds since the epoch (UTC).
+MEMORIES = [
+    {
+        "id": "memory-tkt-101-timings",
+        "author": "kofi",
+        "slack_user": "UKOFI",
+        "said_at": 1_788_861_600_000,  # 8 Sep 2026
+        "text": "TKT-101 timings: linked-note lookups five links deep take more than 8 seconds on Postgres",
+    },
+    {
+        "id": "memory-graph-store-box",
+        "author": "sara",
+        "slack_user": "USARA",
+        "said_at": 1_789_137_000_000,  # 11 Sep 2026
+        "text": "I'll run the graph store for the memory layer, same box as search",
+    },
+    {
+        "id": "memory-migration-sign-off",
+        "author": "tomas",
+        "slack_user": "UTOMAS",
+        "said_at": 1_789_488_000_000,  # 15 Sep 2026
+        "text": "signed off on moving the memory layer to the graph store, Kofi owns the migration",
+    },
+    {
+        "id": "memory-billing-webhook-retry",
+        "author": "arjun",
+        "slack_user": "UARJUN",
+        "said_at": 1_789_902_000_000,  # 20 Sep 2026
+        "text": "billing now retries a failed renewal webhook once, idempotently, so TKT-102 stops charging twice",
+    },
+    {
+        "id": "memory-auth-token-rotation",
+        "author": "maya",
+        "slack_user": "UMAYA",
+        "said_at": 1_790_932_500_000,  # 2 Oct 2026
+        "text": "auth session refresh rotates tokens every hour now, see notebook#45",
+    },
+    {
+        "id": "memory-invoice-receipts",
+        "author": "lena",
+        "slack_user": "ULENA",
+        "said_at": 1_791_560_400_000,  # 9 Oct 2026
+        "text": "the invoice worker sends the receipt email itself now, no more waiting for the nightly batch",
+    },
+]

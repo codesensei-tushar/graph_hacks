@@ -67,6 +67,18 @@ class QuillfernChipsTest(_ChipsOnTheSeed, unittest.TestCase):
         self.assertEqual(questions, [question for question in ask_api.EXAMPLES["quillfern"] if question != dropped])
         self.assertEqual(questions[-1], "who knows the payments gateway")
 
+    def test_the_memory_chip_answers_with_a_path_and_waits_for_memories(self):
+        memory_chip = "what have we said about billing"
+        answer = ask_api.answer_question(memory_chip)
+        self.assertEqual((answer.tool, answer.found), ("related_memories", True))
+        self.assertTrue(answer.memories, answer.answer)
+        self.assertTrue(any(step["rel"] == "MENTIONS" for step in answer.path), answer.answer)
+        # Production before its seed refresh: no Memory nodes, so the chip is not offered.
+        self.addCleanup(seed.reset_and_seed, self.company)
+        falkordb_client.connect()[1].query("MATCH (m:Memory) DETACH DELETE m")
+        ask_api.ANSWERS.clear()
+        self.assertEqual(ask_api.examples().questions, [question for question in ask_api.EXAMPLES["quillfern"] if question != memory_chip])
+
     def test_a_chip_that_raises_is_dropped_alone_and_logged(self):
         broken = "which services are load-bearing"
         answer_question = ask_api.answer_question
