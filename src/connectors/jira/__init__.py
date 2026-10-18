@@ -6,6 +6,11 @@
     CONNECTOR_JIRA_PROJECTS   PAY,PLAT: only these projects are read
     CONNECTOR_JIRA_PEOPLE     optional: accountId=email pairs for people whose email Jira hides
 
+An install connected from the console uses Atlassian OAuth (3LO) instead (``auth='oauth'``): its
+config holds ``cloud_id`` and ``site_url``, requests go to
+``api.atlassian.com/ex/jira/<cloudId>`` with ``oauth.bearer_for``, and ``site_url`` is used
+for links only (``jira/oauth.py``).
+
 One code path for the backfill and every poll after it. The backfill (no cursor) reads the
 project's issues updated in the last ``BACKFILL_DAYS`` days, newest first, up to
 ``MAX_ISSUES_PER_PROJECT``, a page at a time; the cursor then holds the newest ``updated``
@@ -26,23 +31,34 @@ import math
 from datetime import UTC, datetime, timedelta
 
 from src.connectors import registry
-from src.connectors.base import Connector, ConnectorError, Container, Edge, Install, InstallInfo, Page
+from src.connectors.base import AvailableContainer, Connector, ConnectorError, Container, Edge, Install, InstallInfo, OAuthSpec, Page
 from src.connectors.jira import mapper
+from src.connectors.jira import oauth as jira_oauth
+from src.connectors.oauth import OAUTH_SECRET_FIELDS, bearer_for
 from src.connectors.jira.client import PAGE_SIZE, PROJECT_KEY, JiraClient, site_host, site_problems
 
 log = logging.getLogger(__name__)
 
 BACKFILL_DAYS = 90
 MAX_ISSUES_PER_PROJECT = 500
+# Projects offered for selection in the console, by key.
+MAX_AVAILABLE_PROJECTS = 500
 # Minutes of overlap on every poll, for clock skew between us and Jira.
 OVERLAP_MINUTES = 5
 
 
 def client_for(install: Install) -> JiraClient:
+    if jira_oauth.is_oauth(install):
+        return JiraClient.with_bearer(jira_oauth.api_base(install.get("cloud_id")), bearer_for(install, jira_oauth.SPEC))
     problems = site_problems(install.get("base_url"))
     if problems:
         raise ConnectorError(problems[0])
     return JiraClient.for_install(install)
+
+
+def site_base(install: Install) -> str:
+    """The site's origin for links in answers: ``site_url`` over OAuth, ``base_url`` with an API token."""
+    return jira_oauth.site_url(install) if jira_oauth.is_oauth(install) else install.get("base_url").rstrip("/")
 
 
 def people(install: Install) -> dict[str, str]:
@@ -62,6 +78,11 @@ class JiraConnector(Connector):
     poll_seconds = 300
     required = ("base_url", "email", "api_token", "projects")
     accepts_webhooks = False
+    oauth: OAuthSpec = jira_oauth.SPEC
+    # The console stores the selected project keys here (comma-separated), the same field as CONNECTOR_JIRA_PROJECTS.
+    container_field = "projects"
+    # The API token (token installs) and the OAuth tokens: kept encrypted, never in config_json.
+    secret_fields = ("api_token", *OAUTH_SECRET_FIELDS)
 
     def __init__(self) -> None:
         # Seams for tests: the client, and what time it is.
@@ -70,7 +91,7 @@ class JiraConnector(Connector):
 
     def check_credentials(self, install: Install) -> InstallInfo:
         me = self.client_for(install).myself()
-        return InstallInfo(account=me.get("displayName") or me.get("accountId") or "", site=site_host(install.get("base_url")))
+        return InstallInfo(account=me.get("displayName") or me.get("accountId") or "", site=site_host(site_base(install)))
 
     def containers(self, install: Install) -> list[Container]:
         wanted = {key.upper() for key in install.get_list("projects")}
@@ -81,8 +102,21 @@ class JiraConnector(Connector):
         missing = sorted(wanted - set(bad) - {project.get("key") for project in found})
         if missing:
             log.warning("[jira] projects not visible to the token, not synced: %s", ", ".join(missing))
-        base_url = install.get("base_url").rstrip("/")
+        base_url = site_base(install)
         return [mapper.container(install, project, base_url) for project in found if project.get("key") in wanted]
+
+    def available_containers(self, install: Install) -> list[AvailableContainer]:
+        """Every project the account can browse, for the console to select from: the first
+        ``MAX_AVAILABLE_PROJECTS`` by key. Works with an API token and over OAuth alike."""
+        projects = self.client_for(install).all_projects(MAX_AVAILABLE_PROJECTS)
+        if len(projects) >= MAX_AVAILABLE_PROJECTS:
+            log.warning("[jira] %s can browse more than %d projects; offering the first %d by key", install.key, MAX_AVAILABLE_PROJECTS, MAX_AVAILABLE_PROJECTS)
+        offered: dict[str, AvailableContainer] = {}
+        for project in projects:
+            project_id, key = str(project.get("id") or ""), str(project.get("key") or "")
+            if project_id.isdigit() and PROJECT_KEY.fullmatch(key) and project_id not in offered:
+                offered[project_id] = AvailableContainer(external_id=project_id, key=key, name=str(project.get("name") or key)[:200])
+        return list(offered.values())
 
     def fetch(self, install: Install, container: Container, cursor: str | None) -> Page:
         if not container.external_id.isdigit():
@@ -145,7 +179,7 @@ class JiraConnector(Connector):
     def _page(self, install: Install, container: Container, issues: list[dict]) -> tuple[Page, str | None]:
         """The records for these issues, and the newest ``updated`` among them (UTC ISO), for the cursor."""
         page = Page()
-        base_url = install.get("base_url").rstrip("/")
+        base_url = site_base(install)
         known = people(install)
         users: dict[str, object] = {}
         edges: dict[tuple[str, str, str], Edge] = {}

@@ -225,10 +225,40 @@ sudo cat last_good_sha
   strings.
 - The stack restarts on its own after a reboot (`restart: unless-stopped`); graph data lives
   in the `brain_falkordb-data` volume (append-only file, fsync every second).
+- FalkorDB limits are set on purpose; see "FalkorDB limits" below.
 - The boot disk is snapshotted daily at 20:30 UTC (02:00 IST), and snapshots are kept for 7
   days (`brain-daily-snapshots`).
 - Budget alert: ₹3,500/month (about $40; the billing account is in INR), with emails to
   admin@wattcycle.ai at 50, 90 and 100 %, plus a forecast alert at 100 %.
+
+## FalkorDB limits
+
+The FalkorDB images (`falkordb/falkordb` and `falkordb/falkordb-server`) start with
+`FALKORDB_ARGS="MAX_QUEUED_QUERIES 25 TIMEOUT 1000 RESULTSET_SIZE 10000"`. With those, every
+result is cut at 10,000 rows without an error, and any read that runs past 1 s fails with
+"Query timed out". Both compose files therefore set:
+
+```
+FALKORDB_ARGS: MAX_QUEUED_QUERIES 100 TIMEOUT 10000 RESULTSET_SIZE -1
+```
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `RESULTSET_SIZE` | `-1` (no cap) | A capped result looks like a complete one. Queries bound their own size with `LIMIT`. |
+| `TIMEOUT` | `10000` ms | Applies to read queries only; writes are never cut off. A read slower than 10 s is a bug to fix, not to wait for. |
+| `MAX_QUEUED_QUERIES` | `100` | Queries waiting for a worker thread (one per core, 2 on the e2-medium) before new ones are refused. 25 was tight once a slow tool held both threads. |
+
+The values take effect when the container is created, so after changing them recreate it
+(`sudo docker compose up -d falkordb`; the data volume is kept). Check what is in force:
+
+```bash
+sudo docker compose exec falkordb redis-cli GRAPH.CONFIG GET TIMEOUT          # 10000
+sudo docker compose exec falkordb redis-cli GRAPH.CONFIG GET RESULTSET_SIZE   # -1
+sudo docker compose exec falkordb redis-cli GRAPH.CONFIG GET MAX_QUEUED_QUERIES  # 100
+```
+
+(`REDISCLI_AUTH` is set in the container, so no password is typed.) Locally, recreate the dev
+container with `docker compose up -d falkordb` to pick up the same values.
 
 ## Costs (approximate, per month)
 

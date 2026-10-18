@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, explore, find, memories, risk_map
+from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, explore, find, memories, risk_map, ticket_status
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 from src.domain.knowledge.kinds import SERVICE_KINDS
 
@@ -162,10 +162,13 @@ def _find_schema() -> dict:
     words = {
         "kind": ("What kind of service.", {"enum": list(SERVICE_KINDS)}),
         "team": ("The team, copied from the question: the services it runs, the tickets, decisions and documents about them, or its members.", {}),
-        "owner": ("The person who owns the services listed.", {}),
-        "state": ("open or closed for tickets; open, closed or merged for pull requests.", {"enum": ["open", "closed", "merged"]}),
+        "owner": ("The person who owns the services or accounts listed, or a Jira or HubSpot user by name.", {}),
+        "state": ("open or closed for tickets and accounts; open, closed or merged for pull requests.", {"enum": ["open", "closed", "merged"]}),
         "about": ("The service the tickets or decisions are about.", {}),
-        "person": ("The person who worked on or is assigned the tickets.", {}),
+        "person": ("The person who worked on or is assigned the tickets, or a Jira user by name.", {}),
+        "blocked": ("true for the tickets an open ticket blocks, false for the rest.", {}),
+        "status": ("An account's CRM lifecycle stage: customer, opportunity, lead, ...", {}),
+        "stage": ("A deal stage on the account (contract sent, qualified to buy, ...), or open for any deal not closed.", {}),
         "standing": ("true for the decisions that stand today, false for the ones replaced.", {}),
         "proposer": ("The person who proposed the decisions.", {}),
         "approver": ("The person who approved the decisions.", {}),
@@ -184,7 +187,7 @@ def _find_schema() -> dict:
     }
     for name in find.FILTER_NAMES:
         text, extra = words[name]
-        properties[name] = {"type": "boolean" if name == "standing" else "string", **extra, "description": f"{text} For {', '.join(by_filter[name])}."}
+        properties[name] = {"type": "boolean" if name in ("standing", "blocked") else "string", **extra, "description": f"{text} For {', '.join(by_filter[name])}."}
     return _schema(properties, ["label"])
 
 
@@ -459,7 +462,8 @@ register(
             "depends on each), documents they wrote, their pull requests and reviews, open tickets, the decisions they "
             "proposed or approved and whether each still stands, who they work with most, and what rests on them alone. "
             "Use for 'who is X', 'what does X own / work on / know', 'what is X working on', 'who does X work with', "
-            "'what has X decided'. For X leaving, use if_person_leaves; for who knows a service, who_knows."
+            "'what has X decided'. X may be someone only Jira or HubSpot knows. For X leaving, use if_person_leaves; "
+            "for who knows a service, who_knows."
         ),
         args_schema=_schema(
             {"name": {"type": "string", "description": "The person the question is about, copied from the question."}},
@@ -562,10 +566,23 @@ register(
 )
 register(
     ToolSpec(
+        name="ticket_status",
+        description=(
+            "One ticket as its tracker shows it: title, open or closed with the tracker's status, priority, type, who it "
+            "is assigned to and who opened it, what it is about, what blocks it and what it blocks, and the pull requests "
+            "that reference it. Use when the question names one ticket by its key (PAY-12, TKT-101) and asks what it is, "
+            "its status, whether it is fixed, who is working on it, or what blocks it."
+        ),
+        args_schema=_schema({"name": {"type": "string", "description": "The ticket's key, copied from the question (PAY-12)."}}, ["name"]),
+        run=lambda args, scopes: ticket_status.ticket_status(args["name"], scopes),
+    )
+)
+register(
+    ToolSpec(
         name="find",
         description=(
-            "Lists by filter: open tickets, the tickets or decisions about a service, a team's services, systems or "
-            "processes, the standing decisions, pull requests touching a service, documents describing it, people on "
+            "Lists by filter: open or blocked tickets, the tickets assigned to someone, the accounts someone owns, the "
+            "tickets or decisions about a service, a team's services, systems or processes, the standing decisions, pull requests touching a service, documents describing it, people on "
             "a team (\"which tickets are open\", \"list the services in payments\", \"what decisions have we "
             "made\"). Each label takes its own filters; every value is matched to the graph first. For what changed "
             "recently use what_changed; for one decision's reasons, decision_trace."

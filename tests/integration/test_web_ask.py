@@ -7,16 +7,20 @@ from unittest import mock
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from fastapi.testclient import TestClient  # noqa: E402
+from redis.exceptions import ResponseError  # noqa: E402
 
 from src.api.v1 import ask as ask_route  # noqa: E402
 from src.api.v1 import proof as proof_route  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_api  # noqa: E402
+from src.domain.knowledge import agent, ask_api, explorer  # noqa: E402
 from src.main import app  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
 
 GRAPH = f"company_web_test{tests.TEST_GRAPH_SUFFIX}"
+# What the home page loads for every visitor; the same answer for all of them.
+HOME_READS = ("/api/ask/tools", "/api/graph/stats", "/api/graph/sample", "/api/teams", "/api/ask/proof")
+CACHED_READS = (*HOME_READS, "/api/explore/start")
 
 
 class WebAskTest(unittest.TestCase):
@@ -166,16 +170,53 @@ class WebAskTest(unittest.TestCase):
         too_long = self.http.get("/api/ask", params={"q": "who owns billing " + "x" * ask_api.MAX_QUESTION_CHARS})
         self.assertEqual(too_long.status_code, 400)
         self.assertIn("limited to 300 characters", too_long.json()["error"])
+        here = {"X-Real-IP": "203.0.113.7"}
         with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=3, window=60)):
-            for path in ("/api/ask?q=who+owns+billing", "/api/ask/tools", "/api/ask/proof"):
-                self.assertEqual(self.http.get(path, headers={"X-Real-IP": "203.0.113.7"}).status_code, 200, path)
-            throttled = self.http.get("/api/ask?q=who+owns+billing", headers={"X-Real-IP": "203.0.113.7"})
+            for path in ("/api/ask?q=who+owns+billing", "/api/explore?node=billing", "/api/explore/neighbors?node=billing"):
+                self.assertEqual(self.http.get(path, headers=here).status_code, 200, path)
+            throttled = self.http.get("/api/ask?q=who+owns+billing", headers=here)
             self.assertEqual(throttled.status_code, 429)
             self.assertTrue(1 <= int(throttled.headers["Retry-After"]) <= 60)
             self.assertIn("too many questions", throttled.json()["error"])
-            self.assertEqual(self.http.get("/api/ask/proof", headers={"X-Real-IP": "203.0.113.7"}).status_code, 429)
+            self.assertEqual(self.http.get("/api/explore?node=billing", headers=here).status_code, 429)
+            # The cacheable reads are not counted: an out-of-budget address still loads the page.
+            for path in CACHED_READS:
+                self.assertEqual(self.http.get(path, headers=here).status_code, 200, path)
             # Another address has its own budget.
             self.assertEqual(self.http.get("/api/ask?q=who+owns+billing", headers={"X-Real-IP": "198.51.100.9"}).status_code, 200)
+
+    def test_the_cacheable_reads_say_so_and_questions_do_not(self):
+        for path in CACHED_READS:
+            response = self.http.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            self.assertEqual(response.headers["cache-control"], f"public, max-age={int(ask_api.CACHE_TTL_SECONDS)}", path)
+        self.assertNotIn("max-age", self.http.get("/api/ask?q=who+owns+billing").headers.get("cache-control", ""))
+
+    def test_ten_rapid_home_page_loads_from_one_address_all_succeed(self):
+        # What the page fetches on load, with ?q= in the address: the cached reads plus one question.
+        here = {"X-Real-IP": "203.0.113.50"}
+        for _ in range(10):
+            for path in (*HOME_READS, "/api/ask?q=who+owns+billing"):
+                self.assertEqual(self.http.get(path, headers=here).status_code, 200, path)
+
+    def test_a_query_that_times_out_is_a_503_that_says_so_not_a_500(self):
+        timeout = ResponseError("Query timed out")
+        with mock.patch.object(agent, "run_choice", side_effect=timeout):
+            with self.assertLogs("src.domain.knowledge.tool_guard", "WARNING"):
+                response = self.http.get("/api/ask", params={"q": "how is maya connected to the invoice worker"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"error": "That took too long; try a narrower question.", "timed_out": True})
+        # Not cached: the next ask runs again and answers.
+        self.assertEqual(self.http.get("/api/ask", params={"q": "how is maya connected to the invoice worker"}).status_code, 200)
+        for path, target in (("/api/explore?node=billing", "public_explore"), ("/api/explore/neighbors?node=billing", "public_neighbors")):
+            with mock.patch.object(explorer, target, side_effect=timeout), self.assertLogs("src.domain.knowledge.tool_guard", "WARNING"):
+                walked = self.http.get(path)
+            self.assertEqual(walked.status_code, 503, path)
+            self.assertEqual(walked.json()["error"], "That took too long; try a narrower question.")
+        # Any other database error is still a 500 for the logs, not dressed as a timeout.
+        with mock.patch.object(agent, "run_choice", side_effect=ResponseError("errMsg: Invalid input")):
+            with self.assertRaises(ResponseError):
+                self.http.get("/api/ask", params={"q": "who owns billing, now"})
 
     def test_a_repeated_question_walks_the_graph_once(self):
         with mock.patch.object(ask_api.agent, "run_choice", wraps=ask_api.agent.run_choice) as run:

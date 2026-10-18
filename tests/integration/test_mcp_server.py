@@ -188,6 +188,35 @@ class McpServerTest(unittest.TestCase):
             self.assertGreaterEqual(int(headers["retry-after"]), 1)
             self.assertNotEqual(self._post("/mcp/", TOKEN)[0], 429)
 
+    def _bare(self, method: str, path: str = "/mcp/") -> tuple[int, dict[str, str], bytes]:
+        request = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", method=method)
+        request.add_header("Accept", "application/json, text/event-stream")
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, dict(response.headers), response.read()
+        except urllib.error.HTTPError as error:
+            return error.code, dict(error.headers), error.read()
+
+    def test_get_and_delete_are_405_at_once_not_a_held_stream(self):
+        for method in ("GET", "DELETE"):
+            for path in ("/mcp", "/mcp/"):
+                status, headers, body = self._bare(method, path)
+                self.assertEqual(status, 405, (method, path))
+                self.assertEqual(headers["allow"], "POST")
+                self.assertIn("POST each call", json.loads(body)["error"])
+        # A wrong token does not change it, and a 405 does not spend the address's budget.
+        with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(1, 60.0)):
+            self.assertEqual(self._bare("GET")[0], 405)
+            self.assertNotEqual(self._post("/mcp/", None)[0], 429)
+
+    def test_a_string_argument_over_the_question_cap_is_refused(self):
+        async def work(session):
+            return await session.call_tool("who_owns", {"name": "b" * (ask_api.MAX_QUESTION_CHARS + 1)})
+
+        result = asyncio.run(self._with_session(work))
+        self.assertTrue(result.is_error)
+        self.assertIn(f"limited to {ask_api.MAX_QUESTION_CHARS} characters", result.content[0].text)
+
     def test_the_bare_path_is_served_not_redirected(self):
         # Served by the MCP app (an empty body is a bad request there), with or without the token.
         self.assertNotIn(self._post("/mcp", TOKEN)[0], (307, 401, 403, 404))

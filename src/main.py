@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
-from src.api.v1 import auth, connectors, github, health, org_ops, proof, slack, slack_install
+from src.api.v1 import auth, connectors, console_oauth, github, health, org_ops, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
 from src.connectors import sync as connector_sync  # registers the connector sync job
@@ -110,11 +110,20 @@ async def lifespan(_app: FastAPI):
         yield
 
 
-app = FastAPI(title="Company Brain", lifespan=lifespan)
+# The API docs list every route, admin ones included: served only when DOCS_ENABLED is set.
+_docs = settings.docs_enabled
+app = FastAPI(
+    title="Company Brain",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+)
 app.include_router(slack.router)
 app.include_router(slack_install.router)
 app.include_router(github.router)
 app.include_router(connectors.router)
+app.include_router(console_oauth.router)
 app.include_router(health.router)
 app.include_router(proof.router)
 app.include_router(org_ops.router)

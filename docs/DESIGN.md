@@ -68,7 +68,7 @@ One mapping, `BrainGraph.questionsFor(node)` in `graph.js` (its `QUESTIONS` tabl
 | Ticket | `what is {name} about` |
 | Document, or a name with no label | `who knows {name}` |
 
-Pull requests, chats and memories offer nothing. Two tests hold the guarantee: `tests/unit/test_explore.py` routes every template to its tool and holds every `NEXT` step to a template, and `tests/integration/test_explore_questions.py` asks every question offered by every node of every example chip's answer and of the hero's sample, on a fresh Quillfern seed with and without its Sales team, and requires each to be found. A question that fails is fixed in the mapping, never in the test. Nothing is asked ahead: each click is one ask, inside the page's 30 a minute.
+Pull requests, chats and memories offer nothing. Two tests hold the guarantee: `tests/unit/test_explore.py` routes every template to its tool and holds every `NEXT` step to a template, and `tests/integration/test_explore_questions.py` asks every question offered by every node of every example chip's answer and of the hero's sample, on a fresh Quillfern seed with and without its Sales team, and requires each to be found. A question that fails is fixed in the mapping, never in the test. Nothing is asked ahead: each click is one ask, inside the page's budget of about 60 counted calls a minute.
 
 ### 2.2b The graph behind every answer
 
@@ -115,7 +115,7 @@ A full-width dark band in both themes, entered and left through blurred indigo w
 A full-width dark band, like the proof.
 
 - Eyebrow: `For builders`. Heading: **The same tools, over MCP.**
-- Body: "Every read-only tool in the catalogue is served at `/mcp` over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, no token needed: 30 calls a minute per address."
+- Body: "Every read-only tool in the catalogue is served at `/mcp` over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, no token needed: about 60 calls a minute per address."
 - A quick start in tabs, each with a copy button and this server's own address: Claude Code (`claude mcp add --transport http company-brain <origin>/mcp`, the README's command), any MCP client (the endpoint), Python (the README's client), and the ask API (`curl`). Without JavaScript all four show, stacked.
 - The catalogue as a grid read live from `/api/ask/tools`: one card per read-only tool with its first sentence and its arguments, a filter box, and a line naming the tools that write (Slack only, after an Approve card; never over MCP). The proof's tool names link to their cards.
 - Links: the README's data model and query list, local setup ("`docker compose up -d`, then two commands").
@@ -216,7 +216,7 @@ Default to the operating system's setting, with a toggle in the header that reme
 
 1. **No build step and no new Python dependency.** Plain HTML, CSS and ES modules in `src/static/`. A JS library, if one is truly needed, is vendored into `src/static/vendor/` or loaded from cdnjs with an exact version at least two weeks old. Prefer none: the drawing and the walk are a few hundred lines of SVG.
 2. **The same routes:** `/api/ask`, `/api/ask/tools`, `/api/ask/proof`, `/api/teams`, `/api/team/{id}` and the `/team/{id}` page, unchanged, with their caching and rate limits. The only new routes are coder A's `/api/graph/stats` and `/api/graph/sample`. Both read the public scope only (what a public channel reads), so no private-channel memory or private-repo pull request reaches the page, not even as a count. Both are cached and share the per-address limit.
-3. **Request budget.** The limit is 30 requests a minute per address, and answers are cached for 60 seconds. First load makes at most four calls: tools, stats, sample and teams. The proof table loads when it scrolls into view. Nothing polls, retries in a loop, or asks more than one question without a click. A 429 shows a calm "Too many questions from this address; try again in a minute".
+3. **Request budget.** Questions, explorer walks and MCP calls are counted: about 60 a minute per address, with bursts of 30. Answers are cached for 60 seconds, and the reads every visitor shares (tools, stats, sample, teams, proof, explorer starters) go out with `Cache-Control: public, max-age=60` and are not counted. First load makes four uncounted calls: tools, stats, sample and teams. The proof table loads when it scrolls into view. Nothing polls, retries in a loop, or asks more than one question without a click. A 429 shows a calm "Too many questions from this address; try again in a minute".
 4. **Nothing calls the model from the public page.** It uses the keyword router, as now.
 5. **No fabricated numbers, logos, testimonials or replies.** Every count comes from an API response. A quoted reply is either live or copied from a test that pins it, and labelled with where it comes from. No reference-project names anywhere.
 6. **Copy matches main.** If a sentence in section 2 stops being true, change the sentence, not the facts.

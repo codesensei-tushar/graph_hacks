@@ -14,7 +14,7 @@ import re
 import urllib.parse
 from collections.abc import Iterable, Iterator
 
-from src.connectors.http import HttpError, JsonClient, basic_auth
+from src.connectors.http import HttpError, JsonClient, basic_auth, bearer
 
 # A project key as Jira allows it. Keys reach JQL only after this check.
 PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9_]{1,9}$")
@@ -52,6 +52,14 @@ class JiraClient:
     def for_install(cls, install) -> "JiraClient":
         return cls(install.get("base_url"), install.get("email"), install.get("api_token"))
 
+    @classmethod
+    def with_bearer(cls, api_base: str, access_token: str) -> "JiraClient":
+        """OAuth (3LO): ``https://api.atlassian.com/ex/jira/<cloudId>`` with an access token."""
+        client = cls.__new__(cls)
+        client.base_url = api_base.rstrip("/")
+        client.http = JsonClient(client.base_url, headers=bearer(access_token))
+        return client
+
     def __repr__(self) -> str:
         return f"JiraClient({self.base_url!r})"
 
@@ -66,6 +74,18 @@ class JiraClient:
             page = self.http.get("/rest/api/3/project/search", {"keys": keys, "maxResults": 50, "startAt": len(found)}) or {}
             values = page.get("values") or []
             found.extend(values)
+            if page.get("isLast", True) or not values:
+                break
+        return found
+
+    def all_projects(self, limit: int = 500) -> list[dict]:
+        """Every project the account can browse, by key, up to ``limit``. Paged by ``startAt``; a page
+        that does not move ``startAt`` forward ends the listing, so a broken ``isLast`` cannot loop."""
+        found: list[dict] = []
+        while len(found) < limit:
+            page = self.http.get("/rest/api/3/project/search", {"maxResults": min(50, limit - len(found)), "startAt": len(found), "orderBy": "key"}) or {}
+            values = page.get("values") or []
+            found.extend(values[: limit - len(found)])
             if page.get("isLast", True) or not values:
                 break
         return found
