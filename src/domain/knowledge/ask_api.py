@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 from src.db import falkordb_client
 from src.db.falkordb_client import connect
-from src.domain.knowledge import agent, ask_service, catalogue
+from src.domain.knowledge import agent, ask_service, catalogue, kinds
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
 from src.domain.knowledge.proof import ProofReport, run_proof
 
@@ -202,9 +202,11 @@ class GraphNode:
     id: str
     name: str
     label: str
+    # A Service's kind (service, system, process, ...), as the reply words it; None for every other label.
+    kind: str | None = None
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "name": self.name, "label": self.label}
+        return {"id": self.id, "name": self.name, "label": self.label, "kind": self.kind}
 
 
 @dataclass(frozen=True)
@@ -334,7 +336,7 @@ def _answer(question: str, tool: str | None, use_model: bool, read_scopes: list[
 
 
 def shape(question: str, result: ToolResult, picked_by: str, scopes: list[str]) -> AskAnswer:
-    nodes, edges = graph_of(result.path)
+    nodes, edges = graph_of(result.path, service_kinds(result.path, scopes))
     return AskAnswer(
         question=question,
         tool=result.tool,
@@ -351,11 +353,30 @@ def shape(question: str, result: ToolResult, picked_by: str, scopes: list[str]) 
     )
 
 
-def graph_of(path: list[PathStep]) -> tuple[list[GraphNode], list[GraphEdge]]:
+def service_kinds(path: list[PathStep], scopes) -> dict[str, str]:
+    """The kind of each Service the path names by id, read the way the reply wording reads it.
+
+    No query runs when the path names no Service by id.
+    """
+    ids = sorted(
+        {node_id for step in path for node_id, label in ((step.from_id, step.from_label), (step.to_id, step.to_label)) if node_id and label == "Service"}
+    )
+    if not ids:
+        return {}
+    _, graph = connect()
+    rows = graph.ro_query(
+        "MATCH (s:Service) WHERE s.id IN $ids AND coalesce(s.scope, 'org_shared') IN $scopes RETURN s.id, s.kind",
+        {"ids": ids, "scopes": list(scopes)},
+    ).result_set
+    return {service_id: kinds.kind_or_default(kind) for service_id, kind in rows}
+
+
+def graph_of(path: list[PathStep], kinds_by_id: dict[str, str] | None = None) -> tuple[list[GraphNode], list[GraphEdge]]:
     """The nodes and edges of a path, each once, in order of first appearance.
 
     A step carries ids and labels when the tool knew them; a step without an id is keyed
-    by its name, so two steps that cite the same name share one node.
+    by its name, so two steps that cite the same name share one node. ``kinds_by_id``
+    maps a Service's id to its kind, so the drawing can say process or playbook.
     """
     nodes: dict[str, GraphNode] = {}
     edges: list[GraphEdge] = []
@@ -372,7 +393,9 @@ def graph_of(path: list[PathStep]) -> tuple[list[GraphNode], list[GraphEdge]]:
         edge = GraphEdge(node(step.from_id, step.from_name, step.from_label), step.rel, node(step.to_id, step.to_name, step.to_label))
         if edge not in edges:
             edges.append(edge)
-    return list(nodes.values()), edges
+    known = kinds_by_id or {}
+    drawn = [GraphNode(n.id, n.name, n.label, known.get(n.id)) if n.label == "Service" and n.id in known else n for n in nodes.values()]
+    return drawn, edges
 
 
 def _read_spec(name: str) -> ToolSpec:

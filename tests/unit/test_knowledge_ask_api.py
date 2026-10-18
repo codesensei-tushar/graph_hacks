@@ -51,21 +51,29 @@ class AskApiTest(unittest.TestCase):
         ask_api.ANSWERS.clear()
         for spec in self.SPECS:
             catalogue.register(spec)
+        # Shaping an answer reads each Service's kind from the graph; these tests have no graph.
+        kinds = mock.patch.object(ask_api, "service_kinds", return_value={})
+        kinds.start()
+        self.addCleanup(kinds.stop)
 
     def tearDown(self):
         for spec in self.SPECS:
             catalogue._TOOLS.pop(spec.name, None)
 
     def test_the_keyword_choice_runs_and_the_path_becomes_nodes_and_edges(self):
-        with mock.patch.object(agent, "choose_with_keywords", return_value=agent.ToolChoice("probe_read", {"name": "billing"}, "keywords")):
+        with (
+            mock.patch.object(agent, "choose_with_keywords", return_value=agent.ToolChoice("probe_read", {"name": "billing"}, "keywords")),
+            mock.patch.object(ask_api, "service_kinds", return_value={"billing-service": "service", "postgres": "system"}) as service_kinds,
+        ):
             answer = ask_api.answer_question("  who owns   billing ")
+        service_kinds.assert_called_once()
         self.assertEqual(answer.question, "who owns billing")
         self.assertEqual((answer.tool, answer.picked_by, answer.found, answer.depth), ("probe_read", "keywords", True, 2))
         self.assertEqual(answer.scopes, ["org_shared"])
         self.assertIn("['org_shared']", answer.answer)
         self.assertEqual(
             [node.to_dict() for node in answer.nodes],
-            [{"id": node_id, "name": name, "label": label} for node_id, name, label in (ARJUN, BILLING, POSTGRES)],
+            [{"id": node_id, "name": name, "label": label, "kind": kind} for (node_id, name, label), kind in ((ARJUN, None), (BILLING, "service"), (POSTGRES, "system"))],
         )
         self.assertEqual(
             [edge.to_dict() for edge in answer.edges],
@@ -149,3 +157,20 @@ class AskApiTest(unittest.TestCase):
             self.assertEqual(ask_api.answer_question("ticket:").notice, "")
             self.assertEqual(ask_api.answer_question("why did we decide to move billing").notice, "")
 
+
+class ServiceKindTest(unittest.TestCase):
+    """The drawing's kind for each Service, with no graph."""
+
+    def test_graph_of_gives_a_service_its_kind_and_no_other_node_one(self):
+        renewals = ("renewals", "Renewals", "Service")
+        steps = [_step(ARJUN, "OWNS", BILLING), _step(renewals, "DEPENDS_ON", ("hubspot", "HubSpot", "Service")), PathStep("Pricing", "DEPENDS_ON", "Renewals", to_id="renewals", to_label="Service")]
+        nodes, _ = ask_api.graph_of(steps, {"billing-service": "service", "renewals": "process", "arjun": "process"})
+        # The person keeps no kind even when the map names it; HubSpot is not in the map; Pricing has no id.
+        self.assertEqual({node.id: node.kind for node in nodes}, {"arjun": None, "billing-service": "service", "renewals": "process", "hubspot": None, "Pricing": None})
+        self.assertEqual(nodes[1].to_dict(), {"id": "billing-service", "name": "Billing Service", "label": "Service", "kind": "service"})
+        self.assertEqual([node.kind for node in ask_api.graph_of(steps)[0]], [None] * 5)
+
+    def test_no_kind_query_runs_when_the_path_names_no_service_by_id(self):
+        with mock.patch.object(ask_api, "connect") as connect:
+            self.assertEqual(ask_api.service_kinds([PathStep("Billing Service", "ABOUT", "TKT-102", to_label="Ticket")], ["org_shared"]), {})
+        connect.assert_not_called()
