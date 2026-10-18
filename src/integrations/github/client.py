@@ -10,6 +10,7 @@ A refusal is ``GitHubError``; when GitHub says to wait (a 429, or a 403 with
 ``X-RateLimit-Remaining: 0`` or ``Retry-After``), ``retry_after`` holds the seconds to wait.
 """
 
+import base64
 import calendar
 import json
 import logging
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 
 import jwt
 
+from src.core.config import settings
 from src.integrations.github import app_config
 
 log = logging.getLogger(__name__)
@@ -113,20 +115,41 @@ class GitHubClient:
     def _token(self) -> str:
         return _installation_token(self.installation_id)
 
+    def _call(self, url: str) -> tuple[object, dict]:
+        return _request("GET", url, self._token())
+
     def _get(self, path: str, params: dict | None = None) -> object:
         query = f"?{urllib.parse.urlencode(params)}" if params else ""
-        data, _ = _request("GET", f"{API}{path}{query}", self._token())
+        data, _ = self._call(f"{API}{path}{query}")
         return data
 
     def _get_all(self, path: str, params: dict | None = None, limit: int = 300, key: str | None = None) -> list[dict]:
         url: str | None = f"{API}{path}?{urllib.parse.urlencode({'per_page': 100, **(params or {})})}"
         items: list[dict] = []
         while url and len(items) < limit:
-            data, headers = _request("GET", url, self._token())
+            data, headers = self._call(url)
             page = (data or {}).get(key, []) if key else (data or [])
             items.extend(page)
             url = _next_link(headers)
         return items[:limit]
+
+    def _page(self, path: str, params: dict, page: int, per_page: int) -> tuple[list[dict], bool]:
+        """One page of a list, and whether GitHub has another after it."""
+        query = urllib.parse.urlencode({**params, "per_page": per_page, "page": page})
+        data, headers = self._call(f"{API}{path}?{query}")
+        return list(data or []), _next_link(headers) is not None
+
+    def get_repo(self, full_name: str) -> dict:
+        return self._get(f"/repos/{full_name}") or {}
+
+    def pull_requests_page(self, full_name: str, page: int, per_page: int, sort: str = "created") -> tuple[list[dict], bool]:
+        return self._page(f"/repos/{full_name}/pulls", {"state": "all", "sort": sort, "direction": "desc"}, page, per_page)
+
+    def issues_page(self, full_name: str, page: int, per_page: int, since: str | None = None) -> tuple[list[dict], bool]:
+        params = {"state": "all", "sort": "updated" if since else "created", "direction": "desc"}
+        if since:
+            params["since"] = since
+        return self._page(f"/repos/{full_name}/issues", params, page, per_page)
 
     def list_repositories(self) -> list[dict]:
         return self._get_all("/installation/repositories", key="repositories")
@@ -211,6 +234,92 @@ def forget_installation_token(installation_id: int) -> None:
 
 def client_for(installation_id: int) -> GitHubClient:
     return GitHubClient(installation_id)
+
+
+class PublicClient(GitHubClient):
+    """Reads a public repo without an installation of its own. GitHub answers public data to any
+    caller; what differs is the rate limit. Tried in order, each dropped for good on a 401:
+
+    1. ``GITHUB_PUBLIC_REPO_TOKEN``: a token of the operator's (a fine-grained token with public read
+       only is enough): 5,000 requests an hour.
+    2. An installation token of this app's installation on its owner's own account (installation
+       tokens read public repos too): 5,000 an hour. Never another company's installation, whose
+       rate limit is theirs.
+    3. The app's client id and secret as basic auth, which GitHub documents for OAuth apps
+       (5,000 an hour; https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
+    4. No authentication: 60 an hour. Slow, but the backfill waits out every limit, so it finishes.
+
+    Only GETs of public data go out this way; collaborators are never read (a public repo is
+    ``org_shared``, readable by everyone).
+    """
+
+    def __init__(self):
+        super().__init__(0)
+        self._dropped: set[str] = set()
+
+    def _candidates(self) -> list[tuple[str, str | None, str]]:
+        found: list[tuple[str, str | None, str]] = []
+        if settings.github_public_repo_token:
+            found.append(("token", settings.github_public_repo_token, "Bearer"))
+        creds = app_config.current()
+        if creds is not None and creds.private_key and "installation" not in self._dropped:
+            installation = _any_installation()
+            if installation is not None:
+                try:
+                    found.append(("installation", _installation_token(installation), "Bearer"))
+                except Exception as error:
+                    log.info("[github] no installation token for public reads: %s", type(error).__name__)
+        if creds is not None and creds.client_id and creds.client_secret:
+            basic = base64.b64encode(f"{creds.client_id}:{creds.client_secret}".encode()).decode()
+            found.append(("client", basic, "Basic"))
+        found.append(("anonymous", None, "Bearer"))
+        return [item for item in found if item[0] not in self._dropped]
+
+    def _call(self, url: str) -> tuple[object, dict]:
+        last: GitHubError | None = None
+        for name, token, scheme in self._candidates():
+            try:
+                return _request("GET", url, token, auth=scheme)
+            except GitHubError as error:
+                if error.status == 401 and name != "anonymous":
+                    log.warning("[github] public reads: %s credentials refused; trying the next", name)
+                    self._dropped.add(name)
+                    last = error
+                    continue
+                raise
+        raise last or GitHubError(401, "no way to read public data")
+
+    @property
+    def mode(self) -> str:
+        candidates = self._candidates()
+        return candidates[0][0] if candidates else "anonymous"
+
+
+_installation_cache: tuple[float, int | None] | None = None
+
+
+def _any_installation() -> int | None:
+    """The app's unsuspended installation on its owner's account, cached ten minutes; None without one."""
+    global _installation_cache
+    now = time.monotonic()
+    if _installation_cache is not None and now - _installation_cache[0] < 600:
+        return _installation_cache[1]
+    found = None
+    try:
+        creds = app_config.current()
+        owner = (creds.owner_id if creds else "") or str((get_app().get("owner") or {}).get("id") or "")
+        for installation in list_app_installations(limit=100):
+            if owner and str((installation.get("account") or {}).get("id")) == owner and not installation.get("suspended_at"):
+                found = int(installation["id"])
+                break
+    except Exception as error:
+        log.info("[github] installations unavailable for public reads: %s", type(error).__name__)
+    _installation_cache = (now, found)
+    return found
+
+
+def public_client() -> PublicClient:
+    return PublicClient()
 
 
 # --- user sign-in, only to confirm who someone is on GitHub --------------------------------

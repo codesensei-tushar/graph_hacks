@@ -55,8 +55,32 @@
         <div><button class="btn" type="submit" id="register-go">Register on GitHub</button></div>
       </form>
     </section>
+
+    <section class="block" id="public" aria-labelledby="public-title" hidden>
+      <h2 id="public-title">Public repos</h2>
+      <p class="sub">Read a public repo by its address, with no installation: its pull requests, reviews and issues go to everyone in the org (for the legacy org, the public ask page and MCP too). Polled every 10 minutes after the backfill.</p>
+      <form class="form" id="public-form">
+        <div class="form-row">
+          <label for="public-org">Org</label>
+          <input class="input mono" id="public-org" type="text" value="quillfern" autocomplete="off" spellcheck="false">
+          <p class="hint">An org id; quillfern is the legacy org.</p>
+        </div>
+        <div class="form-row">
+          <label for="public-url">Repo address</label>
+          <input class="input mono" id="public-url" type="text" placeholder="owner/repo or https://github.com/owner/repo" autocomplete="off" spellcheck="false" required>
+        </div>
+        <div class="form-row">
+          <label for="public-limit">Pull requests to read</label>
+          <input class="input mono" id="public-limit" type="number" min="0" max="10000" value="0">
+          <p class="hint">0 reads every pull request and issue.</p>
+        </div>
+        <div><button class="btn" type="submit" id="public-go">Add the repo</button> <button class="btn btn-ghost" type="button" id="public-refresh">Refresh</button></div>
+      </form>
+      <ul class="repo-list" id="public-list"></ul>
+    </section>
   </div>
 </main>
 <script src="/static/ops/github-app.js?v=1"></script>
+<script src="/static/ops/github-repos.js?v=1"></script>
 </body>
 </html>

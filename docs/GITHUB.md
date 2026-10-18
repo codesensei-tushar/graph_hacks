@@ -96,6 +96,31 @@ Uninstalling the app, or removing a repo from it, deletes that repo's nodes.
 
 Check deliveries under the app's **Advanced → Recent Deliveries**. A green tick means the app answered 200; the outcome is in the app log as `[github] event=... outcome=...`.
 
+## Public repos by name (no app, no installation)
+
+A public repo needs no GitHub App and no installation, because GitHub answers public data to anyone. The operator adds one to any org, the legacy org by default:
+
+```bash
+curl -X POST "https://YOUR-HOST/ops/github/public-repos" -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"repo": "codesensei-tushar/graph_hacks", "backfill": "all"}'
+curl "https://YOUR-HOST/ops/github/public-repos" -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN"     # progress
+```
+
+- `repo` is `owner/name` or its GitHub URL. `backfill` is `"all"` or a number of pull requests, newest first (default 50). Add `?org=<org id>` for an org other than the legacy one.
+- `POST /ops/github/public-repos/<repo id>/sync` (optionally `{"backfill": ...}`) reads it again from the start. Use it, for example, after the seed's `Service.paths` change, so `TOUCHES` is recomputed. `DELETE /ops/github/public-repos/<repo id>` stops reading it and deletes what it brought in, 500 nodes per job.
+- In the console, `/console/api/github/public-repos` makes the same calls on the session's org. Members can list; owners and admins can add, sync and remove.
+
+What lands in the graph is what the app path writes, through the same `ingest` functions:
+- pull requests with their author, reviews, requested reviewers, changed files (`TOUCHES` from `Service.paths`), `created_at`, `merged_at`, `closed_at` and the description summary
+- issues as tickets
+- `closes #N` and Jira key links
+
+All of it is `org_shared`, so everyone in the org reads it. For the legacy org that includes the public ask page and MCP. No collaborators are read and no webhooks arrive. After the backfill, the repo is polled every 10 minutes for issues and pull requests updated since the last poll. If the repo turns private, or its name now points at another repo, reading stops and the status says so. A private repo is refused, because GitHub answers 404 for it.
+
+**The backfill** reads one page per scheduler job: 100 issues, or 10 pull requests with their files and reviews. Each job is short, and a restart resumes where it stopped. Every write is an upsert, so a page read twice changes nothing. A rate limit (`Retry-After`, or `X-RateLimit-Remaining: 0` until `X-RateLimit-Reset`) puts the same page off until then, at most an hour. Any other failure backs off 1, 5, 15, then 60 minutes. Progress is on the `Repo` node (`bf_phase`, `bf_page`, `bf_pulls`, `bf_issues`, `bf_error`) and in the listing.
+
+**Rate limit.** Set `GITHUB_PUBLIC_REPO_TOKEN` (an optional secret; `deploy.sh` passes it through). A fine-grained personal access token with read access to public repositories is enough, and it gets 5,000 requests an hour. Without it, reads are unauthenticated: 60 an hour ([GitHub's limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)). That still finishes, because every limit is waited out, but a repo of 220 pull requests then takes about 8 hours (3 requests per pull request). If GitHub refuses the token, it is dropped and reads carry on unauthenticated.
+
 ## Heads-up on a new pull request
 
 With `COORDINATION_ALERTS=true`, a public repo's pull request that is opened, reopened or marked ready for review is ingested first, then `who_should_know` runs for it with the public read scope. Its author, its reviewers and anyone asked to review it (`requested_reviewers`, including CODEOWNERS) count as in the loop. If it flags anyone, the bot posts to each installed workspace's home channel: "Heads-up on <title> (<url>):", then the reply and its path.
@@ -110,10 +135,10 @@ A failure is logged as `[github] coordination alert failed` and never affects in
 ## Graph
 
 ```
-(:Repo {id, full_name, private, installation_id, scope})
+(:Repo {id, full_name, private, installation_id, source, scope, bf_*})   source: installation | public
 (:GitHubUser {id, login})-[:CAN_READ]->(:Repo)                    collaborators
 (:GitHubUser)-[:IS]->(:Person)                                     linked account
-(:GitHubUser)-[:AUTHORED]->(:PullRequest)-[:IN_REPO]->(:Repo)
+(:GitHubUser)-[:AUTHORED]->(:PullRequest {created_at, merged_at, closed_at, updated_at})-[:IN_REPO]->(:Repo)
 (:GitHubUser)-[:REVIEWED {state}]->(:PullRequest)
 (:PullRequest)-[:TOUCHES]->(:Service)                              changed files under Service.paths
 (:PullRequest)-[:CLOSES]->(:Ticket)                                "closes #12" in the description
@@ -147,7 +172,8 @@ A seeded `Person` with a `github` login (like `tushar` in `src/seed/company_brai
 | `src/api/v1/github.py` | `POST /github/webhook` (signature, dedupe on `X-GitHub-Delivery`, background work) and `GET /github/oauth/callback` |
 | `src/domain/github/webhooks.py` | What each event does |
 | `src/domain/github/ingest.py` | Pull requests, reviews, and issues into the graph |
-| `src/domain/github/backfill.py` | Install backfill and the hourly collaborator refresh |
+| `src/domain/github/backfill.py` | Install backfill, the stepped backfill (a page per job), the public-repo poll, batched removal, the hourly collaborator refresh |
+| `src/domain/github/public_repos.py`, `src/api/v1/github_repos.py` | Public repos by name (ops and console) |
 | `src/domain/github/repos.py` | Repo scopes and who may read them |
 | `src/domain/github/account_link.py` | `link github` |
 | `src/integrations/github/` | Signature check and the read-only REST client |
