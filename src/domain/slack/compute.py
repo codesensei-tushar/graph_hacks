@@ -19,12 +19,14 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from src.connectors.graph import container_names
 from src.domain.github.repos import repo_names
 from src.domain.access.roles import ROLE_OWNER, role_at_least, role_of, set_role
 from src.domain.knowledge import agent, catalogue
 from src.domain.memory import memory_service
 from src.domain.memory.search_brain import search_brain
 from src.domain.memory.writeback import (
+    ORG_INTERNAL_CONTAINER_TAG,
     SHARED_TEAM_BRAIN_CONTAINER_TAG,
     SlackMemoryScope,
     scope_label,
@@ -146,7 +148,7 @@ def _memory_row(row: dict) -> dict:
 
 def channel_names(tags: list[str]) -> dict[str, str]:
     ids = [tag.removeprefix("slack_channel_") for tag in tags if tag.startswith("slack_channel_")]
-    return {**channel_membership.channel_names(ids), **repo_names(tags)}
+    return {**channel_membership.channel_names(ids), **repo_names(tags), **container_names(tags)}
 
 
 # --- built-in commands -------------------------------------------------------------------
@@ -368,7 +370,7 @@ def _link_account(request: TurnRequest) -> str:
 
 def execute_approved_action(tool_name: str, tool_input: dict, container_tag: str) -> str:
     """Run an approved write through the tool catalogue. The write lands in ``container_tag``."""
-    read_tags = list(dict.fromkeys([SHARED_TEAM_BRAIN_CONTAINER_TAG, container_tag]))
+    read_tags = list(dict.fromkeys([SHARED_TEAM_BRAIN_CONTAINER_TAG, ORG_INTERNAL_CONTAINER_TAG, container_tag]))
     spec = catalogue.get_tool("ingest_ticket" if tool_name == TICKET_TOOL_NAME else tool_name)
     if spec is None or not spec.needs_approval:
         raise ValueError(f"unknown approved tool {tool_name}")

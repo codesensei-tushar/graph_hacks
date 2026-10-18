@@ -119,6 +119,14 @@ flowchart LR
     PullRequest -- CLOSES --> Ticket
     GitHubUser -- "OPENED / ASSIGNED" --> Ticket
   end
+  subgraph connectors[Connected tools: Jira, HubSpot; scope org_internal or a restricted project's]
+    ExternalUser -- IS --> Person
+    ExternalUser -- "OPENED / ASSIGNED" --> Ticket
+    ExternalUser -- CAN_READ --> Container
+    Ticket -- IN_CONTAINER --> Container
+    Ticket -- BLOCKS --> Ticket
+    PullRequest -- "REFERENCES / CLOSES" --> Ticket
+  end
   subgraph slack[Slack and memory, scope per room]
     SlackUser -- IS --> Person
     SlackUser -- MEMBER_OF --> Channel
@@ -132,7 +140,7 @@ flowchart LR
 
 One FalkorDB graph (`company`) holds everything: the seeded company, what Slack and GitHub add at runtime, every memory, and who may read what. Nodes carry `id` and `name`; the tool answers cite them. The Cypher that reads and writes each part is listed in the next section.
 
-**Scopes.** A node written from Slack or GitHub carries `scope`: `org_shared` (public channels, public repos), `slack_channel_<id>` (one private channel or group DM), `user_<slack id>` (one person's DMs with the bot), or `github_repo_<id>` (one private repo). Seeded nodes have no `scope` and count as `org_shared`. Every read filters `coalesce(n.scope, 'org_shared') IN $scopes`, where `$scopes` is the asker's read set.
+**Scopes.** A node written from Slack or GitHub carries `scope`: `org_shared` (public channels, public repos), `slack_channel_<id>` (one private channel or group DM), `user_<slack id>` (one person's DMs with the bot), or `github_repo_<id>` (one private repo). What a connected tool writes is `org_internal`: every Slack asker reads it, and the public ask page, the team pages and MCP, which read `org_shared` only, never do; a restricted project gets `connector_<hash>` instead, read only in its readers' DMs. Seeded nodes have no `scope` and count as `org_shared`. Every read filters `coalesce(n.scope, 'org_shared') IN $scopes`, where `$scopes` is the asker's read set, on every node it shows or walks through.
 
 **Company knowledge** (`src/seed/`, extended by Slack commands and GitHub webhooks):
 
@@ -172,11 +180,20 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 | `GitHubUser` | `id`, `login`, `name` | `-[:IS]->(Person)`, `-[:CAN_READ {user}]->(Repo)`, `-[:AUTHORED]->(PullRequest)`, `-[:REVIEWED {state}]->(PullRequest)`, `-[:REVIEW_REQUESTED]->(PullRequest)` (asked to review, until they do), `-[:OPENED\|ASSIGNED]->(Ticket)` |
 | `PullRequest` | `id`, `name`, `number`, `title`, `summary`, `state`, `merged`, `url`, `scope`, `updated_at` | `-[:IN_REPO]->(Repo)`, `-[:TOUCHES]->(Service)`, `-[:CLOSES]->(Ticket)` |
 
+**Connectors** (`src/connectors/`, see [docs/CONNECTORS.md](docs/CONNECTORS.md)). A connector returns records; `src/connectors/graph.py` is their only writer and MERGEs on ids of the form `<source>:<install>:<external id>`, so it never sets a property on a seeded, imported, Slack or GitHub node. A Jira issue is a `Ticket` and a CRM company a `Service` of kind `account`, each with `id`, `name` (the handle, `PAY-12`), `title`, `summary`, `url`, `state` (`open` or `closed`), `status` (the tool's own), `source`, `install`, `external_id`, `source_updated_at`, `synced_at` (ms) and `scope`. Name resolution matches them by handle, never by title.
+
+| Label | Properties | Edges out |
+| --- | --- | --- |
+| `Container` | `id`, `name`, `external_id`, `url`, `kind` (`project`, `portal`), `source`, `install`, `scope`, `restricted` | |
+| `ExternalUser` | `id`, `name`, `email`, `source`, `install`, `external_id`, `scope` | `-[:IS {via: 'email'}]->(Person)` when exactly one Person has the email, `-[:OPENED\|ASSIGNED]->(Ticket)`, `-[:OWNS\|WORKED_ON]->(Service)` while unlinked (linked, the edge comes from the Person), `-[:CAN_READ]->(Container)` |
+| `Ticket`, `Service` (from a connector) | as above | `-[:IN_CONTAINER]->(Container)`, `-[:ABOUT]->(Service)` (components and labels that name a service), `-[:BLOCKS]->(Ticket)` |
+| `ConnectorState` | `id` (a container's or the install's), `cursor`, `has_more`, `due_at`, `last_error`, `account`, scope `system` | |
+
 **Decisions stay current.** A decision recorded from Slack (`decision: <title>`, or the agent's `record_decision` tool, both behind an Approve card that names what the write will replace) gets `decided_at` and the room's `scope`, `SUPERSEDES` the standing decision it replaces, is `DECIDED_IN` the channel, and is `BASED_ON` the documents, tickets or pull requests it names. Nothing is deleted: asking about a superseded decision answers "*old* is no longer current" and then the current one, with both dates. Vector recall was left out on purpose for the hackathon; recall follows `MENTIONS` edges instead (see `related_memories` below).
 
 **Indexes** (`ensure_indexes` in `src/domain/memory/memory_service.py`): range indexes on `Memory.scope`, `Memory.id`, `Memory.custom_id`, `Tag.id`, `Tag.container`, `Scope.id`, `SlackUser.id`, `Channel.id`; a full-text index on `Memory.text`. `ensure_search_indexes` in `src/domain/knowledge/search.py` adds full-text indexes on `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)` and `Decision(name, summary)` for `search`.
 
-**Short-lived state** lives as Redis keys in the same FalkorDB instance, so the app talks to one process: the scheduler's sorted set `brain:schedule`, approvals `brain:approval:*`, running turns `brain:thread-turn:*`, bot threads `brain:bot-thread:*`, the per-channel event ring `brain:slack-event:*`, channel-observe batches `brain:observe:*`, and the dedupe keys `slack:evt:*` and `github:delivery:*`.
+**Short-lived state** lives as Redis keys in the same FalkorDB instance, so the app talks to one process: the scheduler's sorted set `brain:schedule`, approvals `brain:approval:*`, running turns `brain:thread-turn:*`, bot threads `brain:bot-thread:*`, the per-channel event ring `brain:slack-event:*`, channel-observe batches `brain:observe:*`, and the dedupe keys `slack:evt:*`, `github:delivery:*` and `connector:delivery:*`.
 
 ## Cypher queries the product depends on
 
@@ -248,7 +265,15 @@ MATCH (gh:GitHubUser)-[rel:AUTHORED|REVIEWED]->(pr:PullRequest)-[:TOUCHES]->(ser
 WHERE coalesce(pr.scope, 'org_shared') IN $scopes
 OPTIONAL MATCH (gh)-[:IS]->(person:Person)
 RETURN coalesce(person.name, '@' + gh.login), type(rel), pr.name, service.name
+
+// Accounts in other tools (GitHub, Jira, HubSpot) on the thing itself, as their linked person when there is one.
+MATCH (account)-[rel:OPENED|ASSIGNED|OWNS|WORKED_ON]->(node {id: $id})
+WHERE labels(account)[0] IN ['GitHubUser', 'ExternalUser'] AND coalesce(account.scope, 'org_shared') IN $scopes
+OPTIONAL MATCH (account)-[:IS]->(person:Person)
+RETURN coalesce(person.name, CASE WHEN labels(account)[0] = 'GitHubUser' THEN '@' + account.login ELSE account.name END), type(rel), node.name
 ```
+
+At most eight tickets about a service are listed, open ones first, then the most recently updated, and the rest are counted ("Open tickets: PAY-12, PAY-9 and 14 more."). Jira assignees of those tickets count as `ASSIGNED`.
 
 **decision_trace** (the decision that stands today, who made it, what it rests on, where it was decided, and what it replaced). The question's decision is resolved, then `SUPERSEDES` is followed forward to the current one; a stale decision answers "*old* (decided <date>) is no longer current." first. A decision recorded from Slack quotes its reason from the message it came from: "Decided in #engineering on 17 Oct 2026 by Arjun Mehta: “we're moving billing retries to the invoice worker, decided in today's sync”", with the `RECORDED_FROM` edge in the path. Seeded decisions have no message and keep the date and proposer lines.
 
@@ -301,7 +326,8 @@ MATCH (d:Decision {id: $d}), (m:Memory {id: $m}) MERGE (d)-[:RECORDED_FROM]->(m)
 
 ```cypher
 MATCH path = (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
-WHERE all(n IN nodes(path) WHERE NOT coalesce(n.kind, 'service') IN $excluded)
+WHERE all(n IN nodes(path) WHERE coalesce(n.scope, 'org_shared') IN $scopes)
+  AND all(n IN nodes(path) WHERE NOT coalesce(n.kind, 'service') IN $excluded)
 RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name],
        coalesce(dependent.kind, 'service')
 ORDER BY length(path), dependent.name
@@ -337,7 +363,7 @@ WHERE mine.id IN $owners AND theirs.id IN $anchor_people AND mine.id <> theirs.i
 RETURN 'Decision' AS label, mine.id AS mine, theirs.id AS theirs, work.id AS id, work.name AS name, type(m) AS mine_rel, type(t) AS their_rel
 ```
 
-**path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable; the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
+**path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable (when every shortest route runs through something the asker cannot read, a breadth-first search over readable nodes, one hop at a time and at most 500 nodes, finds the shortest route they can, or says how many hops it searched); the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
 
 ```cypher
 MATCH (a {id: $a}), (b {id: $b})
@@ -356,9 +382,12 @@ RETURN [i IN range(0, length(path) - 1) | [
 
 ```cypher
 CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score
+WITH node, score
+WHERE NOT coalesce(node.kind, 'service') IN $excluded AND coalesce(node.scope, 'org_shared') IN $scopes
 RETURN node.id, node.name, score ORDER BY score DESC, node.name LIMIT $limit
 
-MATCH (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
+MATCH path = (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
+WHERE all(n IN nodes(path) WHERE coalesce(n.scope, 'org_shared') IN $scopes)
 RETURN count(DISTINCT dependent)
 ```
 
@@ -605,7 +634,7 @@ MATCH (m:Memory {id: $id}) MERGE (u:SlackUser {id: $author}) MERGE (u)-[:SAID]->
 MATCH (m:Memory {id: $memory}), (n {id: $node}) MERGE (m)-[:MENTIONS]->(n)
 ```
 
-**Read set** (what a conversation may see). A public channel reads `org_shared`. A private channel adds its own scope. A DM adds the person's scope, every private channel they are a member of, and every private repo they can read:
+**Read set** (what a conversation may see). A public channel reads `org_shared` and `org_internal`. A private channel adds its own scope. A DM adds the person's scope, every private channel they are a member of, every private repo they can read, and every restricted connector project their linked account may read:
 
 ```cypher
 MATCH (:SlackUser {id: $user})-[:MEMBER_OF]->(c:Channel {is_private: true}) RETURN c.id
@@ -613,6 +642,10 @@ MATCH (:SlackUser {id: $user})-[:MEMBER_OF]->(c:Channel {is_private: true}) RETU
 MATCH (:SlackUser {id: $user})-[:IS]->(:Person)<-[:IS]-(:GitHubUser)-[:CAN_READ]->(r:Repo)
 WHERE r.scope STARTS WITH 'github_repo_'
 RETURN DISTINCT r.scope
+
+MATCH (:SlackUser {id: $user})-[:IS]->(:Person)<-[:IS]-(:ExternalUser)-[:CAN_READ]->(c:Container)
+WHERE c.restricted = true AND c.scope STARTS WITH 'connector_'
+RETURN DISTINCT c.scope
 ```
 
 **GitHub ingest** (webhooks and the install backfill). A pull request links to every service whose `paths` prefix covers a changed file; `closes #n` in the body becomes `CLOSES`; the collaborator list replaces the repo's `CAN_READ` edges on every sync:
@@ -668,7 +701,7 @@ curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" --data-binary @your-t
 
 Every read-only tool in the catalogue is also an MCP tool, served at `/mcp` over streamable HTTP (stateless, JSON responses). Same names, same descriptions, the same argument schemas, and the same result: the answer, the cited path, `found`, and the nearest `candidates` on a miss, as structured content. Tools that write the graph (`ingest_ticket`, `record_decision`, `onboard_team`) are not exposed; they need a human's Approve in Slack.
 
-MCP callers read the company-wide `org_shared` scope only. There is no Slack identity to widen it from, so private channels and private repos stay out of reach, under the same permission model the Slack agent uses.
+MCP callers read the company-wide `org_shared` scope only. There is no Slack identity to widen it from, so private channels, private repos and everything connected tools write (`org_internal`) stay out of reach, under the same permission model the Slack agent uses.
 
 `/mcp` is public, like the ask page. Each request is gated four ways:
 

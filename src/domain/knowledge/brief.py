@@ -43,6 +43,8 @@ def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
         parts.append("It runs " + "; ".join(_kind_phrase(group) for group in page.owns) + ".")
     else:
         parts.append(f"{page.name} runs nothing in the graph yet.")
+    if page.accounts_total:
+        parts.append(_member_accounts(page))
     if page.decisions:
         parts.append(_decisions(page.decisions[:MAX_DECISIONS], len(page.decisions), things, result))
     ask = _ask_first(graph, list(things.values()), scopes, result)
@@ -77,6 +79,15 @@ def _kind_phrase(group: team_page.KindGroup) -> str:
     if count > MAX_PER_KIND:
         named.append(f"{count - MAX_PER_KIND} more")
     return f"{count} {noun}: {join_names(named)}"
+
+
+def _member_accounts(page: team_page.TeamPage) -> str:
+    """"Its members also own 37 accounts: Acme Corp (owned by Dev Patel), ... and 33 more." The OWNS edges are in the page's path."""
+    total = page.accounts_total
+    named = [f"{account.name} (owned by {join_names(account.owners)})" for account in page.accounts[:MAX_PER_KIND]]
+    if total > len(named):
+        named.append(f"{total - len(named)} more")
+    return f"Its members also own {total} account{'s' if total != 1 else ''}: {join_names(named)}."
 
 
 def _decisions(shown: list[team_page.StandingDecision], total: int, things: dict, result: ToolResult) -> str:

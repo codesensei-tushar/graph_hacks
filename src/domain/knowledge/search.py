@@ -163,7 +163,7 @@ def _written(graph, label: str, query: str, scopes: list[str]) -> list[Hit]:
     for node_id, name, score in rows:
         hit = Hit(node_id, label, name, float(score))
         hit.about = _about(graph, label, node_id, scopes)
-        hit.people = _people(graph, label, node_id)
+        hit.people = _people(graph, label, node_id, scopes)
         if label == "Decision":
             hit.replaced_by = _replaced_by(graph, node_id, scopes)
         hits.append(hit)
@@ -225,23 +225,28 @@ def _about(graph, label: str, node_id: str, scopes: list[str]) -> list[tuple[str
     return [(service_id, service, rel) for service_id, service in rows]
 
 
-def _people(graph, label: str, node_id: str) -> list[tuple[str, str, str, str]]:
-    """People on a hit: who wrote, worked on, proposed or approved it, and GitHub people through IS."""
+def _people(graph, label: str, node_id: str, scopes: list[str]) -> list[tuple[str, str, str, str]]:
+    """People on a hit: who wrote, worked on, proposed or approved it, and the people behind accounts
+    in other tools (GitHub, Jira) through IS; an unlinked one under its own handle."""
+    # Imported here: ask_service reaches this module through the refusal fallback.
+    from src.domain.knowledge.ask_service import ACCOUNT_LABELS, account_name
+
     rows = graph.ro_query(
-        """
-        MATCH (person:Person)-[rel:AUTHORED|WORKED_ON|PROPOSED|APPROVED]->(hit {id: $id})
+        f"""
+        MATCH (person:Person)-[rel:AUTHORED|WORKED_ON|PROPOSED|APPROVED]->(hit {{id: $id}})
         WHERE $label IN labels(hit)
-        RETURN person.id AS id, person.name AS name, 'Person' AS label, type(rel) AS rel
+        RETURN person.id AS id, person.name AS name, 'Person' AS label, type(rel) AS rel, null AS source
         UNION
-        MATCH (gh:GitHubUser)-[rel:AUTHORED|REVIEWED|OPENED|ASSIGNED]->(hit {id: $id})
-        WHERE $label IN labels(hit)
-        OPTIONAL MATCH (gh)-[:IS]->(person:Person)
-        RETURN coalesce(person.id, gh.id) AS id, coalesce(person.name, '@' + gh.login) AS name,
-               CASE WHEN person IS NULL THEN 'GitHubUser' ELSE 'Person' END AS label, type(rel) AS rel
+        MATCH (account)-[rel:AUTHORED|REVIEWED|OPENED|ASSIGNED]->(hit {{id: $id}})
+        WHERE $label IN labels(hit) AND labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
+        OPTIONAL MATCH (account)-[:IS]->(person:Person)
+        RETURN coalesce(person.id, account.id) AS id,
+               coalesce(person.name, CASE WHEN labels(account)[0] = 'GitHubUser' THEN '@' + account.login ELSE account.name END) AS name,
+               CASE WHEN person IS NULL THEN labels(account)[0] ELSE 'Person' END AS label, type(rel) AS rel, account.source AS source
         """,
-        {"id": node_id, "label": label},
+        {"id": node_id, "label": label, "accounts": list(ACCOUNT_LABELS), "scopes": scopes},
     ).result_set
-    return sorted((who_id, who, who_label, rel) for who_id, who, who_label, rel in rows)
+    return sorted((who_id, account_name(who, who_label, source), who_label, rel) for who_id, who, who_label, rel, source in rows)
 
 
 def _replaced_by(graph, decision_id: str, scopes: list[str]) -> str | None:
@@ -268,10 +273,12 @@ def _answer(graph, topic: str, hits: list[Hit], scopes: list[str]) -> ToolResult
     said = [hit for hit in hits if hit.label == "Memory"]
     result.memories = [hit.memory for hit in said if hit.memory is not None]
 
-    asked: dict[str, _Asked] = {}
+    # People are told apart by label and id, never by name: an unlinked account named like a
+    # person the company knows is someone else.
+    asked: dict[tuple[str, str], _Asked] = {}
     for hit in hits:
         for who_id, who, who_label, rel in hit.people:
-            person = asked.setdefault(who, _Asked(who))
+            person = asked.setdefault((who_label, who_id or who), _Asked(who))
             person.score += WEIGHTS.get(rel, 1)
             what = "" if rel == "SAID" else hit.mention if hit.label != "Decision" else f"*{hit.name}*"
             objects = person.reasons.setdefault(_VERBS.get(rel, rel.lower()), [])

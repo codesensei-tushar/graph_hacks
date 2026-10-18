@@ -32,10 +32,13 @@ def encryption_available() -> bool:
     return _fernet() is not None
 
 
-def encrypt_token(token: str) -> str:
+def encrypt_token(token: str, allow_plaintext: bool = True) -> str:
+    """``allow_plaintext=False`` (connector credentials) raises instead of storing the token unencrypted."""
     global _warned
     fernet = _fernet()
     if fernet is None:
+        if not allow_plaintext:
+            raise RuntimeError("refusing to store a credential unencrypted: install `cryptography` and set TOKEN_ENCRYPTION_KEY")
         if not _warned:
             log.warning(
                 "[slack] storing bot tokens unencrypted: install `cryptography` and set TOKEN_ENCRYPTION_KEY"
@@ -45,8 +48,10 @@ def encrypt_token(token: str) -> str:
     return _FERNET_PREFIX + fernet.encrypt(token.encode()).decode()
 
 
-def decrypt_token(value: str) -> str:
+def decrypt_token(value: str, allow_plaintext: bool = True) -> str:
     if value.startswith(_PLAIN_PREFIX):
+        if not allow_plaintext:
+            raise ValueError("refusing a credential that was stored unencrypted")
         return value[len(_PLAIN_PREFIX) :]
     if value.startswith(_FERNET_PREFIX):
         fernet = _fernet()

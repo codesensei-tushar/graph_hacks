@@ -41,7 +41,7 @@ def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResul
                coalesce(a.name, a.id) AS author
         UNION
         MATCH (e {{id: $id}})-[r]-(n)
-        WHERE n:Service OR n:Document OR n:Ticket OR n:Decision
+        WHERE (n:Service OR n:Document OR n:Ticket OR n:Decision) AND {resolve.SCOPED.format(var="n")}
         MATCH (m:Memory)-[:MENTIONS]->(n)
         WHERE m.scope IN $scopes AND {LIVE} AND NOT (m)-[:MENTIONS]->(e)
         OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)

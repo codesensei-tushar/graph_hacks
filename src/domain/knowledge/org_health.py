@@ -292,6 +292,8 @@ class DecisionAudit:
     replaced_by: str | None = None
     conflicts_with: list[str] = field(default_factory=list)
     uncited: list[tuple[str, str, str, str, str]] = field(default_factory=list)
+    # How many uncited tickets and pull requests there are; ``uncited`` holds the first few.
+    uncited_total: int = 0
     flags: dict[str, bool] = field(default_factory=dict)
 
     @property
@@ -434,7 +436,7 @@ def _check(graph, standing: list[DecisionAudit], scopes: list[str]) -> None:
     for audit in standing:
         audit.conflicts_with = sorted({other.id for thing_id, _name in audit.about for other in by_thing[thing_id] if other.id != audit.id})
         if audit.about:
-            tickets, pull_requests = decisions.uncited_work(graph, audit.id, [thing_id for thing_id, _name in audit.about], scopes)
+            tickets, pull_requests, audit.uncited_total = decisions.uncited_work(graph, audit.id, [thing_id for thing_id, _name in audit.about], scopes)
             audit.uncited = [(*row, "Ticket") for row in tickets] + [(*row, "PullRequest") for row in pull_requests]
         audit.flags = {
             "no_evidence": not audit.sources,
@@ -459,7 +461,10 @@ def _attention(flagged: list[DecisionAudit]) -> str:
         if audit.flags["may_be_stale"]:
             names = [f"{name}" for _id, name, _sid, _service, _label in audit.uncited]
             things = join_names(list(dict.fromkeys(service for _id, _name, _sid, service, _label in audit.uncited)))
-            clauses.append(f"{join_names(names)} landed on {things} and {'it is' if len(names) == 1 else 'they are'} not cited")
+            many = audit.uncited_total > 1
+            if audit.uncited_total > len(names):
+                names.append(f"{audit.uncited_total - len(names)} more")
+            clauses.append(f"{join_names(names)} landed on {things} and {'they are' if many else 'it is'} not cited")
         if audit.flags["old"]:
             clauses.append(f"was decided {decisions.format_date(audit.decided_at)}, over {OLD_DAYS} days ago")
         if clauses:

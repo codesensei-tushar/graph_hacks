@@ -1,5 +1,7 @@
 import unittest
+from unittest import mock
 
+from src.connectors import registry
 from src.domain.slack.format import format_answer, format_scopes
 from src.integrations.slack.client import (
     APPROVAL_APPROVE_ACTION_ID,
@@ -47,6 +49,15 @@ class FormatTests(unittest.TestCase):
         self.assertIn("billing retries are flaky", text)
         self.assertIn("#pay", text)
         self.assertIn("Read from: public channels, #pay", text)
+
+    def test_connected_tools_are_named_only_while_a_connector_is_configured(self):
+        tags = ["org_shared", "org_internal", "slack_channel_G1"]
+        with mock.patch.object(registry, "installs", return_value=[]):
+            self.assertIn("Read from: public channels, #pay_", format_answer({"answer": "x", "path": []}, [], tags, {"G1": "pay"}))
+            self.assertNotIn("connected tools", format_scopes(tags, "org_shared", {"G1": "pay"}))
+        with mock.patch.object(registry, "installs", return_value=[(object(), object())]):
+            self.assertIn("Read from: public channels, connected tools, #pay_", format_answer({"answer": "x", "path": []}, [], tags, {"G1": "pay"}))
+            self.assertIn("• connected tools", format_scopes(tags, "org_shared", {"G1": "pay"}))
 
     def test_public_memory_cites_channel(self):
         memories = [{"text": "hello there all", "scope": "org_shared", "channel_id": "C9", "author": "Bo"}]

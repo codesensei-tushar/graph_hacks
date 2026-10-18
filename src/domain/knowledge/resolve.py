@@ -158,11 +158,14 @@ def same_word(a: str, b: str) -> bool:
 
 
 def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> list[EntityRow]:
+    # A synced item (Jira, HubSpot; it has ``external_id``) is matched by its handle only, never its
+    # title: hundreds of free-text titles would match every question and make every word "known".
     rows = graph.ro_query(
         f"""
         MATCH (n)
         WHERE labels(n)[0] IN $labels AND n.name IS NOT NULL AND {SCOPED.format(var="n")}
-        RETURN n.id, n.name, labels(n)[0], coalesce(n.aliases, ''), coalesce(n.title, ''), n.kind
+        RETURN n.id, n.name, labels(n)[0], coalesce(n.aliases, ''),
+               CASE WHEN n.external_id IS NULL THEN coalesce(n.title, '') ELSE '' END, n.kind
         """,
         {"labels": list(labels), "scopes": scopes},
     ).result_set
@@ -206,7 +209,11 @@ def best_match(text: str, labels: tuple[str, ...], scopes: list[str], graph=None
     """A lenient best guess by word overlap, for classifying ingested text. Not for answering questions."""
     if graph is None:
         _, graph = connect()
-    rows = load_rows(graph, labels, scopes)
+    return best_match_rows(text, load_rows(graph, labels, scopes), labels)
+
+
+def best_match_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...]) -> Entity | None:
+    """``best_match`` over rows already loaded, for callers that classify many texts against one load."""
     strict = resolve_rows(text, rows, labels)
     if strict.found:
         return strict.entity

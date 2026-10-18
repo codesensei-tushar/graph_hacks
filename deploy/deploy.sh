@@ -24,11 +24,24 @@ PLACEHOLDER=REPLACE_ME
 NGINX_GID=101
 # Written to .env only when the secret exists. See docs/DEPLOY.md.
 OPTIONAL_SECRETS="SLACK_OWNER_ID SLACK_ADMIN_IDS SLACK_CLIENT_ID SLACK_CLIENT_SECRET BRAIN_ADMIN_TOKEN MCP_TOKEN TOKEN_ENCRYPTION_KEY LLM_MODEL GITHUB_APP_ID GITHUB_WEBHOOK_SECRET GITHUB_PRIVATE_KEY GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET"
+# Connector settings (docs/CONNECTORS.md): every secret named CONNECTOR_<SOURCE>_<FIELD>. These
+# names are tried on every deploy; any other CONNECTOR_ secret is found too once the VM may list
+# secrets (roles/secretmanager.viewer). Like the optional ones, a missing secret is skipped.
+CONNECTOR_SECRETS="CONNECTOR_JIRA_BASE_URL CONNECTOR_JIRA_EMAIL CONNECTOR_JIRA_API_TOKEN CONNECTOR_JIRA_PROJECTS CONNECTOR_JIRA_PEOPLE CONNECTOR_JIRA_WEBHOOK_SECRET CONNECTOR_HUBSPOT_TOKEN CONNECTOR_HUBSPOT_PEOPLE CONNECTOR_HUBSPOT_API_VERSION CONNECTOR_HUBSPOT_CLIENT_SECRET"
 SELF=$(readlink -f "$0")
 
 log() { printf '[deploy] %s\n' "$*" >&2; }
 compose() { docker compose --project-directory "$BRAIN" "$@"; }
 secret() { gcloud secrets versions access latest --secret="$1" --project="$PROJECT" --quiet; }
+
+# The known connector names, plus every CONNECTOR_ secret the VM is allowed to list. Names only
+# ever match CONNECTOR_[A-Z0-9_]+, because each becomes a key in .env.
+connector_secrets() {
+  local listed
+  listed=$(gcloud secrets list --project="$PROJECT" --quiet --filter='name ~ /secrets/CONNECTOR_' --format='value(name.basename())' 2>/dev/null) || listed=
+  # shellcheck disable=SC2086  # word splitting is the point: two space- or newline-separated lists
+  printf '%s\n' $CONNECTOR_SECRETS $listed | grep -E '^CONNECTOR_[A-Z0-9_]+$' | sort -u || true
+}
 
 env_line() {
   case $2 in
@@ -90,7 +103,7 @@ write_env() {
     env_line LLM_API_KEY "$model"
     env_line MODEL_API_KEY "$model"
     # The VM can read secrets but not list them, so a missing one shows up as NOT_FOUND.
-    for name in $OPTIONAL_SECRETS; do
+    for name in $OPTIONAL_SECRETS $(connector_secrets); do
       if value=$(secret "$name" 2>"$err"); then
         env_line "$name" "$value"
       elif ! grep -q NOT_FOUND "$err"; then

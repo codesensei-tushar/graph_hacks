@@ -345,7 +345,8 @@ def _tickets(graph, scopes: list[str]) -> list[Change]:
         WHERE {SCOPED.format(var="t")}
         OPTIONAL MATCH (t)-[:ABOUT]->(s:Service)
         WHERE {SCOPED.format(var="s")}
-        RETURN t.id, t.name, coalesce(t.title, ''), coalesce(t.state, 'open'), t.updated_at, t.created_at, collect(DISTINCT [s.id, s.name])
+        RETURN t.id, t.name, coalesce(t.title, ''), coalesce(t.state, 'open'), coalesce(t.source_updated_at, t.updated_at), t.created_at,
+               collect(DISTINCT [s.id, s.name])
         """,
         {"scopes": scopes},
     ).result_set

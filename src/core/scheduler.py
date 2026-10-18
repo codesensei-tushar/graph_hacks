@@ -45,6 +45,11 @@ def exists(job_id: str) -> bool:
     return kv().zscore(_QUEUE, job_id) is not None
 
 
+def due_at(job_id: str) -> float | None:
+    """When the pending job runs (epoch seconds), or None."""
+    return kv().zscore(_QUEUE, job_id)
+
+
 def cancel(job_id: str) -> None:
     pipe = kv().pipeline()
     pipe.zrem(_QUEUE, job_id)

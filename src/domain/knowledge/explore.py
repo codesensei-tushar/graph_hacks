@@ -41,7 +41,7 @@ NEIGHBORS = "neighbors"
 EXPLORABLE = (*resolve.DEFAULT_LABELS, "PullRequest")
 # What a walk shows. Accounts (ACCOUNTS) are shown as the person they belong to.
 SHOWN = ("Service", "Person", "Team", "Document", "Ticket", "Decision", "PullRequest", "Chat", "Memory", "Repo", "Channel")
-ACCOUNTS = ("GitHubUser", "SlackUser")
+ACCOUNTS = ("GitHubUser", "SlackUser", "ExternalUser")
 # Edges about identity, access or filing, not about the work. Never shown.
 HIDDEN_RELS = ("IS", "CAN_READ", "IN_SCOPE", "HAS_TAG", "FILED_UNDER", "PARENT", "LINKS", "PART_OF")
 # The relationship types neighbors may follow. Checked here, then passed as $rel.
@@ -79,7 +79,7 @@ MATCH (n)-[r]-(a)
 WHERE n.id IN $ids AND labels(a)[0] IN $accounts AND {_WANTED} AND {_DIRECTED.format(var="n")} AND {SCOPED.format(var="a")}
 OPTIONAL MATCH (a)-[:IS]->(p:Person)
 RETURN n.id, type(r), startNode(r) = n, CASE WHEN p IS NULL THEN labels(a)[0] ELSE 'Person' END,
-       coalesce(p.id, a.id), coalesce(p.name, '@' + a.login, a.name, a.id), null
+       coalesce(p.id, a.id), coalesce(p.name, '@' + a.login, a.name, a.id), CASE WHEN p IS NULL THEN a.source END
 """
 # The node walked from is a person: what their accounts did is theirs.
 _OWN_ACCOUNTS = f"""
@@ -177,6 +177,9 @@ def links(graph, ids: list[str], scopes: list[str], rel: str | None = None, dire
     seen: set[Link] = set()
     for query in (_DIRECT, _THROUGH_ACCOUNT, _OWN_ACCOUNTS):
         for source, rel_type, outgoing, label, node_id, name, kind in graph.ro_query(query, params).result_set:
+            if label == "ExternalUser":
+                # An unlinked connector account: named with its tool, which the query returns in place of a kind.
+                name, kind = ask_service.account_name(name, label, kind), None
             link = Link(source, rel_type, bool(outgoing), label, node_id, name, kinds.kind_or_default(kind) if label == "Service" else None)
             if node_id and node_id != source and link not in seen:
                 seen.add(link)

@@ -6,7 +6,10 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import ops, web
-from src.api.v1 import github, health, proof, slack, slack_install
+from src.api.v1 import connectors, github, health, proof, slack, slack_install
+from src.connectors import graph as connector_graph
+from src.connectors import registry as connector_registry
+from src.connectors import sync as connector_sync  # registers the connector sync job
 from src.core import scheduler
 from src.core.config import settings
 from src.db.falkordb_client import connect
@@ -37,6 +40,7 @@ def _seed_if_empty() -> None:
             log.info("graph is empty; seeding %s (SEED_ON_STARTUP)", settings.seed_company)
             reset_and_seed(company_module(settings.seed_company))
     ensure_indexes()
+    connector_graph.ensure_indexes()
     # Never raises: a failure is logged and the tools that would search keep their refusal.
     ensure_search_indexes()
 
@@ -74,6 +78,9 @@ async def lifespan(_app: FastAPI):
     scheduler.start()
     if settings.github_enabled and not scheduler.exists(github_backfill.COLLABORATOR_REFRESH_JOB_ID):
         github_backfill.schedule_collaborator_refresh()
+    # Connectors with CONNECTOR_<SOURCE>_* set: configure each install and arm its sync.
+    connector_registry.load(settings.connector_env)
+    connector_sync.schedule_all()
     if settings.slack_enabled or settings.slack_oauth_enabled:
         threading.Thread(target=_recover, name="brain-recover", daemon=True).start()
     else:
@@ -88,6 +95,7 @@ app = FastAPI(title="Company Brain", lifespan=lifespan)
 app.include_router(slack.router)
 app.include_router(slack_install.router)
 app.include_router(github.router)
+app.include_router(connectors.router)
 app.include_router(health.router)
 app.include_router(proof.router)
 ops.install(app)
