@@ -248,7 +248,7 @@
       const fresh = hit && Date.now() - hit.at < CACHE_MS;
       const data = fresh ? hit.data : await getJson(`/api/ask?q=${encodeURIComponent(q)}`);
       if (!fresh) answered.set(q, { at: Date.now(), data });
-      render(data);
+      render(data, q);
     } catch (error) {
       out.replaceChildren();
       statusLine.textContent = error.message === TOO_MANY ? TOO_MANY : `No answer: ${error.message}`;
@@ -259,13 +259,36 @@
     }
   }
 
-  function render(data) {
+  // The same blast_radius question at one hop, two hops and every hop, so the deeper run shows
+  // what the first one left out. A hop phrase at the end is what the server reads as a depth
+  // (algorithms._HOPS): the buttons swap it, and "all" drops it, with any closing "?".
+  // NAMES_DEPTH mirrors algorithms.depth_in, so the pressed button is the depth asked for.
+  const HOP_PHRASE = /(?:,?\s*\b(?:\d+|one|two|three|four|five|six)\s+hops?(?:\s+out)?)?[\s.?!]*$/i;
+  const NAMES_DEPTH = /\b(?:(?:\d+|one|two|three|four|five|six)\s+hops?|depth\s+\d+|directly|direct dependents|immediate(?:ly)?|first hop)\b/i;
+  const DEPTHS = [["1 hop", ", one hop", 1], ["2 hops", ", two hops out", 2], ["all", "", null]];
+
+  function addDepthButtons(question, depth) {
+    const head = $(".path-head", out);
+    if (!head) return;
+    const base = question.replace(HOP_PHRASE, "");
+    const asked = NAMES_DEPTH.test(question) ? depth : null;
+    const group = el("div", { class: "depths", role: "group", "aria-label": "How many hops to follow" });
+    for (const [label, phrase, hops] of DEPTHS) {
+      const choice = el("button", { type: "button", "aria-pressed": String(hops === asked) }, label);
+      choice.addEventListener("click", () => askFromPage(`${base}${phrase}`));
+      group.append(choice);
+    }
+    head.insertBefore(group, $(".replay", head));
+  }
+
+  function render(data, question) {
     statusLine.textContent = "";
     out.replaceChildren();
     if (data.notice) out.append(el("p", { class: "notice" }, data.notice));
     out.append(el("p", { class: data.found ? "text" : "text refused" }, data.answer));
 
     BrainGraph.renderPath(out, data.nodes || [], data.edges || [], { tool: data.tool, depth: data.depth });
+    if (data.tool === "blast_radius" && data.found) addDepthButtons(question, data.depth);
 
     if (data.found && data.candidates && data.candidates.length) {
       out.append(el("p", { class: "note" }, `Also matched: ${data.candidates.join(", ")}. Ask again with that name to switch.`));
