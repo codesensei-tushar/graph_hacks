@@ -240,9 +240,22 @@ class WhoShouldKnowTest(unittest.TestCase):
 
     def test_an_issue_number_is_not_a_pull_request_number(self):
         self.assertEqual(_ask("who should know about #12").answer, "docs#12 touches no service in the graph, so nothing depends on what it changes.")
-        issue = _ask("who should know about issue #12")
-        self.assertFalse(issue.found)
-        self.assertNotIn("docs#12", issue.answer)
+        refused = "notebook#12 is a ticket, not a change. Name the pull request or service that changes, or ask who knows notebook#12."
+        for question in ("who should know about issue #12", "who should know about issue 12"):
+            with self.subTest(question=question):
+                issue = _ask(question)
+                self.assertFalse(issue.found)
+                self.assertEqual(issue.answer, refused)
+
+    def test_an_issue_named_with_its_repo_is_found_by_repo_as_a_pull_request_is(self):
+        refused = "notebook#12 is a ticket, not a change. Name the pull request or service that changes, or ask who knows notebook#12."
+        for question in ("who should know about notebook#12", "who should know about quillfern/notebook#12"):
+            with self.subTest(question=question):
+                self.assertEqual(_ask(question).answer, refused)
+        # Another owner's notebook is not quillfern's: the issue is only the nearest name.
+        wrong_owner = _ask("who should know about acme/notebook#12")
+        self.assertFalse(wrong_owner.found)
+        self.assertEqual(wrong_owner.answer, "Nothing in the graph matches “acme notebook 12”. Nearest: notebook#12.")
 
     def test_a_pull_request_title_never_hides_a_service(self):
         # docs#12345 is titled "Auth service".
