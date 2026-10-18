@@ -30,6 +30,33 @@
     return node;
   };
 
+  // --- What to ask about a node --------------------------------------------------------------
+  // One mapping, shared by the hero graph, the answer drawing and the "Ask next" chips, so every
+  // surface offers the same questions. Each one routes to its tool on its own words (the keyword
+  // router), and tests/integration/test_explore_questions.py asks every one on a fresh seed.
+  // {name} is the node's name; {lower} is the same with a lowercase first letter, for a decision's
+  // title after "why did we". A Service's kind can stand in for its label (an account has nothing
+  // to break or depend on); a node with no label is asked about as "who knows"; any other label
+  // (a pull request, a chat, a memory) offers nothing.
+  const QUESTIONS = {
+    Service: ["who knows {name}", "what breaks if {name} goes down", "what does {name} depend on"],
+    account: ["who knows {name}"],
+    Person: ["what if {name} leaves"],
+    Team: ["who is on the {name} team"],
+    Decision: ["why did we {lower}"],
+    Ticket: ["what is {name} about"],
+    Document: ["who knows {name}"],
+    "": ["who knows {name}"],
+  };
+  const own = (key) => (Object.prototype.hasOwnProperty.call(QUESTIONS, key) ? QUESTIONS[key] : null);
+
+  function questionsFor(node) {
+    const label = node.label || "";
+    const templates = (label === "Service" && node.kind && own(node.kind)) || own(label) || [];
+    const lower = /^[A-Z][a-z]/.test(node.name) ? node.name[0].toLowerCase() + node.name.slice(1) : node.name;
+    return templates.map((template) => template.replace("{name}", () => node.name).replace("{lower}", () => lower));
+  }
+
   function legend(nodes) {
     const seen = new Set(nodes.map((node) => familyOf(node.label)));
     const list = el("ul", { class: "legend" });
@@ -131,7 +158,7 @@
     return { starts, reached };
   }
 
-  function drawPath(nodes, edges) {
+  function drawPath(nodes, edges, onAsk) {
     const byId = new Map(nodes.map((node) => [node.id, node]));
     const { columns, column, row, ins, outs } = layout(nodes, edges);
     const { starts, reached } = walkTimes(edges);
@@ -222,12 +249,20 @@
     spreadLabels(labels);
 
     const nodeEls = new Map();
+    const asks = new Map();
     for (const node of nodes) {
       const b = box(node.id);
       const color = FAMILY_COLOR[familyOf(node.label)];
       // A Service says what it is (process, system, playbook); every other node names its label.
       const kind = node.label === "Service" && node.kind ? node.kind : node.label ? kindOf(node.label) : "";
-      const group = svgEl("g", { class: "node", transform: `translate(${b.x},${b.y})`, tabindex: "0", "aria-label": kind ? `${node.name}, ${kind}` : node.name });
+      const named = kind ? `${node.name}, ${kind}` : node.name;
+      const question = onAsk ? questionsFor(node)[0] : undefined;
+      const group = svgEl("g", {
+        class: question ? "node askable" : "node",
+        transform: `translate(${b.x},${b.y})`,
+        tabindex: "0",
+        "aria-label": question ? `${named}. Click to ask: ${question}` : named,
+      });
       const body = svgEl("g", { class: "body" });
       body.style.setProperty("--d", `${reached.get(node.id) || 0}ms`);
       body.append(svgEl("rect", { width: b.w, height: b.h, rx: 8, ry: 8, fill: `color-mix(in oklab, ${color} 16%, var(--surface))`, stroke: color }));
@@ -239,13 +274,18 @@
         kindText.textContent = kind;
         body.append(kindText);
       }
-      const tip = svgEl("title");
-      tip.textContent = kind ? `${node.name} (${kind})` : node.name;
-      group.append(body, tip);
+      group.append(body);
+      // A drawing that asks shows the page's own tooltip (renderPath), so it carries no native one.
+      if (!onAsk) {
+        const tip = svgEl("title");
+        tip.textContent = kind ? `${node.name} (${kind})` : node.name;
+        group.append(tip);
+      }
       nodeLayer.append(group);
       nodeEls.set(node.id, group);
+      asks.set(node.id, { name: node.name, kind, question });
     }
-    return { svg, edgeEls, nodeEls, starts };
+    return { svg, edgeEls, nodeEls, starts, asks, links: { ins, outs, column, y: (id) => box(id).y } };
   }
 
   // Labels that share a column gap are nudged apart vertically so none sits on another.
@@ -286,7 +326,8 @@
 
   // The heading, drawing, legend and the `A -[REL]-> B` lines. The walk runs once on arrival
   // and again from the Replay button; hovering or focusing a node, an edge or a line lights
-  // that part of the drawing and its lines together. ``meta`` names the tool and depth.
+  // that part of the drawing and its lines together. ``meta`` names the tool and depth, and
+  // ``meta.onAsk``, when given, makes every node with a question ask it (see askFromNodes).
   function renderPath(container, nodes, edges, meta = {}) {
     if (!edges.length) return;
     const head = el("div", { class: "path-head" });
@@ -302,7 +343,7 @@
     container.append(head);
 
     const canvas = el("div", { class: "canvas go" });
-    const { svg, edgeEls, nodeEls, starts } = drawPath(nodes, edges);
+    const { svg, edgeEls, nodeEls, starts, asks, links } = drawPath(nodes, edges, meta.onAsk);
     canvas.append(svg);
     // On a phone the drawing keeps a readable size and scrolls sideways: a fade at each edge with
     // more beyond it, and a "scroll →" cue until the reader starts scrolling, say so.
@@ -352,6 +393,9 @@
       }
     }
 
+    walkWithKeys(nodeEls, links);
+    if (meta.onAsk) askFromNodes(frame, canvas, nodeEls, asks, meta.onAsk);
+
     replay.addEventListener("click", () => {
       for (const part of [canvas, list]) part.classList.remove("go");
       void canvas.offsetWidth; // restart the CSS animations
@@ -359,5 +403,70 @@
     });
   }
 
-  window.BrainGraph = { el, svgEl, renderPath, familyOf, kindOf, FAMILY_COLOR, SCOPE_LABEL };
+  // The arrow keys walk the drawing from a focused node: Right along an edge to what it points at,
+  // Left back to what points at it, Up and Down to the node above or below in its column. Of
+  // several edges, the one to the node drawn nearest in height is taken. Focus moves; nothing is asked.
+  function walkWithKeys(nodeEls, { ins, outs, column, y }) {
+    const columns = new Map();
+    for (const id of nodeEls.keys()) {
+      if (!columns.has(column(id))) columns.set(column(id), []);
+      columns.get(column(id)).push(id);
+    }
+    for (const ids of columns.values()) ids.sort((a, b) => y(a) - y(b));
+    const nearest = (id, others) => others.filter((other) => nodeEls.has(other) && other !== id).sort((a, b) => Math.abs(y(a) - y(id)) - Math.abs(y(b) - y(id)))[0];
+    const MOVES = {
+      ArrowRight: (id) => nearest(id, outs.get(id)),
+      ArrowLeft: (id) => nearest(id, ins.get(id)),
+      ArrowDown: (id) => { const ids = columns.get(column(id)); return ids[ids.indexOf(id) + 1]; },
+      ArrowUp: (id) => { const ids = columns.get(column(id)); return ids[ids.indexOf(id) - 1]; },
+    };
+    for (const [id, group] of nodeEls) {
+      group.addEventListener("keydown", (event) => {
+        const move = MOVES[event.key];
+        const to = move && move(id);
+        if (!to) return;
+        event.preventDefault();
+        nodeEls.get(to).focus();
+      });
+    }
+  }
+
+  // A node with a question asks it on click, Enter or Space. Hovering or focusing any node shows
+  // the hero's tooltip over the drawing: its name, its kind and "Click to ask: ...". The team
+  // pages pass no onAsk, so their drawings stay passive with the native title.
+  function askFromNodes(frame, canvas, nodeEls, asks, onAsk) {
+    const tip = el("div", { class: "tip", "aria-hidden": "true" });
+    frame.append(tip);
+    const show = (id) => {
+      const { name, kind, question } = asks.get(id);
+      tip.replaceChildren(el("b", {}, name));
+      if (kind) tip.append(el("span", {}, kind));
+      if (question) tip.append(el("em", {}, `Click to ask: ${question}`));
+      tip.classList.add("show");
+      const box = frame.getBoundingClientRect();
+      const at = nodeEls.get(id).getBoundingClientRect();
+      const x = Math.max(8, Math.min(at.left - box.left + at.width / 2 - tip.offsetWidth / 2, box.width - tip.offsetWidth - 8));
+      const above = at.top - box.top - tip.offsetHeight - 8;
+      const y = above >= 0 ? above : at.bottom - box.top + 8;
+      tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    };
+    const hide = () => tip.classList.remove("show");
+    for (const [id, group] of nodeEls) {
+      group.addEventListener("mouseenter", () => show(id));
+      group.addEventListener("focus", () => show(id));
+      group.addEventListener("mouseleave", hide);
+      group.addEventListener("blur", hide);
+      const { question } = asks.get(id);
+      if (!question) continue;
+      group.addEventListener("click", () => onAsk(question));
+      group.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onAsk(question);
+      });
+    }
+    canvas.addEventListener("scroll", hide, { passive: true });
+  }
+
+  window.BrainGraph = { el, svgEl, renderPath, questionsFor, familyOf, kindOf, FAMILY_COLOR, SCOPE_LABEL };
 })();

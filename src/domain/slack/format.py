@@ -8,8 +8,9 @@ MAX_MEMORY_SNIPPET = 220
 
 HELP_TEXT = "\n".join(
     [
-        "*Ask me about the company.* Who owns something, why a decision was made, what breaks if a service goes down.",
+        "*Ask me about the company.* Who owns something, why a decision was made, what breaks if a service goes down, what changed lately, or who knows about a topic.",
         "",
+        "• In a thread, follow up with `and last month?`, `only decisions` or `what about platform?`; a question that names nothing is about what the thread is about",
         "• `remember: <note>` saves a note to this conversation's memory",
         "• `ticket: <title>` files a ticket in the company graph after you approve it",
         "• `decision: <what was decided>` records a decision, and what it replaces, after you approve it",

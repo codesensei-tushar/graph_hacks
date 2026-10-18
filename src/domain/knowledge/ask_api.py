@@ -14,7 +14,7 @@ than ``MAX_QUESTION_CHARS`` is refused with ``QuestionTooLong``; keyword answers
 proof report are kept for ``CACHE_TTL_SECONDS`` per graph, so a chip clicked twice walks the
 graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``.
 
-The page offers an example chip only when it answers with a path on the graph in use, so a chip whose
+The page offers an example chip only when it answers with a path or a dated memory on the graph in use, so a chip whose
 data the live graph lacks stays hidden until a seed refresh brings it back.
 """
 
@@ -51,6 +51,12 @@ EXAMPLES: dict[str, list[str]] = {
         "is the billing retries decision still the last word",
         "who should know if postgres changes",
         "what have we said about billing",
+        "what are our riskiest services",
+        "what should I read before touching the invoice worker",
+        "who knows about refunds",
+        "who is Arjun Mehta",
+        "what changed this week",
+        "which teams depend on platform",
         "who knows the payments gateway",
     ],
     "company-brain": [
@@ -87,7 +93,7 @@ DEMO: dict[str, list[dict[str, str]]] = {
         {"prompt": "who owns the linear integration", "expect": "Not in the graph. The answer says so and names the nearest matches. It never guesses."},
     ],
 }
-_QUESTION_KEYS = ("name", "topic", "query", "source")
+_QUESTION_KEYS = ("name", "topic", "query", "text", "source")
 
 # The Slack commands that write the graph. Typed here, they get the read that answers the
 # same need, and a notice that the write itself happens in Slack behind an Approve card.
@@ -253,6 +259,8 @@ class AskAnswer:
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
     # Set when the question was a Slack write command: where the write happens instead.
     notice: str = ""
+    # The table a ranking tool returns (risk_map); None for every other tool.
+    grid: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -269,6 +277,7 @@ class AskAnswer:
             "edges": [edge.to_dict() for edge in self.edges],
             "memories": [dict(memory) for memory in self.memories],
             "scopes": list(self.scopes),
+            "grid": self.grid,
         }
 
 
@@ -302,7 +311,7 @@ def examples() -> Examples:
     """The seeded company and the questions to offer for it. An unknown company gets the Quillfern set.
 
     Chips are offered only when they answer: every question but the last is asked here and
-    dropped unless it is ``found`` and walks a path, so a graph missing a chip's data never
+    dropped unless it is ``found`` and walks a path or cites a memory, so a graph missing a chip's data never
     offers it. The path matters for the memory tools, which find the thing named and still
     answer "no memory mentions it" on a graph with no memories. The last is the deliberate
     refusal and is always kept, unasked, as the last. Asking goes
@@ -317,10 +326,10 @@ def examples() -> Examples:
 
 
 def _answers(question: str) -> bool:
-    """Whether an example chip answers with a path on the graph in use. A chip that raises is dropped and logged."""
+    """Whether an example chip answers with a path or a memory on the graph in use. A chip that raises is dropped and logged."""
     try:
         answer = answer_question(question)
-        return answer.found and bool(answer.path)
+        return answer.found and bool(answer.path or answer.memories)
     except Exception as error:
         log.warning("[ask] example chip dropped (%s): %s", error, question)
         return False
@@ -378,6 +387,7 @@ def shape(question: str, result: ToolResult, picked_by: str, scopes: list[str]) 
         edges=edges,
         memories=[memory.to_dict() for memory in result.memories],
         scopes=list(scopes),
+        grid=result.grid,
     )
 
 

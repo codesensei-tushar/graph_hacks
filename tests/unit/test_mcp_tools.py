@@ -53,3 +53,61 @@ class McpToolListTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class McpInstructionsTest(unittest.TestCase):
+    def test_the_chain_runs_search_then_explore_then_what_to_ask(self):
+        text = mcp_tools.instructions()
+        for name in ("search", "explore", "who_knows", "reading_list", "what_changed"):
+            self.assertIn(name, mcp_tools.tool_names())
+        self.assertLess(text.index("start with search"), text.index("Pass a name you found to explore"))
+        self.assertLess(text.index("Pass a name you found to explore"), text.index("what_changed for what changed around it and upstream lately"))
+        self.assertIn("reading_list for what to read before changing it", text)
+
+    def test_a_tool_that_lands_later_joins_the_chain_and_one_that_is_gone_leaves_it(self):
+        from unittest import mock
+
+        with mock.patch.object(mcp_tools, "tool_names", return_value=["search", "explore", "who_knows"]):
+            text = mcp_tools.instructions()
+        self.assertIn("Pass a name you found to explore for its neighbourhood.", text)
+        self.assertIn("Then ask about that name: who_knows for who to ask.", text)
+        self.assertNotIn("what_changed", text)
+
+    def test_the_server_sends_them(self):
+        from src.api import mcp
+
+        self.assertEqual(mcp.INSTRUCTIONS, mcp_tools.instructions())
+
+
+class McpNextCallsTest(unittest.TestCase):
+    def _found(self, *steps: PathStep) -> ToolResult:
+        result = ToolResult(tool="search", answer="found")
+        result.extend(steps)
+        return result
+
+    def test_the_services_a_search_hit_is_about_come_back_as_calls_to_make_next(self):
+        result = self._found(
+            PathStep("Arjun Mehta", "AUTHORED", "Billing runbook", "arjun", "doc-billing-runbook", "Person", "Document"),
+            PathStep("Billing runbook", "DESCRIBES", "Billing Service", "doc-billing-runbook", "billing-service", "Document", "Service"),
+            PathStep("TKT-102", "ABOUT", "Billing Service", "TKT-102", "billing-service", "Ticket", "Service"),
+            PathStep("Invoice format spec", "DESCRIBES", "Invoice Worker", "doc-invoice-format", "invoice-worker", "Document", "Service"),
+        )
+        from unittest import mock
+
+        with mock.patch.object(mcp_tools, "tool_names", return_value=["search", "explore", "what_changed", "reading_list", "who_knows"]):
+            calls = mcp_tools.next_calls("search", result)
+        self.assertEqual(
+            [(call["tool"], call["arguments"]) for call in calls[:4]],
+            [("explore", {"name": "Billing Service"}), ("what_changed", {"name": "Billing Service"}), ("reading_list", {"name": "Billing Service"}), ("who_knows", {"name": "Billing Service"})],
+        )
+        self.assertEqual(calls[4]["arguments"], {"name": "Invoice Worker"})
+        self.assertEqual(calls[1]["why"], "what changed around it lately (Billing Service)")
+
+    def test_no_calls_after_a_refusal_or_for_a_tool_that_is_not_listed(self):
+        refused = ToolResult(tool="search", answer="nothing", found=False)
+        self.assertEqual(mcp_tools.next_calls("search", refused), [])
+        from unittest import mock
+
+        result = self._found(PathStep("Billing runbook", "DESCRIBES", "Billing Service", "d", "billing-service", "Document", "Service"))
+        with mock.patch.object(mcp_tools, "tool_names", return_value=["search", "who_knows"]):
+            self.assertEqual([call["tool"] for call in mcp_tools.next_calls("search", result)], ["who_knows"])

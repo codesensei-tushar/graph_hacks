@@ -105,9 +105,11 @@
     const columns = [...(grid.columns || [])].sort((a, b) => (a.type === "score") - (b.type === "score"));
     const rows = grid.rows || [];
     if (!rows.length) return;
+    // A grid can name itself ("What Arjun Mehta holds" from person_profile); the risk map does not.
+    const caption = grid.title || CAPTION;
 
     const table = el("table", { class: "riskmap" });
-    table.append(el("caption", { class: "sr" }, CAPTION));
+    table.append(el("caption", { class: "sr" }, caption));
     const head = el("tr");
     head.append(el("th", { scope: "col", class: "thing" }, "Thing"));
     for (const column of columns) {
@@ -134,9 +136,9 @@
 
     // The caption is read with the table; its visible copy is a heading like the path's, above the
     // scroller, so it stays in view while the grid scrolls.
-    const heading = el("h3", { class: "riskmap-head", "aria-hidden": "true" }, `${CAPTION} `);
+    const heading = el("h3", { class: "riskmap-head", "aria-hidden": "true" }, `${caption} `);
     const info = el("span", { class: "meta" });
-    info.append("(", el("code", {}, "risk_map"), `, ${plural(rows.length, "thing", "things")})`);
+    info.append("(", el("code", {}, grid.kind || "risk_map"), `, ${plural(rows.length, "thing", "things")})`);
     heading.append(info);
     const scroller = el("div", { class: "riskmap-scroll", tabindex: "0", role: "region", "aria-label": "Risk map, scrolls sideways" });
     scroller.append(table);

@@ -37,10 +37,8 @@ log = logging.getLogger(__name__)
 
 MOUNT_PATH = "/mcp"
 SERVER_NAME = "company-brain"
-INSTRUCTIONS = (
-    "Read-only tools over one company's knowledge graph. Every answer cites the edges it walked. "
-    "Callers read the company-wide scope; nothing here writes the graph."
-)
+# Built from the catalogue, so the chain it describes names only tools the server lists.
+INSTRUCTIONS = mcp_tools.instructions()
 
 
 # --- the MCP server ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ import uuid
 from collections import defaultdict
 
 from src.db.falkordb_client import client, connect, graph_reads_disabled
-from src.domain.knowledge import kinds, resolve
+from src.domain.knowledge import fallback, kinds, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import Entity, join_names
 
@@ -113,7 +113,8 @@ def blast_radius(question: str, scopes: list[str], depth=None, direction=None) -
     _, graph = connect()
     resolution = resolve.resolve_name(question, ("Service",), scopes, graph=graph)
     if not resolution.found:
-        return ToolResult(tool="blast_radius", answer=resolve.describe_miss(resolution, "service"), found=False, candidates=resolution.candidate_names())
+        miss = ToolResult(tool="blast_radius", answer=resolve.describe_miss(resolution, "service"), found=False, candidates=resolution.candidate_names())
+        return fallback.before_refusing(question, scopes, miss)
     target = resolution.entity
     wanted = clamp_depth(depth)
     subject = kinds.subject(target.name, target.kind)
@@ -447,6 +448,14 @@ def _readable_shortest_paths(graph, start: Entity, end: Entity, rels: list[str],
 
 
 # --- PageRank ------------------------------------------------------------------------------
+
+
+def pagerank_by_id(graph) -> dict[str, float]:
+    """Every Service's PageRank over DEPENDS_ON, by id: the same call ``load_bearing`` ranks by,
+    over the same unfiltered nodes, so the scores agree. FalkorDB's scores shift with everything
+    else in the graph, so compare them within one graph, never across seeds."""
+    rows = graph.ro_query("CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score RETURN node.id, score").result_set
+    return {service_id: score for service_id, score in rows}
 
 
 def load_bearing(limit=DEFAULT_LOAD_BEARING, scopes: list[str] | None = None) -> ToolResult:

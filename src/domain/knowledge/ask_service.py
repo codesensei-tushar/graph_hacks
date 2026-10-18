@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, coordination, kinds, memories, resolve
+from src.domain.knowledge import algorithms, bridges, coordination, fallback, find, kinds, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -66,11 +66,45 @@ _RECALL = re.compile(r"\b(?:remember|recall|what did .+ say|who said|said|discus
 _BLAST = re.compile(
     r"\b(?:breaks?|goes down|outage|depends?|dependents?|rel(?:y|ies) on|blast|stops? if|stalls?|is down|happens if|affected if)\b", re.IGNORECASE
 )
-_DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
+# "who approved moving the memory layer" asks for the decision and its people, not who knows the layer.
+_DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b|\bwho (?:approved|proposed|signed off on|decided)\b", re.IGNORECASE)
 _PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|still valid|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
 _GROUPS = re.compile(
     r"\b(?:working groups?|de facto teams?|who (?:actually )?works together|work clusters?"
     r"|who works with (?:who|whom)|(?:people|who) (?:actually )?work together|collaborates? with (?:who|whom)|who collaborates)\b",
+    re.IGNORECASE,
+)
+# Risk across the company, not one person or one service: "what are our riskiest services",
+# "bus factor across the company", "what is undocumented". Before _LEAVES, which also matches
+# "bus factor"; "the bus factor on arjun" names a person and stays there.
+_RISK = re.compile(
+    r"\brisk ?map\b|\briskiest\b|\b(?:biggest|worst|highest) (?:risks?|bus[- ]factor(?: risks?)?)\b"
+    r"|\bbus[- ]factor (?:risks?|map|heat ?map|across|overall|company[- ]wide)\b|\bknowledge gaps?\b|\bundocumented\b"
+    r"|\b(?:no|missing|without) (?:a )?(?:runbooks?|docs?|documentation)\b|\bone person (?:away )?from an outage\b",
+    re.IGNORECASE,
+)
+# Teams depending on teams, not one service's dependents: "which teams depend on platform",
+# "what does payments need from other teams", "cross-team dependencies". Before blast radius,
+# which shares "depend on"; "what does the invoice worker depend on" names no team and stays there.
+_TEAM_DEPS = re.compile(
+    r"\bwhich teams? (?:depends?|rel(?:y|ies)) on\b|\bwho depends on (?:the )?\w+ team\b"
+    r"|\bwhat does (?:the )?\w+(?: team)? (?:need|use|depend on|rely on) from (?:other|another) teams?\b"
+    r"|\bwhat (?:do|does) (?:the )?\w+ team (?:depend|rely) on\b|\b(?:cross[- ]team|team[- ]level|inter[- ]team) dependenc(?:y|ies)\b"
+    r"|\bdependenc(?:y|ies) between teams\b|\bteams? dependenc(?:y|ies)\b",
+    re.IGNORECASE,
+)
+# The team is the subject: what it needs from others, rather than who needs it.
+_TEAM_NEEDS = re.compile(
+    r"\bwhat does (?:the )?\w+(?: team)? (?:need|use|depend on|rely on) from (?:other|another) teams?\b"
+    r"|\bwhat (?:do|does) (?:the )?\w+ team (?:depend|rely) on\b",
+    re.IGNORECASE,
+)
+# Every standing decision audited, not one decision traced: "which decisions are stale", "are any
+# decisions in conflict". "is the billing retries decision still the last word" stays decision_pressure.
+_DECISION_HEALTH = re.compile(
+    r"\b(?:stale|conflicting|contradictory|contradicting|outdated|orphaned|unsupported) decisions?\b"
+    r"|\bdecisions? (?:that )?(?:conflict|contradict|clash|are stale|are outdated|lack evidence|need(?:s)? (?:attention|review))\b"
+    r"|\bdecision health\b|\b(?:any|which) decisions (?:in conflict|conflict|are stale|are outdated|need)\b|\bhealth of (?:our )?decisions\b",
     re.IGNORECASE,
 )
 # A person leaving, not a service failing. "who is the only one who knows billing" names a
@@ -89,7 +123,8 @@ _BRIEF = re.compile(
     r"\b(?:just joined|i(?:'m| am) new (?:to|on)|new (?:to|on) the|brief me|onboard me|onboarding brief|up to speed)\b"
     r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b"
     r"|\bwhat (?:does|do) (?:the )?\w+(?: \w+)? team (?:own|run|do|work on|handle)\b|\bwhat (?:does|do) (?:the )?\w+ own\b"
-    r"|\bwho(?:'s| is| are)? (?:on|in) (?:the )?\w+(?: \w+)? team\b|\bmembers of (?:the )?\w+(?: \w+)? team\b",
+    r"|\bwho(?:'s| is| are)? (?:on|in) (?:the )?\w+(?: \w+)? team\b|\bmembers of (?:the )?\w+(?: \w+)? team\b"
+    r"|\b(?:summari[sz]e|overview of|tell me about|describe) (?:the )?\w+(?: \w+)? team\b",
     re.IGNORECASE,
 )
 # A change and the people it should reach: "who should know about notebook#45", "who else should
@@ -109,6 +144,50 @@ _TKT_ID = re.compile(r"^TKT-(\d+)$")
 _ASK_WHO = re.compile(r"\bwho should (?:i|we) (?:ping|ask|talk to)\b", re.IGNORECASE)
 # People between teams. "how is maya connected to the invoice worker" is a path question.
 _CONNECTORS = re.compile(r"\bwho (?:connects|bridges|links)\b|\b(?:bridges?|connectors?|go-betweens?) between\b", re.IGNORECASE)
+# Words to look for, not a thing to resolve: "search for webhooks", "look up refunds", "anything about
+# PDF layout", "mentions of TKT-102". "search-service" and "search brain" name things and stay where they were.
+_SEARCH = re.compile(
+    r"^\s*(?:search(?: the graph| everything)? for|look ?up)\b|\banything (?:about|on|mentioning)\b|\bmentions? of\b",
+    re.IGNORECASE,
+)
+# What changed lately, around a thing, a team or the company. A time word is what makes "what
+# happened" or "decided" a question about change; "what is new hire onboarding" names a process.
+_WHEN = r"(?:recently|lately|today|yesterday|this (?:week|month)|last (?:week|month)|past (?:week|month))"
+_CHANGED = re.compile(
+    r"\bwhat(?:'s| has)? changed\b|\bwhat'?s new\b(?! hire)|\bwhat is new\b(?= in\b| on\b| for\b| with\b| this\b| since\b|\s*\??$)"
+    r"|\brecent changes?\b|\bchangelog\b|\bcatch me up\b|\bwhat did i miss\b"
+    rf"|\bwhat happened\b.*\b{_WHEN}\b|\b(?:decided?|decisions?)\b.*\b{_WHEN}\b"
+    r"|\b(?:failing|broken|erroring|flaky)\b.*\bchanged?\b",
+    re.IGNORECASE,
+)
+# Everything around one thing: "explore billing", "what do we know about the sales team", "everything
+# on TKT-102". After the routes that name a question shape (risk, leaving, briefs, paths, reading
+# lists, search), before decisions: "explore the billing retries decision" wants the decision's
+# neighbourhood, not its trace. Public: explore strips it from the question before resolving the name.
+EXPLORE = re.compile(
+    r"\bexplore\b|\bwhat do (?:we|you) know about\b|\beverything (?:we know )?(?:about|on)\b|\bneighbou?rhood of\b|\bwhat(?:'s| is) around\b",
+    re.IGNORECASE,
+)
+# A list by filter: "which tickets are open", "list the services in payments", "what decisions have we
+# made". Before decisions, which shares "decisions"; "what decisions have we made about billing" names
+# one thing and stays on decision_trace, as does any "list ... about X".
+_FIND = re.compile(
+    r"^\s*(?:what|which) decisions (?:have|did) we (?:made|make)\s*\??\s*$"
+    r"|\b(?:list|show)(?: me)? (?:all |the |our )?(?:open |closed |merged |standing )?"
+    r"(?:decisions|tickets|issues|pull requests|prs|services|systems|processes|playbooks|documents|docs|people|teams)\b(?!.*\babout\b)"
+    r"|^\s*(?:what|which) (?:are|is) (?:the |our )?open (?:tickets|issues|pull requests|prs)\b"
+    r"|^\s*which (?:tickets|issues|pull requests|prs) are open\b",
+    re.IGNORECASE,
+)
+# What to read before a change. "what should I know about billing" stays on who_knows. Public:
+# reading_list strips it from the question before resolving the name.
+READING_LIST = re.compile(
+    r"\b(?:what|which) (?:should|do|must) (?:i|we|you|a new \w+) read\b|\breading list\b|\bread up on\b"
+    r"|\b(?:what|which) (?:docs?|documents?|documentation|runbooks?) (?:cover|covers|describe|describes|explain|explains|exist|are there)\b"
+    r"|\b(?:what|which) (?:docs?|documents?|documentation|runbooks?) (?:should|do|must) (?:i|we|you|a new \w+) read\b"
+    r"|\b(?:docs?|documentation|context) (?:to read )?before (?:i |we )?(?:touch|touching|edit|editing|change|changing|work on|working on)\b",
+    re.IGNORECASE,
+)
 
 
 def route(question: str) -> tuple[str, dict]:
@@ -118,6 +197,17 @@ def route(question: str) -> tuple[str, dict]:
         return "none", {}
     if _GROUPS.search(text):
         return "working_groups", {}
+    if _RISK.search(text):
+        return "risk_map", {}
+    if _TEAM_DEPS.search(text):
+        return "team_dependencies", {"name": text, "direction": "dependencies" if _TEAM_NEEDS.search(text) else "dependents"}
+    if _DECISION_HEALTH.search(text):
+        return "decision_health", {"name": text}
+    if _CHANGED.search(text):
+        from src.domain.knowledge.what_changed import only_in
+
+        only = only_in(text)
+        return "what_changed", {"name": text, **({"only": only} if only else {})}
     if _LEAVES.search(text):
         # Before blast radius: "what breaks if Arjun leaves" is about a person.
         return "if_person_leaves", {"name": text}
@@ -131,6 +221,19 @@ def route(question: str) -> tuple[str, dict]:
         return "connectors", {"source": text, "target": ""}
     if _PATH.search(text):
         return "path_between", {"source": text, "target": ""}
+    if READING_LIST.search(text):
+        return "reading_list", {"name": text}
+    if _SEARCH.search(text):
+        # Before decisions and memories: "search for decisions about refunds" wants every hit, not one decision.
+        return "search", {"text": text}
+    if _FIND.search(text):
+        return "find", find.parse(text) or {"label": "Decision"}
+    if EXPLORE.search(text):
+        args = {"name": text}
+        depth = algorithms.depth_in(text)
+        if depth is not None:
+            args["depth"] = min(depth, 2)
+        return "explore", args
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
@@ -182,8 +285,8 @@ def ingest_ticket(title: str, about: str, scope: str) -> TicketCreated:
     target = ticket_target(title, about, graph=graph)
     ticket_id = _next_ticket_id(graph)
     graph.query(
-        "CREATE (ticket:Ticket {id: $id, name: $id, title: $title, summary: $title, scope: $scope})",
-        {"id": ticket_id, "title": title, "scope": scope},
+        "CREATE (ticket:Ticket {id: $id, name: $id, title: $title, summary: $title, scope: $scope, created_at: $now})",
+        {"id": ticket_id, "title": title, "scope": scope, "now": _now_millis()},
     )
     if target is None:
         return TicketCreated(id=ticket_id, about_name=None)
@@ -199,7 +302,7 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found:
-        return _miss("who_owns", resolution)
+        return fallback.before_refusing(question, scopes, _miss("who_owns", resolution))
     target = resolution.entity
 
     result = ToolResult(tool="who_owns", answer="", candidates=resolution.candidate_names())
@@ -282,7 +385,8 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found:
-        return _miss("who_knows", resolution)
+        # "who knows about refunds" names a topic, not a thing: the graph may still answer.
+        return fallback.before_refusing(question, scopes, _miss("who_knows", resolution))
     result = knowers(graph, resolution.entity, scopes)
     result.candidates = resolution.candidate_names()
     return result
@@ -524,11 +628,60 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
     return bus_factor.if_person_leaves(question, scopes)
 
 
+def risk_map(scopes: list[str]) -> ToolResult:
+    """Lives in ``risk_map.py``, which ranks people with ``knowers`` here. Kept here for the keyword router."""
+    from src.domain.knowledge import risk_map as risk
+
+    return risk.risk_map(scopes)
+
+
+def team_dependencies(name: str | None, scopes: list[str], direction: str | None = None) -> ToolResult:
+    """Lives in ``org_health.py``, which audits decisions too. Kept here for the keyword router."""
+    from src.domain.knowledge import org_health
+
+    return org_health.team_dependencies(name, scopes, direction)
+
+
+def decision_health(name: str | None, scopes: list[str]) -> ToolResult:
+    """Lives in ``org_health.py``, which reads decisions (and so the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import org_health
+
+    return org_health.decision_health(name, scopes)
+
+
+def person_profile(question: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``person_profile.py``, which reads decisions and the bus factor. Kept here for the keyword router."""
+    from src.domain.knowledge import person_profile as profile
+
+    return profile.person_profile(question, scopes)
+
+
 def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
     """Lives in ``brief.py``, which reads the team page (and so the ask API). Kept here for the keyword router."""
     from src.domain.knowledge import brief
 
     return brief.onboarding_brief(question, scopes)
+
+
+def _now_millis() -> int:
+    """The decisions clock, so a filed ticket is dated the way a recorded decision is."""
+    from src.domain.knowledge.decisions import now_millis
+
+    return now_millis()
+
+
+def what_changed(question: str, scopes: list[str], days=None, only=None, person=None) -> ToolResult:
+    """Lives in ``what_changed.py``, which follows decisions forward (and so imports the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import what_changed as changed
+
+    return changed.what_changed(question, scopes, days, only, person)
+
+
+def reading_list(question: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``reading_list.py``, which follows decisions forward (and so imports the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import reading_list as reading
+
+    return reading.reading_list(question, scopes)
 
 
 def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
@@ -545,8 +698,14 @@ _ROUTED = {
     "decision_trace": lambda args, scopes: decision_trace(args["topic"], scopes),
     "decision_pressure": lambda args, scopes: decision_pressure(args["topic"], scopes),
     "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
+    "risk_map": lambda args, scopes: risk_map(scopes),
+    "person_profile": lambda args, scopes: person_profile(args["name"], scopes),
+    "team_dependencies": lambda args, scopes: team_dependencies(args.get("name"), scopes, args.get("direction")),
+    "decision_health": lambda args, scopes: decision_health(args.get("name"), scopes),
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
+    "reading_list": lambda args, scopes: reading_list(args["name"], scopes),
+    "what_changed": lambda args, scopes: what_changed(args.get("name") or "", scopes, args.get("days"), args.get("only"), args.get("person")),
     "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth"), args.get("direction")),
     "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),
@@ -556,7 +715,24 @@ _ROUTED = {
     "load_bearing": lambda args, scopes: algorithms.load_bearing(args.get("limit"), scopes),
     "related_memories": lambda args, scopes: memories.related_memories(args["name"], scopes, args.get("k")),
     "recall": lambda args, scopes: memories.recall(args["query"], scopes, args.get("k")),
+    "explore": lambda args, scopes: _explore().explore(args["name"], scopes, args.get("depth")),
+    "find": lambda args, scopes: find.find(args.get("label"), {key: value for key, value in args.items() if key != "label"}, scopes),
+    "search": lambda args, scopes: _search(args["text"], scopes),
 }
+
+
+def _explore():
+    """``explore.py`` imports this module for ``EXPLORE``; imported here when a question is routed to it."""
+    from src.domain.knowledge import explore
+
+    return explore
+
+
+def _search(text: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``search.py``, which reads decisions (and so the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import search
+
+    return search.search(text, scopes)
 
 
 def _miss(tool: str, resolution: Resolution, kind: str = "service, document, or ticket") -> ToolResult:
