@@ -97,6 +97,17 @@ A full-width dark band in both themes, entered and left through blurred indigo w
 - "Synthetic data and this project's own only."
 - Links: repository, README, blog and video when they exist, `/healthz` (status, deployed commit, FalkorDB; `/api/health` counts every node, system ones too, so it would disagree with the page's public counts).
 
+### 2.8 Team pages
+
+`/team/<id>` reads one team the way the ask page reads the company, and never shows an empty box.
+
+- The head: the team's name, its people and what it runs, then one line from the page's own rows ("Payments depends on Platform (3 edges). Platform (1 edge) depends on Payments. 1 of the 2 things it runs rests on one person: Invoice Worker."). The other teams are linked above the name, so a reader can walk from team to team.
+- People, then what the team runs grouped by kind.
+- **Across teams**: the `DEPENDS_ON` edges into things other teams run, and from them, grouped by team, each team linked to its page. The team graph draws them, with the other team's `RUNS` edge.
+- **Where risk sits**: the team's rows of the risk map, from the same query and ranking as the `risk_map` tool, drawn by the same grid as the ask page.
+- Decisions that stand, open tickets, what was said, the team graph, and questions to ask.
+- A section with no rows is not rendered; one line names them instead ("Not in the graph yet for this team: chat.").
+
 ## 3. Visual direction
 
 ### 3.1 Palette

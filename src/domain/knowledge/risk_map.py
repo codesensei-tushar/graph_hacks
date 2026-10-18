@@ -88,10 +88,44 @@ class RiskRow:
 def risk_map(scopes: list[str]) -> ToolResult:
     """Every visible owned thing with its gaps, the riskiest first."""
     _, graph = connect()
+    ranked = rows(graph, scopes)
+    result = ToolResult(tool=TOOL, answer="")
+    if not ranked:
+        result.answer = "The graph has no owned things yet, so there is nothing to rank."
+        return result
+    result.grid = grid(ranked)
+
+    flagged = [row for row in ranked if row.score]
+    if not flagged:
+        each = "the one thing in the graph" if len(ranked) == 1 else f"each of the {len(ranked)} things"
+        result.answer = (
+            f"No gaps: {each} has more than one person who knows it, "
+            "a document where one applies, and an owner on the team that runs it."
+        )
+        return result
+    listed, rest = flagged[:MAX_LISTED], flagged[MAX_LISTED:]
+    parts = [f"Risk sits with {len(flagged)} of {len(ranked)} things, ranked by how much depends on each and how many gaps it has."]
+    for row in listed:
+        parts.append(_sentence(row))
+        result.extend(_steps(graph, row, scopes))
+    for row in rest:
+        result.extend(_owns(row))
+    if rest:
+        parts.append(f"And {len(rest)} more: {join_names([kinds.listed(row.name, row.kind) for row in rest])}.")
+    result.answer = " ".join(parts)
+    return result
+
+
+def rows(graph, scopes: list[str], ids: list[str] | None = None) -> list[RiskRow]:
+    """Every visible owned thing as a row, the riskiest first; only the things in ``ids`` when given.
+
+    A team page passes the ids of what the team runs, so its grid and the tool's agree row for row.
+    """
+    only = "AND s.id IN $ids" if ids is not None else ""
     things = graph.ro_query(
         f"""
         MATCH (s:Service)
-        WHERE {SCOPED.format(var="s")}
+        WHERE {SCOPED.format(var="s")} {only}
         OPTIONAL MATCH (team:Team)-[:RUNS]->(s)
         WITH s, team ORDER BY team.name
         WITH s, collect(DISTINCT [team.id, team.name])[0] AS team
@@ -104,38 +138,20 @@ def risk_map(scopes: list[str]) -> ToolResult:
         RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, team, owners, count(DISTINCT doc)
         ORDER BY s.name
         """,
-        {"scopes": scopes},
+        {"scopes": scopes, "ids": list(ids or [])},
     ).result_set
-    result = ToolResult(tool=TOOL, answer="")
     if not things:
-        result.answer = "The graph has no owned things yet, so there is nothing to rank."
-        return result
-
+        return []
     pagerank = algorithms.pagerank_by_id(graph)
     reach: dict[str, int] = {}
-    rows = [_row(graph, thing, pagerank, scopes, reach) for thing in things]
-    rows.sort(key=lambda row: (-row.score, -row.dependents, row.name))
-    result.grid = {"kind": TOOL, "columns": COLUMNS, "rows": [row.to_dict() for row in rows[:MAX_ROWS]], "scoring": SCORING}
+    ranked = [_row(graph, thing, pagerank, scopes, reach) for thing in things]
+    ranked.sort(key=lambda row: (-row.score, -row.dependents, row.name))
+    return ranked
 
-    flagged = [row for row in rows if row.score]
-    if not flagged:
-        each = "the one thing in the graph" if len(rows) == 1 else f"each of the {len(rows)} things"
-        result.answer = (
-            f"No gaps: {each} has more than one person who knows it, "
-            "a document where one applies, and an owner on the team that runs it."
-        )
-        return result
-    listed, rest = flagged[:MAX_LISTED], flagged[MAX_LISTED:]
-    parts = [f"Risk sits with {len(flagged)} of {len(rows)} things, ranked by how much depends on each and how many gaps it has."]
-    for row in listed:
-        parts.append(_sentence(row))
-        result.extend(_steps(graph, row, scopes))
-    for row in rest:
-        result.extend(_owns(row))
-    if rest:
-        parts.append(f"And {len(rest)} more: {join_names([kinds.listed(row.name, row.kind) for row in rest])}.")
-    result.answer = " ".join(parts)
-    return result
+
+def grid(ranked: list[RiskRow]) -> dict:
+    """The rows as the grid the page draws: the tool's answer and a team page use the same one."""
+    return {"kind": TOOL, "columns": COLUMNS, "rows": [row.to_dict() for row in ranked[:MAX_ROWS]], "scoring": SCORING}
 
 
 def _row(graph, thing: list, pagerank: dict[str, float], scopes: list[str], reach: dict[str, int]) -> RiskRow:

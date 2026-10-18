@@ -12,6 +12,7 @@
 <link rel="preload" href="/static/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <script>try { var t = localStorage.getItem("brain-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <link rel="stylesheet" href="/static/style.css?v=11">
+<link rel="stylesheet" href="/static/riskmap.css?v=2">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the content</a>
@@ -38,9 +39,11 @@
 <main id="main" class="team-main">
   <div class="wrap">
     <section class="page-head" aria-labelledby="team-name">
-      <p class="crumb"><a href="/#teams">← All teams</a></p>
+      <nav class="crumb" aria-label="Teams"><a href="/#teams">← All teams</a><span class="team-switch" id="team-switch" hidden></span></nav>
       <h1 id="team-name">Loading the team…</h1>
       <p class="lede" id="team-line"></p>
+      <p class="note" id="team-glance" hidden></p>
+      <p class="note" id="team-missing" hidden></p>
       <noscript><p class="note">This page needs JavaScript.</p></noscript>
     </section>
 
@@ -54,6 +57,16 @@
         <h2>What the team runs</h2>
         <p class="sub">Grouped by kind. A process, a system, a playbook and a service are the same kind of node with a different <code>kind</code>, so every tool answers for all of them.</p>
         <div id="owns"></div>
+      </section>
+      <section class="block" id="links">
+        <h2>Across teams</h2>
+        <p class="sub">What this team's work depends on in other teams, and what other teams' work depends on here. Each line is a <code>DEPENDS_ON</code> edge in the graph.</p>
+        <div id="team-links"></div>
+      </section>
+      <section class="block" id="risk">
+        <h2>Where risk sits</h2>
+        <p class="sub">What this team runs, ranked by how much depends on each thing and how many gaps it has: one person who knows it, no document, an owner on another team. The same query and ranking as the <code>risk_map</code> tool.</p>
+        <div id="team-risk"></div>
       </section>
 
       <section class="block" id="decisions-block">
@@ -97,6 +110,7 @@
 </footer>
 <script src="/static/shell.js?v=4"></script>
 <script src="/static/graph.js?v=6"></script>
-<script src="/static/team.js?v=5"></script>
+<script src="/static/riskmap.js?v=1"></script>
+<script src="/static/team.js?v=6"></script>
 </body>
 </html>
