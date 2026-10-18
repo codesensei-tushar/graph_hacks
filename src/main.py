@@ -11,6 +11,7 @@ from src.core import scheduler
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
+from src.domain.knowledge.topics import ensure_topic_indexes
 from src.domain.memory.memory_service import ensure_indexes
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
 from src.domain.slack import token_install
@@ -36,6 +37,8 @@ def _seed_if_empty() -> None:
             log.info("graph is empty; seeding %s (SEED_ON_STARTUP)", settings.seed_company)
             reset_and_seed(company_module(settings.seed_company))
     ensure_indexes()
+    # Never raises: a failure is logged and topic questions keep their refusal.
+    ensure_topic_indexes()
 
 
 def _recover() -> None:

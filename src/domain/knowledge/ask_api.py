@@ -53,6 +53,7 @@ EXAMPLES: dict[str, list[str]] = {
         "what have we said about billing",
         "what are our riskiest services",
         "what should I read before touching the invoice worker",
+        "who knows about refunds",
         "who knows the payments gateway",
     ],
     "company-brain": [

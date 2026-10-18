@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, memories, risk_map
+from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, memories, risk_map, topics
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 
 _TOOLS: dict[str, ToolSpec] = {}
@@ -104,6 +104,10 @@ def _run_related_memories(args: dict, scopes: list[str]) -> ToolResult:
 
 def _run_recall(args: dict, scopes: list[str]) -> ToolResult:
     return memories.recall(args["query"], scopes, args.get("k", memories.DEFAULT_K))
+
+
+def _run_topic_experts(args: dict, scopes: list[str]) -> ToolResult:
+    return topics.topic_experts(args["topic"], scopes)
 
 
 def _run_ingest_ticket(args: dict, scopes: list[str]) -> ToolResult:
@@ -360,6 +364,22 @@ register(
             ["name"],
         ),
         run=_run_related_memories,
+    )
+)
+register(
+    ToolSpec(
+        name="topic_experts",
+        description=(
+            "Who knows about a topic that is not a named service, document, or ticket (\"who knows about refunds\", "
+            "\"who can help with webhooks\"): full-text search over the documents, tickets, pull requests, decisions, "
+            "and chat memories the asker can read, then the people who wrote, worked on, reviewed, proposed, or said each, "
+            "ranked by those edges, with the thing each is about. For a named service, document, or ticket, use who_knows."
+        ),
+        args_schema=_schema(
+            {"topic": {"type": "string", "description": "The topic words, copied from the question (refunds, PDF layout, webhooks)."}},
+            ["topic"],
+        ),
+        run=_run_topic_experts,
     )
 )
 register(

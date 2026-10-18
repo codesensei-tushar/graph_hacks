@@ -267,7 +267,11 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found:
-        return _miss("who_knows", resolution)
+        # "who knows about refunds" names a topic, not a thing: the people behind where it comes
+        # up, or the same refusal when it comes up nowhere. Imported here: topics imports this module's neighbours.
+        from src.domain.knowledge import topics
+
+        return topics.topic_if_asked(question, scopes, _miss("who_knows", resolution))
     result = knowers(graph, resolution.entity, scopes)
     result.candidates = resolution.candidate_names()
     return result
@@ -495,7 +499,14 @@ _ROUTED = {
     "load_bearing": lambda args, scopes: algorithms.load_bearing(args.get("limit")),
     "related_memories": lambda args, scopes: memories.related_memories(args["name"], scopes, args.get("k")),
     "recall": lambda args, scopes: memories.recall(args["query"], scopes, args.get("k")),
+    "topic_experts": lambda args, scopes: _topic_experts(args["topic"], scopes),
 }
+
+
+def _topic_experts(topic: str, scopes: list[str]) -> ToolResult:
+    from src.domain.knowledge import topics
+
+    return topics.topic_experts(topic, scopes)
 
 
 def _miss(tool: str, resolution: Resolution, kind: str = "service, document, or ticket") -> ToolResult:

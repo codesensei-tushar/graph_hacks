@@ -173,7 +173,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 **Decisions stay current.** A decision recorded from Slack (`decision: <title>`, or the agent's `record_decision` tool, both behind an Approve card that names what the write will replace) gets `decided_at` and the room's `scope`, `SUPERSEDES` the standing decision it replaces, is `DECIDED_IN` the channel, and is `BASED_ON` the documents, tickets or pull requests it names. Nothing is deleted: asking about a superseded decision answers "*old* is no longer current" and then the current one, with both dates. Vector recall was left out on purpose for the hackathon; recall follows `MENTIONS` edges instead (see `related_memories` below).
 
-**Indexes** (`ensure_indexes` in `src/domain/memory/memory_service.py`): range indexes on `Memory.scope`, `Memory.id`, `Memory.custom_id`, `Tag.id`, `Tag.container`, `Scope.id`, `SlackUser.id`, `Channel.id`; a full-text index on `Memory.text`; the vector index on `Memory.embedding` once item 4 lands.
+**Indexes** (`ensure_indexes` in `src/domain/memory/memory_service.py`): range indexes on `Memory.scope`, `Memory.id`, `Memory.custom_id`, `Tag.id`, `Tag.container`, `Scope.id`, `SlackUser.id`, `Channel.id`; a full-text index on `Memory.text`. `ensure_topic_indexes` in `src/domain/knowledge/topics.py` adds full-text indexes on `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)` and `Decision(name, summary)` for `topic_experts`.
 
 **Short-lived state** lives as Redis keys in the same FalkorDB instance, so the app talks to one process: the scheduler's sorted set `brain:schedule`, approvals `brain:approval:*`, running turns `brain:thread-turn:*`, bot threads `brain:bot-thread:*`, the per-channel event ring `brain:slack-event:*`, channel-observe batches `brain:observe:*`, and the dedupe keys `slack:evt:*` and `github:delivery:*`.
 
@@ -181,7 +181,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a small schema: `tool`, an enum of the catalogue's names, and `args`, the chosen tool's arguments as JSON text (each tool's argument names, types and bounds are in the prompt, because the structured-output API rejects integer bounds and refuses the union of every tool's arguments as too complex). The choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
 
-**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (73 of them on 18 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (77 of them on 18 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |
@@ -194,6 +194,7 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `load_bearing` | Which services the company leans on most, by PageRank, with dependent counts | no |
 | `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
 | `recall` | Memories whose text matches the question, dated, no path | no |
+| `topic_experts` | Who knows about a topic that is not a named thing ("who knows about refunds"): full-text over documents, tickets, pull requests, decisions and chat, then the people on each hit ranked by their edges | no |
 | `working_groups` | Who clusters together from shared work, by label propagation, and where that splits from the org chart | no |
 | `if_person_leaves` | What rests on one person alone if they leave, ranked by what depends on it, and who is next in line for each | no |
 | `risk_map` | Where risk concentrates across the company: every owned thing ranked by what depends on it times its gaps (one person, no document, owner on another team), with PageRank shown beside it, plus the full ranking as a table | no |
@@ -419,6 +420,26 @@ WHERE all(n IN nodes(path) WHERE coalesce(n.scope, 'org_shared') IN $scopes
 RETURN d.id, d.name, coalesce(d.kind, 'service'), length(path),
        [n IN nodes(path) | n.id], [n IN nodes(path) | n.name]
 ```
+
+**topic_experts** (who knows about a topic, not a named thing). "who knows about refunds" names no service, document or ticket, so `who_knows` used to refuse it. Before refusing, `who_knows` now checks whether the question asks about a topic ("about", "help with", "expert on"); if so, full-text indexes over `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)`, `Decision(name, summary)` and `Memory.text` find where every word of the topic comes up together, filtered by the asker's scopes. The people on each hit rank who to ask: wrote it or proposed it 3, worked on, reviewed, approved or is assigned 2, opened it or said it in chat 1. Each hit's `DESCRIBES`, `ABOUT`, `TOUCHES` or `MENTIONS` edge names what it is about, a replaced decision says what replaced it, and chat messages come back dated. When nothing comes up, the refusal is the one `who_knows` always gave, so "who knows the payments gateway" is still refused: names and aliases of owned things are not indexed, they stay with the resolver. The model and MCP can call it directly with the topic words.
+
+```cypher
+CALL db.idx.fulltext.queryNodes($label, $q) YIELD node, score
+WHERE coalesce(node.scope, 'org_shared') IN $scopes
+RETURN node.id, coalesce(node.name, node.title, node.id), score
+ORDER BY score DESC, node.id
+LIMIT $limit
+// then, per hit: who is on it, and what it is about
+MATCH (person:Person)-[rel:AUTHORED|WORKED_ON|PROPOSED|APPROVED]->(hit {id: $id}) WHERE $label IN labels(hit)
+RETURN person.id AS id, person.name AS name, 'Person' AS label, type(rel) AS rel
+UNION
+MATCH (gh:GitHubUser)-[rel:AUTHORED|REVIEWED|OPENED|ASSIGNED]->(hit {id: $id}) WHERE $label IN labels(hit)
+OPTIONAL MATCH (gh)-[:IS]->(person:Person)
+RETURN coalesce(person.id, gh.id) AS id, coalesce(person.name, '@' + gh.login) AS name,
+       CASE WHEN person IS NULL THEN 'GitHubUser' ELSE 'Person' END AS label, type(rel) AS rel
+```
+
+The indexes are created by `ensure_topic_indexes` on every start and after every seed, one field per call (`CALL db.idx.fulltext.createNodeIndex($label, $field)`). It reads `db.indexes()` first and creates only what is missing, so a second start is a no-op. A failure is logged and never stops the app; until the next start the topic search finds nothing for that label and `who_knows` keeps its refusal.
 
 **decision_pressure** (is this decision still the last word). The standing decision, followed through `SUPERSEDES`, then the tickets and pull requests on the same service that it does not cite. "Why did we" stays on `decision_trace`.
 
