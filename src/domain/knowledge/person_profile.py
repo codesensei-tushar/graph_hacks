@@ -161,25 +161,29 @@ MAX_ACCOUNT_CITES = 25
 
 
 def account_profile(graph, account: Entity, scopes: list[str]) -> ToolResult:
-    """What an unlinked Jira or HubSpot account holds: what it owns or works on, its open tickets,
-    what rests on it alone, and how an admin links it to a person. Every fact an edge."""
+    """What an unlinked Jira or HubSpot user holds (every user of the same identity: the same email
+    in another tool): what they own or work on, their open tickets, what rests on them alone, and how
+    an admin links them to a person. Every fact an edge."""
     result = ToolResult(tool=TOOL, answer="")
-    params = {"id": account.id, "scopes": scopes}
+    ids = people.identity_ids(graph, account, scopes)
+    params = {"id": account.id, "ids": ids, "scopes": scopes}
     rows = graph.ro_query(
         f"""
-        MATCH (:ExternalUser {{id: $id}})-[rel:OWNS|WORKED_ON]->(s:Service)
-        WHERE {SCOPED.format(var="s")}
-        RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, collect(DISTINCT type(rel))
+        MATCH (a:ExternalUser)-[rel:OWNS|WORKED_ON]->(s:Service)
+        WHERE a.id IN $ids AND {SCOPED.format(var="s")}
+        RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, collect(DISTINCT type(rel)), collect(DISTINCT a.id)
         ORDER BY s.name
         """,
         params,
     ).result_set
     held: list[_Held] = []
+    by: dict[str, str] = {}
     reach: dict[str, int] = {}
-    for service_id, name, kind, rels in rows:
+    for service_id, name, kind, rels, users in rows:
         rel = "OWNS" if "OWNS" in rels else "WORKED_ON"
+        by[service_id] = users[0]
         held.append(_Held(service_id, name, kinds.kind_or_default(kind), rel, bus_factor._dependents(graph, service_id, params, reach)))
-    parts = [f"{account.name} is an account in {account.kind or 'a connected tool'}."]
+    parts = [f"{account.name} is {people.describe(account)}."]
     cited = 0
     for verb, rel in (("Owns", "OWNS"), ("Works on", "WORKED_ON")):
         things = [thing for thing in held if thing.rel == rel]
@@ -187,7 +191,7 @@ def account_profile(graph, account: Entity, scopes: list[str]) -> ToolResult:
             continue
         for thing in things:
             if cited < MAX_ACCOUNT_CITES:
-                result.add(PathStep(account.name, rel, thing.name, from_id=account.id, to_id=thing.id, from_label=account.label, to_label="Service"))
+                result.add(PathStep(account.name, rel, thing.name, from_id=by[thing.id], to_id=thing.id, from_label=account.label, to_label="Service"))
                 cited += 1
         named = [kinds.listed(thing.name, thing.kind) if len({t.kind for t in things}) > 1 else thing.name for thing in things[:MAX_ACCOUNT_THINGS]]
         if len(things) > MAX_ACCOUNT_THINGS:
@@ -196,9 +200,9 @@ def account_profile(graph, account: Entity, scopes: list[str]) -> ToolResult:
         parts.append(f"{verb} {len(things)} {noun}: {join_names(named)}.")
     tickets = graph.ro_query(
         f"""
-        MATCH (:ExternalUser {{id: $id}})-[rel:ASSIGNED|OPENED|WORKED_ON]->(t:Ticket)
-        WHERE {SCOPED.format(var="t")} AND coalesce(t.state, 'open') <> 'closed'
-        RETURN t.id, t.name, coalesce(t.title, t.name), collect(DISTINCT type(rel))
+        MATCH (a:ExternalUser)-[rel:ASSIGNED|OPENED|WORKED_ON]->(t:Ticket)
+        WHERE a.id IN $ids AND {SCOPED.format(var="t")} AND coalesce(t.state, 'open') <> 'closed'
+        RETURN t.id, t.name, coalesce(t.title, t.name), collect(DISTINCT type(rel)), collect(DISTINCT a.id)
         ORDER BY t.name
         """,
         params,
@@ -208,8 +212,8 @@ def account_profile(graph, account: Entity, scopes: list[str]) -> ToolResult:
         if not mine:
             continue
         named = []
-        for ticket_id, name, title, _rels in mine[:MAX_TICKETS]:
-            result.add(PathStep(account.name, rel, name, from_id=account.id, to_id=ticket_id, from_label=account.label, to_label="Ticket"))
+        for ticket_id, name, title, _rels, users in mine[:MAX_TICKETS]:
+            result.add(PathStep(account.name, rel, name, from_id=users[0], to_id=ticket_id, from_label=account.label, to_label="Ticket"))
             named.append(f"{name} (“{title}”)" if title and title != name else name)
         if len(mine) > MAX_TICKETS:
             named.append(f"{len(mine) - MAX_TICKETS} more")
@@ -220,7 +224,7 @@ def account_profile(graph, account: Entity, scopes: list[str]) -> ToolResult:
             alone_ids = {item.steps[0].to_id for item in at_risk if item.order == 0}
             result.grid = _grid(graph, account, held, alone_ids, scopes)
         alone = len(at_risk)
-        parts.append(f"{'1 thing rests' if alone == 1 else f'{alone} things rest'} on this account alone." if alone else "Nothing rests on this account alone.")
+        parts.append(f"{'1 thing rests' if alone == 1 else f'{alone} things rest'} on them alone." if alone else "Nothing rests on them alone.")
     else:
         parts.append("Nothing else is linked to it yet.")
     parts.append(people.unlinked_hint(account))
@@ -297,11 +301,13 @@ def _held(graph, person: Entity, params: dict, result: ToolResult) -> list[_Held
 def _grid(graph, person: Entity, held: list[_Held], alone_ids: set[str], scopes: list[str]) -> dict:
     """Every thing they hold, with who else knows it (who_knows' own ranking) and whether it rests on them alone."""
     rows = []
+    # Told apart by id: an unlinked user with their name is someone else; their own users in other tools are them.
+    mine = {(person.label, node_id) for node_id in people.identity_ids(graph, person, scopes)}
     for thing in held[:MAX_GRID_ROWS]:
         entity = Entity(thing.id, thing.name, "Service", thing.kind)
         known = ask_service.knowers(graph, entity, scopes)
         # Told apart by id: an unlinked account with their name is someone else.
-        others = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, entity) if who != (person.label, person.id)]
+        others = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, entity) if who not in mine]
         alone = thing.id in alone_ids
         rows.append(
             {
