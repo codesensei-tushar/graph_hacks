@@ -1,0 +1,236 @@
+[
+  {
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "id": "10101",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10101",
+    "key": "PAY-1",
+    "fields": {
+      "summary": "Renewal retries without double charges",
+      "description": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {"type": "paragraph", "content": [{"type": "text", "text": "Retried renewal webhooks must never charge a customer twice."}]}
+        ]
+      },
+      "status": {"name": "In Progress", "id": "3", "statusCategory": {"id": 4, "key": "indeterminate", "name": "In Progress", "colorName": "yellow"}},
+      "issuetype": {"id": "10004", "name": "Epic", "subtask": false, "hierarchyLevel": 1},
+      "priority": {"id": "2", "name": "High"},
+      "project": {"id": "10000", "key": "PAY", "name": "Quillfern Payments", "projectTypeKey": "software"},
+      "reporter": {"accountId": "712020:0b1c-maya", "accountType": "atlassian", "displayName": "Maya Ortiz", "emailAddress": "maya@quillfern.example.com", "active": true, "timeZone": "Asia/Kolkata"},
+      "assignee": {"accountId": "712020:7f3e-arjun", "accountType": "atlassian", "displayName": "Arjun Mehta", "active": true, "timeZone": "Asia/Kolkata"},
+      "components": [{"id": "10010", "name": "Billing Service", "self": "https://quillfern.atlassian.net/rest/api/3/component/10010"}],
+      "labels": ["renewals"],
+      "issuelinks": [],
+      "security": null,
+      "updated": "2026-10-18T09:00:00.000+0530"
+    }
+  },
+  {
+    "id": "10102",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10102",
+    "key": "PAY-2",
+    "fields": {
+      "summary": "Make renewal webhook retries idempotent",
+      "description": null,
+      "status": {"name": "Done", "id": "10002", "statusCategory": {"id": 3, "key": "done", "name": "Done", "colorName": "green"}},
+      "issuetype": {"id": "10001", "name": "Story", "subtask": false, "hierarchyLevel": 0},
+      "priority": {"id": "2", "name": "High"},
+      "parent": {"id": "10101", "key": "PAY-1", "fields": {"summary": "Renewal retries without double charges"}},
+      "project": {"id": "10000", "key": "PAY", "name": "Quillfern Payments", "projectTypeKey": "software"},
+      "reporter": {"accountId": "712020:0b1c-maya", "accountType": "atlassian", "displayName": "Maya Ortiz", "emailAddress": "maya@quillfern.example.com", "active": true},
+      "assignee": {"accountId": "712020:7f3e-arjun", "accountType": "atlassian", "displayName": "Arjun Mehta", "active": true},
+      "components": [{"id": "10010", "name": "Billing Service"}],
+      "labels": [],
+      "issuelinks": [
+        {
+          "id": "10200",
+          "type": {"id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+          "inwardIssue": {"id": "10103", "key": "PAY-3", "fields": {"summary": "Add an idempotency key column to the charges table", "status": {"name": "Backlog"}}}
+        }
+      ],
+      "security": null,
+      "updated": "2026-10-17T12:00:00.000+0000"
+    }
+  },
+  {
+    "id": "10103",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10103",
+    "key": "PAY-3",
+    "fields": {
+      "summary": "Add an idempotency key column to the charges table",
+      "description": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {"type": "text", "text": "Waiting on "},
+              {"type": "mention", "attrs": {"id": "712020:0b1c-maya", "text": "@Maya Ortiz"}},
+              {"type": "text", "text": " for the Postgres upgrade."},
+              {"type": "hardBreak"},
+              {"type": "text", "text": "See "},
+              {"type": "inlineCard", "attrs": {"url": "https://quillfern.atlassian.net/browse/PLAT-7"}}
+            ]
+          },
+          {"type": "bulletList", "content": [{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "renewal_id column"}]}]}]}
+        ]
+      },
+      "status": {"name": "Backlog", "id": "10000", "statusCategory": {"id": 2, "key": "new", "name": "To Do", "colorName": "blue-gray"}},
+      "issuetype": {"id": "10002", "name": "Task", "subtask": false, "hierarchyLevel": 0},
+      "priority": {"id": "3", "name": "Medium"},
+      "parent": {"id": "10101", "key": "PAY-1"},
+      "project": {"id": "10000", "key": "PAY", "name": "Quillfern Payments", "projectTypeKey": "software"},
+      "reporter": {"accountId": "712020:0b1c-maya", "accountType": "atlassian", "displayName": "Maya Ortiz", "emailAddress": "maya@quillfern.example.com", "active": true},
+      "assignee": {"accountId": "712020:5d2a-robin", "accountType": "atlassian", "displayName": "Robin Contractor", "emailAddress": "robin@agency.example.com", "active": true},
+      "components": [{"id": "10010", "name": "Billing Service"}],
+      "labels": [],
+      "issuelinks": [
+        {
+          "id": "10200",
+          "type": {"id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+          "outwardIssue": {"id": "10102", "key": "PAY-2", "fields": {"summary": "Make renewal webhook retries idempotent", "status": {"name": "Done"}}}
+        },
+        {
+          "id": "10201",
+          "type": {"id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+          "inwardIssue": {"id": "10207", "key": "PLAT-7", "fields": {"summary": "Upgrade Postgres to 17 on the primary", "status": {"name": "In Progress"}}}
+        },
+        {
+          "id": "10202",
+          "type": {"id": "10003", "name": "Relates", "inward": "relates to", "outward": "relates to"},
+          "outwardIssue": {"id": "10101", "key": "PAY-1", "fields": {"summary": "Renewal retries without double charges"}}
+        }
+      ],
+      "security": null,
+      "updated": "2026-10-16T08:15:00.000+0000"
+    }
+  },
+  {
+    "id": "10104",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10104",
+    "key": "PAY-4",
+    "fields": {
+      "summary": "Chargeback from a named customer",
+      "description": null,
+      "status": {"name": "Backlog", "id": "10000", "statusCategory": {"id": 2, "key": "new", "name": "To Do"}},
+      "issuetype": {"id": "10003", "name": "Bug", "subtask": false},
+      "priority": {"id": "1", "name": "Highest"},
+      "project": {"id": "10000", "key": "PAY", "name": "Quillfern Payments"},
+      "reporter": {"accountId": "712020:7f3e-arjun", "accountType": "atlassian", "displayName": "Arjun Mehta", "active": true},
+      "assignee": null,
+      "components": [{"id": "10010", "name": "Billing Service"}],
+      "labels": [],
+      "issuelinks": [],
+      "security": {"id": "10100", "name": "Finance only", "description": "Only the finance group can see this issue."},
+      "updated": "2026-10-15T10:00:00.000+0000"
+    }
+  },
+  {
+    "id": "10105",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10105",
+    "key": "PAY-5",
+    "fields": {
+      "summary": "Document refund retries in the billing runbook",
+      "description": {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Say how a refund is retried and by whom."}]}]},
+      "status": {"name": "Backlog", "id": "10000", "statusCategory": {"id": 2, "key": "new", "name": "To Do"}},
+      "issuetype": {"id": "10002", "name": "Task", "subtask": false},
+      "priority": {"id": "4", "name": "Low"},
+      "project": {"id": "10000", "key": "PAY", "name": "Quillfern Payments"},
+      "reporter": {"accountId": "557058:f58131cb-automation", "accountType": "app", "displayName": "Automation for Jira", "active": true},
+      "assignee": null,
+      "components": [],
+      "labels": [],
+      "issuelinks": [],
+      "security": null,
+      "updated": "2026-10-10T10:00:00.000+0000"
+    }
+  },
+  {
+    "id": "10106",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10106",
+    "key": "PAY-6",
+    "fields": {
+      "summary": "Old renewal report",
+      "description": null,
+      "status": {"name": "Done", "id": "10002", "statusCategory": {"id": 3, "key": "done", "name": "Done"}},
+      "issuetype": {"id": "10002", "name": "Task", "subtask": false},
+      "priority": {"id": "3", "name": "Medium"},
+      "project": {"id": "10000", "key": "PAY", "name": "Quillfern Payments"},
+      "reporter": {"accountId": "712020:7f3e-arjun", "accountType": "atlassian", "displayName": "Arjun Mehta", "active": true},
+      "assignee": null,
+      "components": [{"id": "10010", "name": "Billing Service"}],
+      "labels": [],
+      "issuelinks": [],
+      "security": null,
+      "updated": "2026-05-01T10:00:00.000+0000"
+    }
+  },
+  {
+    "id": "10207",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10207",
+    "key": "PLAT-7",
+    "fields": {
+      "summary": "Upgrade Postgres to 17 on the primary",
+      "description": {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Upgrade the primary and both replicas; schema changes wait for it."}]}]},
+      "status": {"name": "In Progress", "id": "3", "statusCategory": {"id": 4, "key": "indeterminate", "name": "In Progress"}},
+      "issuetype": {"id": "10002", "name": "Task", "subtask": false},
+      "priority": {"id": "2", "name": "High"},
+      "project": {"id": "10001", "key": "PLAT", "name": "Quillfern Platform"},
+      "reporter": {"accountId": "712020:0b1c-maya", "accountType": "atlassian", "displayName": "Maya Ortiz", "emailAddress": "maya@quillfern.example.com", "active": true},
+      "assignee": {"accountId": "712020:0b1c-maya", "accountType": "atlassian", "displayName": "Maya Ortiz", "emailAddress": "maya@quillfern.example.com", "active": true},
+      "components": [{"id": "10020", "name": "Postgres"}],
+      "labels": [],
+      "issuelinks": [
+        {
+          "id": "10201",
+          "type": {"id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+          "outwardIssue": {"id": "10103", "key": "PAY-3", "fields": {"summary": "Add an idempotency key column to the charges table"}}
+        }
+      ],
+      "security": null,
+      "updated": "2026-10-17T15:30:00.000+0000"
+    }
+  },
+  {
+    "id": "10208",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10208",
+    "key": "PLAT-8",
+    "fields": {
+      "summary": "Duplicate password reset emails",
+      "description": null,
+      "status": {"name": "Done", "id": "10002", "statusCategory": {"id": 3, "key": "done", "name": "Done"}},
+      "issuetype": {"id": "10003", "name": "Bug", "subtask": false},
+      "priority": {"id": "2", "name": "High"},
+      "project": {"id": "10001", "key": "PLAT", "name": "Quillfern Platform"},
+      "reporter": {"accountId": "712020:0b1c-maya", "accountType": "atlassian", "displayName": "Maya Ortiz", "emailAddress": "maya@quillfern.example.com", "active": true},
+      "assignee": {"accountId": "712020:5d2a-robin", "accountType": "atlassian", "displayName": "Robin Contractor", "emailAddress": "robin@agency.example.com", "active": true},
+      "components": [{"id": "10021", "name": "Notification Service"}],
+      "labels": [],
+      "issuelinks": [],
+      "security": null,
+      "updated": "2026-10-12T09:00:00.000+0000"
+    }
+  },
+  {
+    "id": "10301",
+    "self": "https://quillfern.atlassian.net/rest/api/3/issue/10301",
+    "key": "HR-1",
+    "fields": {
+      "summary": "Salary bands for 2027",
+      "description": null,
+      "status": {"name": "Backlog", "id": "10000", "statusCategory": {"id": 2, "key": "new", "name": "To Do"}},
+      "issuetype": {"id": "10002", "name": "Task", "subtask": false},
+      "priority": {"id": "3", "name": "Medium"},
+      "project": {"id": "10002", "key": "HR", "name": "People team"},
+      "reporter": {"accountId": "712020:7f3e-arjun", "accountType": "atlassian", "displayName": "Arjun Mehta", "active": true},
+      "assignee": null,
+      "components": [],
+      "labels": [],
+      "issuelinks": [],
+      "security": null,
+      "updated": "2026-10-17T10:00:00.000+0000"
+    }
+  }
+]
