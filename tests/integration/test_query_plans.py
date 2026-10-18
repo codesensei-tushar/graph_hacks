@@ -48,12 +48,7 @@ QUESTIONS = {
 
 # Openings (whitespace collapsed, first 90 characters) of read queries still allowed to plan an
 # All Node Scan. Shrink only.
-ALLOWED: frozenset[str] = frozenset(
-    {
-        # resolve.load_rows: label scans and a per-generation cache in #213; drop this line when it lands.
-        "MATCH (n) WHERE labels(n)[0] IN $labels AND n.name IS NOT NULL AND coalesce(n.scope, 'org_",
-    }
-)
+ALLOWED: frozenset[str] = frozenset()
 
 
 def _opening(query: str) -> str:
