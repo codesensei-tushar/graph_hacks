@@ -106,6 +106,8 @@ Cut line: if time runs out, ship items 1, 2 and 5 plus the video. Those are the 
 
 ## Demo script
 
+Superseded by round 6's "Storyboard, consolidated" and, for production, "Recording script, Quillfern on production (draft)".
+
 Run against the synthetic company, in Slack, in this order:
 
 1. `who owns billing, and who else has worked on it` in a public channel. Owner, then people linked by past pull requests, with the path.
@@ -219,6 +221,8 @@ Nothing merges after the production run except the README link to the video and 
 
 ## Production demo steps
 
+Written for the self-seed. Production serves Quillfern, and while it does, "Recording script, Quillfern on production (draft)" replaces this.
+
 Production keeps the Company Brain self-seed plus the real workspace and GitHub data; nobody reseeds it. The final check runs these seven moves against production after the last merge. They are the same seven moves as the Quillfern script, on this project's own graph.
 
 | Step | Type in the workspace connected to production | Expect |
@@ -234,6 +238,8 @@ Production keeps the Company Brain self-seed plus the real workspace and GitHub 
 Step 4 depends on `blast_radius` taking a depth; until then ask once and read the full set. Step 5 depends on the approval card showing the resolved service. Step 7 needs the private test repo and one `link github` done the day before.
 
 ## Recording script, production
+
+Written for the self-seed. Production serves Quillfern, and while it does, "Recording script, Quillfern on production (draft)" replaces this.
 
 Type these exactly, in this order, in the dev Slack workspace connected to production. Each step says the tool that should answer and the edges to read aloud. Hold every reply on screen for three seconds. If a step answers differently, stop and fix before recording on; do not improvise.
 
@@ -329,6 +335,8 @@ What the design must not do, sent to the coders directly:
 
 ### The Sales beat
 
+Superseded by round 6's "The Sales beat, literal".
+
 Added after step 4 in both scripts; the recording runs it on the synthetic company, since production holds this project's own graph. Expected replies are targets until coder B's tests pin them; the recording script follows the tests, not the other way round.
 
 | Step | Type | Tool | Read aloud |
@@ -389,7 +397,7 @@ Hard cap three and a half minutes. This table replaces the round 2 storyboard an
 | Time | Shot | Say |
 | --- | --- | --- |
 | 0:00 to 0:12 | Title over the FalkorDB Browser showing production's graph | "Agents see pieces. Company Brain puts people, services, docs, tickets, decisions and chat in one FalkorDB graph and answers by walking it." |
-| 0:12 to 0:22 | Browser: Memory layer with its `DEPENDS_ON`, `OWNS` and `TOUCHES` edges, and a Memory with `MENTIONS` | "Slack and GitHub feed it live. Every memory carries the scope of the room it was said in." |
+| 0:12 to 0:22 | Browser on the local replay graph, not production: production has no Slack or GitHub data, so no `TOUCHES` edges and no memories. Use the graph set up for the Sales beat (`--steps history --no-sales`, under "Before recording" below). There, checked on 18 Oct, Memory Layer has `DEPENDS_ON` (to Graph Store, from Search Service), `OWNS` from Kofi Mensah, `TOUCHES` from notebook#41, and two memories with `MENTIONS` | "Slack and GitHub feed it live. Every memory carries the scope of the room it was said in." |
 | 0:22 to 0:45 | Slack, production, recording step 1 | "The answer is the path." |
 | 0:45 to 1:00 | Step 2 | "Decision, author, sources, and the conversation it came from." |
 | 1:00 to 1:20 | Step 3 | "Knowledge stays current without deleting history." |
