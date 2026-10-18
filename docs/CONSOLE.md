@@ -151,20 +151,19 @@ An owner or admin clicks **Connect** in the console.
    - **Store.** It stores the `ConnectorInstall` (`auth: 'oauth'`, `status: 'connecting'`), with the
      tokens MultiFernet-encrypted in `secret_enc` and bound to the org and the install. Connecting an
      account the org already has replaces that install's tokens instead of making a second install.
-3. The redirect goes to a fixed page: the project picker (Jira), the site picker (Jira, several
-   sites), the connection's page (HubSpot), or `/console?error=<code>`.
+3. The redirect goes to a fixed page:
+   - `/console?connected=<source>` on success; the console then offers the next step (Jira: pick projects).
+   - `/console/connect/jira/site?id=<connection id>` when the Jira consent covers several sites.
+   - `/console?error=<code>` on a failure.
    - Nothing from the vendor (an error description, a site name) is put in a URL or a page.
    - The redirect is `no-store`, and nginx logs paths without query strings.
 
 | `error=` | Meaning |
 | --- | --- |
-| `oauth_state` | Unknown, expired (10 min) or already used state, or a state for another tool. Start again. |
-| `oauth_session` | The session changed (signed out, signed in again, created an org) or is no longer an admin |
 | `oauth_denied` | The person declined on the vendor's consent page |
-| `oauth_failed` | The code exchange or the account lookup failed. The backend logs the failure type, never its text. |
-| `no_jira_site` | The consent covers no Jira site on atlassian.net |
-| `claimed` | Another org already reads this Jira site or HubSpot portal |
-| `not_configured` | The app's client id or secret is missing |
+| `oauth_state` | The state is unknown, expired (10 min), already used or for another tool, or the session changed (signed out, signed in again, created an org, no longer an admin). Start again. |
+| `account_claimed` | Another org already reads this Jira site or HubSpot portal |
+| `oauth_failed` | Anything else: the code exchange or the account lookup failed, the consent covers no Jira site on atlassian.net, or the app's client id or secret is missing. The backend logs the failure type, never its text. |
 
 ## Tokens at run time
 

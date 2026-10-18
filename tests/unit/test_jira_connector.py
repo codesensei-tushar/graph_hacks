@@ -51,6 +51,18 @@ class JiraConnectorTest(unittest.TestCase):
         lower = Install(source="jira", config={**CONFIG, "projects": "pay, NOPE"})
         self.assertEqual([c.external_id for c in self.connector.containers(lower)], ["10000"])
 
+    def test_available_containers_are_every_browsable_project(self):
+        offered = self.connector.available_containers(self.install)
+        self.assertEqual([(c.external_id, c.key, c.name) for c in offered], [("10000", "PAY", "Quillfern Payments"), ("10001", "PLAT", "Quillfern Platform"), ("10002", "HR", "People team")])
+        self.assertEqual(jira.JiraConnector.container_field, "projects")
+
+    def test_available_containers_skip_what_is_not_a_project_and_are_capped(self):
+        odd = [{"id": "10000", "key": "PAY", "name": "Payments"}, {"id": "10000", "key": "PAY", "name": "again"}, {"id": "x", "key": "BAD"}, {"id": "7", "key": "not a key"}, {"id": "8", "key": "OPS"}]
+        with mock.patch.object(self.fake, "all_projects", return_value=odd):
+            self.assertEqual([c.key for c in self.connector.available_containers(self.install)], ["PAY", "OPS"])
+        with mock.patch.object(jira, "MAX_AVAILABLE_PROJECTS", 2), mock.patch.object(self.fake, "all_projects", side_effect=lambda limit: load("projects.json")["values"][:limit]), self.assertLogs("src.connectors.jira", "WARNING"):
+            self.assertEqual(len(self.connector.available_containers(self.install)), 2)
+
     def test_check_credentials_names_the_account_and_site(self):
         info = self.connector.check_credentials(self.install)
         self.assertEqual((info.account, info.site), ("Maya Ortiz", "quillfern.atlassian.net"))

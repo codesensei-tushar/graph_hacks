@@ -110,12 +110,14 @@ class GraphOverviewTest(unittest.TestCase):
         self.assertLessEqual(len(self.get("/api/graph/sample")["nodes"]), graph_overview.DEFAULT_SAMPLE)
         self.assertLessEqual(len(self.get("/api/graph/sample?limit=1000")["nodes"]), graph_overview.MAX_SAMPLE)
 
-    def test_the_routes_share_the_public_rate_limit_and_cache(self):
+    def test_the_routes_are_cached_and_not_counted_against_the_public_rate_limit(self):
         with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=2, window=60)):
             headers = {"X-Real-IP": "203.0.113.9"}
-            self.assertEqual(self.http.get("/api/graph/stats", headers=headers).status_code, 200)
-            self.assertEqual(self.http.get("/api/graph/sample", headers=headers).status_code, 200)
-            self.assertEqual(self.http.get("/api/graph/stats", headers=headers).status_code, 429)
+            for _ in range(5):
+                for path in ("/api/graph/stats", "/api/graph/sample"):
+                    response = self.http.get(path, headers=headers)
+                    self.assertEqual(response.status_code, 200, path)
+                    self.assertEqual(response.headers["cache-control"], ask_api.CACHE_CONTROL)
         ask_api.ANSWERS.clear()
         with mock.patch.object(graph_overview, "graph_stats", wraps=graph_overview.graph_stats) as build:
             self.get("/api/graph/stats")
