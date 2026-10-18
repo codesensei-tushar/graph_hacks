@@ -15,7 +15,7 @@ PageRank is not sampled, and every order is fixed.
 from dataclasses import dataclass, field
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import kinds
+from src.domain.knowledge import companies, kinds
 from src.domain.knowledge.ask_api import ANSWERS, cache_key, GraphEdge, read_tools
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED
 
@@ -124,7 +124,7 @@ def graph_stats(scopes=DEFAULT_SCOPES) -> GraphStats:
         """,
         params,
     ).result_set
-    company = graph.ro_query("MATCH (c:Company) RETURN c.id, c.name ORDER BY c.id LIMIT 1").result_set
+    company_id, company_name = companies.primary_company(graph)
     labels = {label: int(by_label[label]) for label in COUNTED_LABELS if by_label.get(label)}
     kind_counts: dict[str, int] = {}
     for kind, count in by_kind:
@@ -137,8 +137,8 @@ def graph_stats(scopes=DEFAULT_SCOPES) -> GraphStats:
         kinds={kind: kind_counts[kind] for kind in kinds.SERVICE_KINDS if kind in kind_counts},
         rels=len(by_rel),
         tools=len(read_tools()),
-        company=company[0][0] if company else None,
-        company_name=company[0][1] if company else None,
+        company=company_id,
+        company_name=company_name,
     )
 
 

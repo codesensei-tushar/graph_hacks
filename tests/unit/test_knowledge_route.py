@@ -412,7 +412,7 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
             "mentions of TKT-102": "search",
             "everything on TKT-102": "explore",
             "who should know about notebook#45": "who_should_know",
-            "what is PR-45": "who_knows",
+            "what is PR-45": "pr_explain",
         }
         for question, tool in cases.items():
             with self.subTest(question=question):

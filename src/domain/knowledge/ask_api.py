@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 
 from src.db import falkordb_client
 from src.db.falkordb_client import connect
-from src.domain.knowledge import agent, ask_service, catalogue, kinds, smalltalk
+from src.domain.knowledge import agent, ask_service, catalogue, companies, kinds, smalltalk
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
 from src.domain.knowledge.proof import ProofReport, run_proof
 
@@ -77,6 +77,19 @@ EXAMPLES: dict[str, list[str]] = {
         "who owns the linear integration",
     ],
 }
+# Questions about this repo itself (codesensei-tushar/graph_hacks), for the live demo. Offered first
+# whenever the graph holds the Company Brain self-seed, also when it is merged next to Quillfern:
+# then Quillfern's chips follow and Quillfern's refusal stays last. The pull request chips answer
+# once GitHub ingest has read the repo; until then ``examples()`` leaves them out.
+REPO_COMPANY = "company-brain"
+REPO_EXAMPLES: list[str] = [
+    "what did PR #207 do",
+    "who should know about PR #216",
+    "who owns the console",
+    "what does the connector framework depend on",
+    "who should know about the scheduler",
+    "what changed in the scheduler this week",
+]
 
 # The numbered script under the ask box. Slack-only moves stay in the list so a judge
 # sees where a write waits for approval; the page itself only runs the read questions.
@@ -389,6 +402,8 @@ class Examples:
     company_id: str | None
     company_name: str | None
     questions: list[str]
+    # The other companies merged into the same graph, by id (the self-seed next to Quillfern).
+    also: list[str] = field(default_factory=list)
 
 
 def demo_steps(company_id: str | None) -> list[dict[str, str]]:
@@ -399,6 +414,10 @@ def demo_steps(company_id: str | None) -> list[dict[str, str]]:
 def examples() -> Examples:
     """The seeded company and the questions to offer for it. An unknown company gets the Quillfern set.
 
+    The company is the configured seed company when the graph holds it (``companies.primary_company``).
+    When the graph also holds this repo's self-seed, ``REPO_EXAMPLES`` come first, so the live demo's
+    questions about this repo lead and the company's own chips follow.
+
     Chips are offered only when they answer: every question but the last is asked here and
     dropped unless it is ``found`` and walks a path or cites a memory, so a graph missing a chip's data never
     offers it. The path matters for the memory tools, which find the thing named and still
@@ -408,10 +427,13 @@ def examples() -> Examples:
     period and the click that follows is already answered.
     """
     _, graph = connect()
-    rows = graph.ro_query("MATCH (c:Company) RETURN c.id, c.name ORDER BY c.id LIMIT 1").result_set
-    company_id, company_name = (rows[0][0], rows[0][1]) if rows else (None, None)
+    held = companies.companies(graph)
+    company_id, company_name = held[0] if held else (None, None)
     *chips, refusal = EXAMPLES.get(company_id or "", EXAMPLES["quillfern"])
-    return Examples(company_id, company_name, [question for question in chips if _answers(question)] + [refusal])
+    also = [other for other, _name in held[1:]]
+    if REPO_COMPANY in also or company_id == REPO_COMPANY:
+        chips = REPO_EXAMPLES + [question for question in chips if question not in REPO_EXAMPLES]
+    return Examples(company_id, company_name, [question for question in chips if _answers(question)] + [refusal], also)
 
 
 def _answers(question: str) -> bool:
