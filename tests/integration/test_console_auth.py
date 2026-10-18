@@ -455,8 +455,13 @@ class ConsoleAuthTest(unittest.TestCase):
         # The bot install (package B) verifies the creator, then routes the team: now owner.
         self.slack.users["UFOUNDER"] = SlackUserInfo(id="UFOUNDER", real_name="Founder", team_id=team)
         self._install_and_route(org_id, team, "UFOUNDER")
+        pending_key = self._session_key()
         # At once, not after the minute between role checks: the route is what a pending role waits for.
-        self.assertEqual(self.client.get("/console/api/me").json()["role"], "owner")
+        promoted = self.client.get("/console/api/me")
+        self.assertEqual(promoted.json()["role"], "owner")
+        # ...and the session is rotated on that response (a privilege change), its new cookie set.
+        self.assertIn(sessions.COOKIE, promoted.headers.get("set-cookie", ""))
+        self.assertIsNone(kv().get(pending_key))
         self.assertEqual(self.client.get("/console/api/whoami").json()["org"], org_id)
 
     def test_the_slack_install_callback_promotes_the_installers_pending_session(self):
@@ -467,10 +472,12 @@ class ConsoleAuthTest(unittest.TestCase):
         org_id = self._mutate("/console/api/orgs", {"name": "Promoted", "invite_code": self._mint()}).json()["org"]["id"]
         self.slack.users["UFOUNDER"] = SlackUserInfo(id="UFOUNDER", real_name="Founder", team_id=team)
         self._install_and_route(org_id, team, "UFOUNDER")
+        old_key = self._session_key()
         request = mock.Mock(cookies={sessions.COOKIE: self.client.cookies[sessions.COOKIE]})
-        slack_install._promote_pending_creator(request, tenancy.resolve(org_id), team)
-        # The stored record itself is owner, before the browser's next request reaches the console.
-        self.assertEqual(json.loads(kv().get(self._session_key()))["role"], "owner")
+        new_sid = slack_install._promote_pending_creator(request, tenancy.resolve(org_id), team)
+        # Gaining privileges rotates the session, as sign-in does: the old id is dead, the new one is owner.
+        self.assertIsNone(kv().get(old_key))
+        self.assertEqual(json.loads(kv().get(f"console:session:{hashlib.sha256(new_sid.encode()).hexdigest()}"))["role"], "owner")
         # A cookie that is no session is ignored.
         slack_install._promote_pending_creator(mock.Mock(cookies={sessions.COOKIE: "not-a-session"}), tenancy.resolve(org_id), team)
 
