@@ -226,8 +226,12 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     ask_who = _ASK_WHO.search(text)
     if ask_who and ask_who.start() > 0 and not coordination.pr_reference(text):
         # "I am new on payments ... who should I talk to about the invoice worker": the person to go to, about
-        # what follows; the preamble is context, not the subject, and not a request for a brief.
-        return "who_knows", {"name": text[ask_who.start() :]}
+        # what follows, not a brief. When what follows names nothing ("billing is failing, who should I ping",
+        # "I'm stuck on TKT-101, who should I ask"), who_knows resolves the whole question instead.
+        tail = text[ask_who.start() :]
+        if not text[ask_who.end() :].strip(" ?.!"):
+            return "who_knows", {"name": text}
+        return "who_knows", {"name": tail, "context": text}
     if _GROUPS.search(text):
         return "working_groups", {}
     if _RISK.search(text):
@@ -447,9 +451,13 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     return result
 
 
-def who_knows(question: str, scopes: list[str]) -> ToolResult:
+def who_knows(question: str, scopes: list[str], context: str | None = None) -> ToolResult:
+    """``context``, when given, is the whole question ``question`` was cut from ("I am new on payments,
+    who should I talk to about X"): resolved instead when the cut names nothing."""
     _, graph = connect()
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
+    if not resolution.found and context and (whole := resolve.resolve_name(context, ANSWER_LABELS, scopes, graph=graph)).found:
+        question, resolution = context, whole
     if not resolution.found:
         # "who knows about refunds" names a topic, not a thing: the graph may still answer.
         return fallback.before_refusing(question, scopes, _miss("who_knows", resolution))
@@ -789,7 +797,7 @@ _ROUTED = {
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth"), args.get("direction")),
     "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
-    "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
+    "who_knows": lambda args, scopes: who_knows(args["name"], scopes, args.get("context")),
     "path_between": lambda args, scopes: algorithms.path_between(args["source"], args.get("target") or "", scopes),
     "load_bearing": lambda args, scopes: algorithms.load_bearing(args.get("limit"), scopes),
     "related_memories": lambda args, scopes: memories.related_memories(args["name"], scopes, args.get("k")),

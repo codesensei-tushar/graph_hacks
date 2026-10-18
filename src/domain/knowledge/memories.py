@@ -93,19 +93,19 @@ def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResul
 ATTACHED = 3
 
 
-def subject_of(result: ToolResult) -> str | None:
-    """The node an answer is about: the mentionable node its path names most often, the first on a tie."""
-    counts: dict[str, int] = {}
-    order: list[str] = []
+def subject_of(result: ToolResult) -> tuple[str, str] | None:
+    """The node an answer is about, as (id, label): the mentionable node its path names most often, the first on a tie."""
+    counts: dict[tuple[str, str], int] = {}
+    order: list[tuple[str, str]] = []
     for step in result.path:
         for node_id, label in ((step.from_id, step.from_label), (step.to_id, step.to_label)):
             if node_id and label in MENTIONABLE:
-                if node_id not in counts:
-                    order.append(node_id)
-                counts[node_id] = counts.get(node_id, 0) + 1
+                if (node_id, label) not in counts:
+                    order.append((node_id, label))
+                counts[(node_id, label)] = counts.get((node_id, label), 0) + 1
     if not counts:
         return None
-    return max(order, key=lambda node_id: (counts[node_id], -order.index(node_id)))
+    return max(order, key=lambda node: (counts[node], -order.index(node)))
 
 
 def attached(result: ToolResult, scopes: list[str], k: int = ATTACHED) -> list[MemoryLine]:
@@ -116,33 +116,42 @@ def attached(result: ToolResult, scopes: list[str], k: int = ATTACHED) -> list[M
     subject = subject_of(result) if result.found else None
     if subject is None:
         return []
+    node_id, label = subject
+    # The label comes from MENTIONABLE, never from text, and anchors the match on its id index.
+    anchor = f"(e:{label} {{id: $id}})"
+    returned = (
+        "RETURN DISTINCT m.id, m.text, m.scope, m.channel_id, m.created_at, m.ts, coalesce(a.name, a.id) "
+        "ORDER BY coalesce(m.created_at, 0) DESC LIMIT $k"
+    )
+    params = {"id": node_id, "scopes": list(scopes), "k": int(k)}
     _, graph = connect()
-    rows = graph.ro_query(
+    direct = graph.ro_query(
         f"""
-        MATCH (m:Memory)-[:MENTIONS]->(e {{id: $id}})
+        MATCH (m:Memory)-[:MENTIONS]->{anchor}
         WHERE m.scope IN $scopes AND {LIVE}
         OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
-        RETURN m.id AS id, m.text AS text, m.scope AS scope, m.channel_id AS channel_id, m.created_at AS created, m.ts AS ts,
-               coalesce(a.name, a.id) AS author, 0 AS hops
-        UNION
-        MATCH (e {{id: $id}})-[]-(n)
-        WHERE (n:Service OR n:Document OR n:Ticket OR n:Decision) AND {resolve.SCOPED.format(var="n")}
-        MATCH (m:Memory)-[:MENTIONS]->(n)
-        WHERE m.scope IN $scopes AND {LIVE}
-        OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
-        RETURN m.id AS id, m.text AS text, m.scope AS scope, m.channel_id AS channel_id, m.created_at AS created, m.ts AS ts,
-               coalesce(a.name, a.id) AS author, 1 AS hops
+        {returned}
         """,
-        {"id": subject, "scopes": list(scopes)},
+        params,
     ).result_set
-    best: dict[str, tuple] = {}
-    for row in rows:
-        if row[0] not in best or row[7] < best[row[0]][7]:
-            best[row[0]] = row
-    ordered = sorted(best.values(), key=lambda row: (row[7], -(row[4] or 0)))
+    near = []
+    if len(direct) < k:
+        near = graph.ro_query(
+            f"""
+            MATCH {anchor}-[]-(n)
+            WHERE (n:Service OR n:Document OR n:Ticket OR n:Decision) AND {resolve.SCOPED.format(var="n")}
+            MATCH (m:Memory)-[:MENTIONS]->(n)
+            WHERE m.scope IN $scopes AND {LIVE} AND NOT (m)-[:MENTIONS]->(e)
+            OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
+            {returned}
+            """,
+            params,
+        ).result_set
+    rows = list({row[0]: row for row in [*near, *direct]}.values())  # one line per memory, direct wins
+    rows.sort(key=lambda row: (row[0] not in {first[0] for first in direct}, -(row[4] or 0)))
     return [
         MemoryLine(text=text or "", learned_at=day_from(created, ts), author=author or "someone", scope=scope, channel_id=channel_id)
-        for _id, text, scope, channel_id, created, ts, author, _hops in ordered[:k]
+        for _id, text, scope, channel_id, created, ts, author in rows[:k]
     ]
 
 

@@ -34,7 +34,9 @@ class CompoundRouteTest(unittest.TestCase):
 
     def test_who_should_i_talk_to_beats_i_am_new(self):
         question = "I am new on payments and need to fix a bug, who should I talk to about the invoice worker"
-        self.assertEqual(ask_service.route(question), ("who_knows", {"name": "who should I talk to about the invoice worker"}))
+        self.assertEqual(ask_service.route(question), ("who_knows", {"name": "who should I talk to about the invoice worker", "context": question}))
+        # Nothing after the phrase: the whole question is the subject.
+        self.assertEqual(ask_service.route("billing is failing, who should I ping"), ("who_knows", {"name": "billing is failing, who should I ping"}))
         self.assertEqual(ask_service.route("I just joined payments")[0], "onboarding_brief")
 
     def test_open_ticket_phrasings_route_alike(self):

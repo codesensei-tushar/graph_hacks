@@ -82,6 +82,21 @@ class AnswerExtrasTest(unittest.TestCase):
         self.assertEqual(result.tool, "who_knows")
         self.assertTrue(result.answer.startswith("Invoice Worker is owned by"), result.answer)
 
+    def test_the_subject_named_before_who_should_i_ping_is_kept(self):
+        cases = {
+            "billing is failing, who should I ping": "Billing Service is owned by Arjun Mehta.",
+            "the invoice worker is down, who should we talk to": "Invoice Worker is owned by",
+            "I'm stuck on TKT-101, who should I ask": "TKT-101 is",
+            # The text after the phrase names nothing; the preamble does.
+            "billing is failing, who should I talk to about it": "Billing Service is owned by Arjun Mehta.",
+        }
+        for question, lead in cases.items():
+            with self.subTest(question=question):
+                result = ask_service.ask(question, ORG)
+                self.assertEqual(result.tool, "who_knows")
+                self.assertTrue(result.found, result.answer)
+                self.assertTrue(result.answer.startswith(lead), result.answer)
+
     # --- 9: typos and small talk -----------------------------------------------------------------
 
     def test_a_typo_is_answered_with_the_nearest_name(self):
