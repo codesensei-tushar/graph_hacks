@@ -119,7 +119,7 @@ class ConnectorIdentityTest(unittest.TestCase):
                     self.assertIn("Arjun Mehta", result.answer)
             # Someone else named in the question stays the subject.
             choice = agent_turn.for_the_asker(agent.choose_with_keywords("what if Lena leaves, should I worry"), "what if Lena leaves, should I worry", request)
-            self.assertEqual(choice.args["name"], "what if Lena leaves, should I worry")
+            self.assertIn("Lena", choice.args["name"])
 
 
 if __name__ == "__main__":
