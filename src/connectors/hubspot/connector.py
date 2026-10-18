@@ -55,7 +55,7 @@ class HubSpotConnector(Connector):
         self._client_for = client_for or _client_for
         self._clock = clock
         # install.key -> what the portal is, its owners and stage labels, and when those expire.
-        self._portals: dict[str, tuple[str, str]] = {}
+        self._portals: dict[tuple[str, str], tuple[str, str]] = {}
         self._directories: dict[str, tuple[float, dict[str, dict], dict[str, str]]] = {}
 
     # --- the contract -----------------------------------------------------------------------
@@ -190,13 +190,13 @@ class HubSpotConnector(Connector):
     # --- what is reused between pages --------------------------------------------------------
 
     def _portal(self, install: Install, refresh: bool = False) -> tuple[str, str]:
-        if refresh or install.key not in self._portals:
+        if refresh or (install.org, install.key) not in self._portals:
             details = self._client_for(install).account_details()
             portal = str(details.get("portalId") or "")
             if not portal:
                 raise ConnectorError("HubSpot's account details named no portal")
-            self._portals[install.key] = (portal, details.get("uiDomain") or "app.hubspot.com")
-        return self._portals[install.key]
+            self._portals[(install.org, install.key)] = (portal, details.get("uiDomain") or "app.hubspot.com")
+        return self._portals[(install.org, install.key)]
 
     def _directory(self, install: Install, client: HubSpotClient) -> tuple[dict[str, dict], dict[str, str]]:
         cached = self._directories.get(install.key)

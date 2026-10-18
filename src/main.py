@@ -6,9 +6,10 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
-from src.api.v1 import auth, connectors, console_oauth, github, health, org_ops, proof, slack, slack_install
+from src.api.v1 import auth, connectors, console_connectors, console_oauth, github, health, org_ops, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
+from src.connectors import store as connector_store
 from src.connectors import sync as connector_sync  # registers the connector sync job
 from src.core import scheduler, tenancy
 from src.core.config import settings
@@ -42,6 +43,7 @@ def _seed_if_empty() -> None:
             reset_and_seed(company_module(settings.seed_company))
     ensure_indexes()
     connector_graph.ensure_indexes()
+    connector_store.ensure_indexes()
     # Never raises: a failure is logged and the tools that would search keep their refusal.
     ensure_search_indexes()
     # The other orgs' graphs got their indexes when they were created; this adds any added since.
@@ -105,6 +107,12 @@ async def lifespan(_app: FastAPI):
         github_backfill.schedule_collaborator_refresh()
     # Connectors with CONNECTOR_<SOURCE>_* set: configure each install and arm its sync.
     connector_registry.load(settings.connector_env)
+    # Installs made in the console, stored in each org's graph (the legacy org's too).
+    for org in [tenancy.legacy_org(), *_other_orgs()]:
+        try:
+            connector_registry.load_from_graph(org.id)
+        except Exception:
+            log.exception("loading stored connector installs failed org=%s", org.id)
     connector_sync.schedule_all()
     if settings.slack_enabled or settings.slack_oauth_enabled:
         threading.Thread(target=_recover, name="brain-recover", daemon=True).start()
@@ -133,6 +141,7 @@ app.include_router(console_oauth.router)
 app.include_router(health.router)
 app.include_router(proof.router)
 app.include_router(org_ops.router)
+app.include_router(console_connectors.router)
 app.include_router(auth.router)
 ops.install(app)
 web.install(app)

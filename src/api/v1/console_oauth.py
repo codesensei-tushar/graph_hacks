@@ -226,7 +226,10 @@ def _claim_and_store(session, source: str, external_account: str, site: str | No
         installed = store.to_install(store.get(current.id))
         oauth.forget(installed)
         if current.status in ("active", "error"):
+            from src.connectors import sync
+
             registry.put(installed)
+            sync.rearm(installed)  # a credentials back-off must not outlast the reconnect
         return current.id
     try:
         created = store.create_install(
