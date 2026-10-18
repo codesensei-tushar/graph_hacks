@@ -11,8 +11,18 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M9.5 17.6 22.5 23.4' stroke='%237d8597' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M9.5 14.4 22.5 8.6' stroke='%232dd4e6' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='6' cy='16' r='4.2' fill='%237c8cff'/%3E%3Crect x='21.5' y='3' width='8.5' height='8.5' rx='2' fill='%23f0703a'/%3E%3Cpath d='M25.8 20.5l4.5 4.5-4.5 4.5-4.5-4.5z' fill='%232ec48c'/%3E%3C/svg%3E">
 <link rel="preload" href="/static/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Company Brain">
+<meta property="og:title" content="Company Brain: ask how your company works">
+<meta property="og:description" content="Ask who owns what, who to ask, why a decision was made, or what breaks if something fails. Every answer shows the connections it used, and it never guesses.">
+<meta property="og:url" content="https://brain.noobsurd.space/">
+<meta property="og:image" content="https://brain.noobsurd.space/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Company Brain: ask how your company works, and every answer shows the path it walked.">
+<meta name="twitter:card" content="summary_large_image">
 <script src="/static/theme.js?v=1"></script>
-<link rel="stylesheet" href="/static/style.css?v=15">
+<link rel="stylesheet" href="/static/style.css?v=16">
 <link rel="stylesheet" href="/static/riskmap.css?v=3">
 <link rel="stylesheet" href="/static/explore.css?v=1">
 </head>
@@ -51,7 +61,7 @@
       </div>
     </div>
     <div class="hero-foot">
-      <p class="lede">People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.</p>
+      <p class="lede">Ask who owns what, who to ask, why a decision was made, or what breaks if something fails. Company Brain keeps a company's people, teams, systems, documents and decisions as one connected map, and every answer shows the connections it used. When the map does not know, it says so instead of guessing.</p>
       <a class="btn btn-ghost" href="#how">How it works <span aria-hidden="true">↗</span></a>
     </div>
   </section>
@@ -60,7 +70,7 @@
     <!-- 2.2 Live proof: the answer to whatever was asked above, with the walk. -->
     <section class="block" id="live-answer" aria-labelledby="live-title">
       <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Live</p>
-      <h2 id="live-title">Ask the graph behind this project.</h2>
+      <h2 id="live-title">Ask the demo company's graph.</h2>
       <p class="sub"><span id="graph-line">This page reads the live graph this server runs.</span> Pick a question or write your own. The answer comes back with its path, drawn in the order it was walked.</p>
       <div class="answer" id="answer">
         <div class="answer-bar"><span>answer</span><span class="q" id="answer-q"></span></div>
@@ -81,6 +91,7 @@
     <section class="block" id="graph" aria-labelledby="graph-title">
       <p class="eyebrow">The graph</p>
       <h2 id="graph-title">The graph behind every answer.</h2>
+      <p class="sub">A map of the company: each dot is a person, a team, something a team runs, or a document, ticket or decision, and each line is how two of them are connected. Every answer walks these lines.</p>
       <figure class="live" id="live">
         <div class="live-bar">
           <span class="dot" aria-hidden="true"></span>
@@ -374,7 +385,7 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
       <div class="catalogue-panel" id="tools">
         <div class="tool-head">
           <p class="tool-count" id="tool-count"><span class="sk-line short" aria-hidden="true"></span></p>
-          <label class="tool-filter"><span class="sr">Filter the tools</span><input type="search" id="tool-filter" placeholder="Filter: owner, depends, leaves…" autocomplete="off" disabled></label>
+          <label class="tool-filter"><span class="sr">Filter the tools</span><input type="search" id="tool-filter" placeholder="Filter the tools…" autocomplete="off" disabled></label>
         </div>
         <ul class="tool-grid" id="tool-list" aria-live="polite">
           <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
@@ -402,11 +413,11 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
     <p class="foot-links"><a href="https://github.com/codesensei-tushar/graph_hacks#readme">README</a><a href="/healthz">/healthz</a></p>
   </div>
 </footer>
-<script src="/static/shell.js?v=5"></script>
+<script src="/static/shell.js?v=6"></script>
 <script src="/static/graph.js?v=8"></script>
 <script src="/static/hero.js?v=5"></script>
 <script src="/static/riskmap.js?v=2"></script>
 <script src="/static/answer.js?v=1"></script>
-<script src="/static/app.js?v=14"></script>
+<script src="/static/app.js?v=15"></script>
 </body>
 </html>

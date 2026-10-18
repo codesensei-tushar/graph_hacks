@@ -492,7 +492,7 @@
     status.textContent = "Running the questions twice…";
     try {
       const data = await getJson("/api/ask/proof");
-      $("#proof-line").replaceChildren(el("b", {}, `${data.collapsed} of ${data.total}`), " capabilities collapse without the graph.");
+      $("#proof-line").replaceChildren(el("b", {}, `${data.collapsed} of ${data.total}`), " answers disappear without the graph.");
       $("#proof-refusal").textContent = refusalSentence(data.rows || []);
       status.hidden = true;
       body.replaceChildren();
