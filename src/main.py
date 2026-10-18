@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import ops, web
-from src.api.v1 import connectors, github, health, proof, slack, slack_install
+from src.api.v1 import auth, connectors, github, health, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
 from src.connectors import sync as connector_sync  # registers the connector sync job
@@ -98,6 +98,7 @@ app.include_router(github.router)
 app.include_router(connectors.router)
 app.include_router(health.router)
 app.include_router(proof.router)
+app.include_router(auth.router)
 ops.install(app)
 web.install(app)
 mcp_api.install(app)
