@@ -2,6 +2,10 @@ services:
   falkordb:
     # Same engine version as production (deploy/docker-compose.yml).
     image: falkordb/falkordb:v4.22.1
+    environment:
+      # The same limits as production (deploy/docker-compose.yml); the image default caps results
+      # at 10k rows and kills reads after 1 s.
+      FALKORDB_ARGS: MAX_QUEUED_QUERIES 100 TIMEOUT 10000 RESULTSET_SIZE -1
     ports:
       - "6379:6379"
       - "3000:3000"
