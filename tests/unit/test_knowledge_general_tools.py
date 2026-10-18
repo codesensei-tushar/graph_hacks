@@ -149,10 +149,10 @@ class SchemaTest(unittest.TestCase):
 
 class WordingTest(unittest.TestCase):
     def test_groups_read_in_plain_words(self):
-        self.assertEqual(explore._phrase("ABOUT", False, "Ticket"), "tickets about it:")
-        self.assertEqual(explore._phrase("DEPENDS_ON", False, "Service"), "depended on by")
-        self.assertEqual(explore._phrase("SUPERSEDES", False, "Decision"), "replaced by")
-        self.assertEqual(explore._phrase("SOMETHING_NEW", True, "Service"), "something new")
+        self.assertEqual(explore.phrase("ABOUT", False, "Ticket"), "tickets about it:")
+        self.assertEqual(explore.phrase("DEPENDS_ON", False, "Service"), "depended on by")
+        self.assertEqual(explore.phrase("SUPERSEDES", False, "Decision"), "replaced by")
+        self.assertEqual(explore.phrase("SOMETHING_NEW", True, "Service"), "something new")
         self.assertEqual(explore._listing([f"n{index}" for index in range(10)], 8), "n0, n1, n2, n3, n4, n5, n6, n7 and 2 more")
 
 
