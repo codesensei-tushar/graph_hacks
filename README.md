@@ -49,7 +49,7 @@ Any other client: streamable HTTP at `https://brain.noobsurd.space/mcp` with tha
 python scripts/replay_workspace.py --graph company_demo
 ```
 
-In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 14 replies from "who owns billing" to the Sales questions, and ends with `fake Slack calls=155 bot messages=16`: the 14 replies and the two Approve cards.
+In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 15 replies, from "who owns billing" through the Sales questions to the heads-up a new pull request posts, and ends with `fake Slack calls=156 bot messages=17`: the 15 replies and the two Approve cards.
 
 - What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
 - Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
