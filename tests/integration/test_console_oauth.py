@@ -384,6 +384,33 @@ class ConsoleOAuthTest(unittest.TestCase):
         self.assertEqual(self.vendors.refreshes["hubspot"], 1)
         self.assertNoSecretsLogged()
 
+    def test_hubspot_syncs_after_the_callback_with_no_picker(self):
+        """HubSpot has no projects to pick: the callback itself loads the install and arms its first step,
+        which makes it active with items, with nothing else called."""
+        install_id = self._connected("hubspot")
+        with tenancy.org_context(self.acme.id):
+            install = registry.get_install(self.acme.id, "hubspot", install_id.partition(":")[2])
+            self.assertIsNotNone(install, "the callback did not load the install")
+            self.assertEqual(store.get(install_id).status, "connecting")
+            # scheduler.schedule is a mock in this class: the first step was armed at once, for this install.
+            armed = [c for c in scheduler.schedule.call_args_list if c.args[1] == sync.SYNC_JOB and c.args[2] == {"source": "hubspot", "install": install.id}]
+            self.assertTrue(armed, "no first step armed")
+            self.assertEqual(armed[-1].args[0], 0)
+            for _ in range(20):  # what the scheduler does with the armed job, step after step
+                sync.sync_step("hubspot", install.id)
+                states = [s for s in connector_graph.list_states(install) if s.get("id") != install.key]
+                if states and not any(s.get("has_more") for s in states):
+                    break
+            self.assertEqual(store.get(install_id).status, "active")
+            self.assertTrue(states)
+            self.assertGreater(sum(connector_graph.count_items(s["id"]) for s in states), 0)
+
+    def test_jira_waits_for_its_projects(self):
+        install_id = self._connected("jira")
+        with tenancy.org_context(self.acme.id):
+            self.assertIsNone(registry.get_install(self.acme.id, "jira", install_id.partition(":")[2]))
+            self.assertEqual(store.get(install_id).status, "connecting")
+
     def test_hubspot_token_for_another_portal_reads_nothing(self):
         install_id = self._connected("hubspot")
         with tenancy.org_context(self.acme.id):

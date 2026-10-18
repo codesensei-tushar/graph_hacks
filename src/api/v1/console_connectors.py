@@ -308,9 +308,10 @@ def read_scopes(session) -> list[str]:
     from src.domain.memory.read_scope import resolve_brain_read_container_tags
     from src.domain.memory.writeback import SlackMemoryScope
 
-    person = _get(session, "person")
-    person = person.get("id") if isinstance(person, dict) else getattr(person, "id", person)
-    scope = SlackMemoryScope(kind="dm", user_id=person, slack_user_id=_get(session, "slack_user"))
+    # The personal container is keyed by the Slack user id (``user_<slack id>``), as the DM turn writes
+    # it, never by the person node's id: otherwise the console cannot read the asker's own DM memories.
+    slack_user = _get(session, "slack_user") or None
+    scope = SlackMemoryScope(kind="dm", user_id=slack_user, slack_user_id=slack_user)
     return resolve_brain_read_container_tags(scope)
 
 

@@ -11,6 +11,7 @@ code for tokens, finds the vendor account (a Jira site from ``accessible-resourc
 portal from the token's metadata, checked against the CRM's own account details), claims the
 ``ExternalAccount`` for the org, and stores the install (status ``connecting``) with its tokens
 encrypted. A reconnect of an account the org already has replaces that install's tokens instead.
+A connector with no picker (HubSpot) starts syncing at once; Jira waits for its projects.
 
 Every outcome is a redirect to a fixed console page. Nothing from the vendor (an error
 description, a site or portal name) is echoed into a URL or a page, and the code, the state and
@@ -230,6 +231,8 @@ def _claim_and_store(session, source: str, external_account: str, site: str | No
 
             registry.put(installed)
             sync.rearm(installed)  # a credentials back-off must not outlast the reconnect
+        elif _syncs_everything(source):
+            _start_sync(installed)  # connecting since a callback before syncs started here
         return current.id
     try:
         created = store.create_install(
@@ -240,7 +243,30 @@ def _claim_and_store(session, source: str, external_account: str, site: str | No
         if newly_claimed:
             orgs.release_external_account(external_account, session.org)
         raise
+    if _syncs_everything(source):
+        _start_sync(created)
     return created.key
+
+
+def _syncs_everything(source: str) -> bool:
+    """A connector with no picker (HubSpot reads the whole portal): nothing else will start its sync."""
+    connector = registry.get(source)
+    return connector is not None and not connector.container_field
+
+
+def _start_sync(install) -> None:
+    """Load the install and run its first step now. The install stays ``connecting`` until that step
+    works (``sync._record_status`` makes it active). A disconnect that lands meanwhile wins: the
+    status is re-read after the put, as ``select_containers`` does, and the install withdrawn."""
+    from src.connectors import store, sync
+
+    registry.put(install)
+    current = store.get(install.key)
+    if current is None or current.status == "removing":
+        registry.drop(install.org, install.source, install.id)
+        sync.cancel(install)
+        return
+    sync.sync_now(install.source, install_id=install.id)
 
 
 class _Claimed(Exception):

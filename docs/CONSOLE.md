@@ -153,6 +153,9 @@ An owner or admin clicks **Connect** in the console.
      account the org already has replaces that install's tokens instead of making a second install.
 3. The redirect goes to a fixed page:
    - `/console?connected=<source>` on success; the console then offers the next step (Jira: pick projects).
+     A tool with nothing to pick (HubSpot reads the whole portal) starts syncing from the callback
+     itself: the install is loaded and its first step armed at once. It shows `connecting` until that
+     step works, then `active`.
    - `/console/connect/jira/site?id=<connection id>` when the Jira consent covers several sites.
    - `/console?error=<code>` on a failure.
    - Nothing from the vendor (an error description, a site name) is put in a URL or a page.
@@ -202,6 +205,28 @@ Logs show `[oauth] <install> token refreshed; rotated=True` and
 3. Drop the old key (`TOKEN_ENCRYPTION_KEYS=<new>`) and redeploy.
 
 Refreshes write with the first key too, so active installs move to it on their own within an hour.
+
+## Troubleshooting
+
+**Sign-in says "Company Brain cannot read this workspace's Slack connection: its encryption key
+changed"** (`/signin?error=workspace_key`). The workspace's stored bot token cannot be decrypted
+with any key in `TOKEN_ENCRYPTION_KEYS`: the old key was dropped (step 3 above) before the rewrap
+reached it. Until it is fixed nobody in that workspace can sign in and the bot cannot answer there.
+The backend logs, once per attempt:
+
+```
+[console] the stored Slack bot token of team=T... cannot be decrypted (InvalidToken): TOKEN_ENCRYPTION_KEYS no longer holds the key it was encrypted with. ...
+```
+
+Fix it either way:
+
+- Put the old key back as a second key (`TOKEN_ENCRYPTION_KEYS=<new>,<old>`), redeploy, run the
+  rewrap (step 2 above), and only then drop it again.
+- Or, if the old key is gone, have a workspace member reinstall the Slack app from the console
+  (setup step 2): the install stores a fresh token under the current key.
+
+A transient failure (Slack or the graph unreachable) is `workspace_unavailable` instead, and goes
+away on a retry.
 
 ## nginx
 
