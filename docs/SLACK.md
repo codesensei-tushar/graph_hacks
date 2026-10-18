@@ -228,7 +228,7 @@ What a conversation can read depends on where you ask:
 | Roles | `domain/access/roles.py` | `repo-lib/permissions.ts` |
 | Manifest | `domain/slack/manifest.py`, `slack_app/manifest.yaml` | `setup/manifest.ts` |
 
-Delayed work (approval expiry, rollout paging, observe batches, reaction spacing, invite waves) runs on `src/core/scheduler.py`, a Redis sorted set polled by one thread, in place of Durable Object alarms.
+Delayed work (approval expiry, rollout paging, observe batches, reaction spacing, invite waves) runs on `src/core/scheduler.py`, in place of Durable Object alarms: a Redis sorted set worked by a pool of four threads (`SCHEDULER_WORKERS`) plus one that takes only approval expiries, so a long connector sync or model call never holds an expiry up. A job is claimed atomically (Lua) with a lease, at most one per org and group runs at a time (`scheduler.GROUPS`: the connector jobs, the invite wave, the rollout, the GitHub jobs), and a job whose worker died runs again when its lease runs out.
 
 ## What is next
 
