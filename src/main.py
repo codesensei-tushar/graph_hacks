@@ -91,7 +91,15 @@ async def lifespan(_app: FastAPI):
         yield
 
 
-app = FastAPI(title="Company Brain", lifespan=lifespan)
+# The API docs list every route, admin ones included: served only when DOCS_ENABLED is set.
+_docs = settings.docs_enabled
+app = FastAPI(
+    title="Company Brain",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+)
 app.include_router(slack.router)
 app.include_router(slack_install.router)
 app.include_router(github.router)
