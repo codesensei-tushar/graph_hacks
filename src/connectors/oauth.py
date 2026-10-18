@@ -43,7 +43,8 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from src.connectors import http
-from src.connectors.base import ConnectorError, CredentialsRejected, Install, RetryLater
+from src.connectors.base import ConnectorError, CredentialsRejected, Install, OAuthSpec, RetryLater
+from src.core.config import settings
 from src.db.falkordb_client import kv
 
 log = logging.getLogger(__name__)
@@ -64,45 +65,38 @@ _ERROR_CODE = re.compile(r"^[a-z_]{1,64}$")
 _RELEASE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
 
 
-@dataclass(frozen=True)
-class OAuthSpec:
-    """How a source's OAuth app signs a workspace in. One per connector (``Connector.oauth``).
+def client_id(spec: OAuthSpec) -> str:
+    """The app's client id, from the variable the spec names (``JIRA_OAUTH_CLIENT_ID``), never ``CONNECTOR_*``."""
+    return _setting(spec.client_id_setting)
 
-    ``client_id_env`` and ``client_secret_env`` name the environment variables holding the app's
-    credentials; they are deliberately not ``CONNECTOR_*`` (``registry.load`` would read those as
-    install fields). ``token_body`` is ``"json"`` (Atlassian) or ``"form"`` (HubSpot).
-    """
 
-    authorize_url: str
-    token_url: str
-    scopes: tuple[str, ...]
-    client_id_env: str
-    client_secret_env: str
-    token_body: str = "form"
-    # Extra query parameters on the authorize URL (Atlassian's audience and prompt).
-    authorize_params: dict[str, str] = field(default_factory=dict, compare=False, hash=False)
-    # Joins the scopes on the authorize URL. Both vendors take a space.
-    scope_separator: str = " "
+def client_secret(spec: OAuthSpec) -> str:
+    return _setting(spec.client_secret_setting)
 
-    def client_id(self) -> str:
-        return os.environ.get(self.client_id_env, "").strip()
 
-    def client_secret(self) -> str:
-        return os.environ.get(self.client_secret_env, "").strip()
+def _setting(name: str) -> str:
+    return (os.environ.get(name) or str(getattr(settings, name.lower(), "") or "")).strip()
 
-    def configured(self) -> bool:
-        return bool(self.client_id() and self.client_secret())
 
-    def authorize_url_for(self, redirect_uri: str, state: str) -> str:
-        query = {
-            **self.authorize_params,
-            "client_id": self.client_id(),
-            "scope": self.scope_separator.join(self.scopes),
-            "redirect_uri": redirect_uri,
-            "state": state,
-            "response_type": "code",
-        }
-        return f"{self.authorize_url}?{urllib.parse.urlencode(query, quote_via=urllib.parse.quote)}"
+def configured(spec: OAuthSpec | None) -> bool:
+    return bool(spec and client_id(spec) and client_secret(spec))
+
+
+def callback_url(source: str) -> str:
+    """``<PUBLIC_URL>/console/oauth/<source>/callback``: what each vendor app has registered."""
+    return f"{settings.public_url}/console/oauth/{source}/callback"
+
+
+def authorize_url(spec: OAuthSpec, redirect_uri: str, state: str) -> str:
+    query = {
+        **spec.extra_params,
+        "client_id": client_id(spec),
+        "scope": " ".join(spec.scopes),
+        "redirect_uri": redirect_uri,
+        "state": state,
+        "response_type": "code",
+    }
+    return f"{spec.authorize_url}?{urllib.parse.urlencode(query, quote_via=urllib.parse.quote)}"
 
 
 class OAuthError(ConnectorError):
@@ -185,7 +179,7 @@ def exchange_code(spec: OAuthSpec, code: str, redirect_uri: str) -> Tokens:
     """Trade an authorization code for tokens. Raises ``OAuthError`` when the vendor refuses it."""
     payload = _post(
         spec.token_url,
-        {"grant_type": "authorization_code", "client_id": spec.client_id(), "client_secret": spec.client_secret(), "code": code, "redirect_uri": redirect_uri},
+        {"grant_type": "authorization_code", "client_id": client_id(spec), "client_secret": client_secret(spec), "code": code, "redirect_uri": redirect_uri},
         spec.token_body,
     )
     tokens = _tokens(payload)
@@ -199,7 +193,7 @@ def refresh(spec: OAuthSpec, refresh_token: str) -> Tokens:
     """Spend ``refresh_token`` for a new access token (and, with Atlassian, a new refresh token)."""
     payload = _post(
         spec.token_url,
-        {"grant_type": "refresh_token", "client_id": spec.client_id(), "client_secret": spec.client_secret(), "refresh_token": refresh_token},
+        {"grant_type": "refresh_token", "client_id": client_id(spec), "client_secret": client_secret(spec), "refresh_token": refresh_token},
         spec.token_body,
     )
     return _tokens(payload, previous_refresh=refresh_token)
@@ -218,7 +212,8 @@ def _read_secret(install: Install) -> dict:
 def _write_secret(install: Install, secret: dict) -> None:
     from src.connectors import store
 
-    store.write_secret(_org(install), install.key, secret)
+    if not store.write_secret(_org(install), install.key, secret):
+        raise LookupError("the install is gone")
 
 
 def _org(install: Install) -> str:
@@ -243,20 +238,13 @@ def _fresh(expires_at, now: float) -> bool:
 
 
 def _usable(install: Install, secret: dict, now: float) -> str | None:
-    """The stored access token if it is fresh and belongs to this install, else None."""
-    _check_binding(install, secret)
+    """The stored access token if it is fresh, else None. (The store has already checked that the
+    secret was written for this org and install.)"""
     token = secret.get("access_token")
     if isinstance(token, str) and token and _fresh(secret.get("expires_at"), now):
         _cache[(_org(install), install.key)] = (token, float(secret["expires_at"]))
         return token
     return None
-
-
-def _check_binding(install: Install, secret: dict) -> None:
-    """A secret names the org and install it was written for; one copied onto another install is refused."""
-    org, key = secret.get("org"), secret.get("install")
-    if (org is not None and org != _org(install)) or (key is not None and key != install.key):
-        raise CredentialsRejected(f"{install.key}: the stored credentials belong to another install")
 
 
 def bearer_for(install: Install, spec: OAuthSpec | None = None) -> str:
@@ -291,8 +279,8 @@ def bearer_for(install: Install, spec: OAuthSpec | None = None) -> str:
         refresh_token = secret.get("refresh_token")
         if not isinstance(refresh_token, str) or not refresh_token:
             raise CredentialsRejected(f"{install.key}: no refresh token stored; reconnect it")
-        if not spec.configured():
-            raise ConnectorError(f"{install.source} OAuth app credentials are not set ({spec.client_id_env}, {spec.client_secret_env})")
+        if not configured(spec):
+            raise ConnectorError(f"{install.source} OAuth app credentials are not set ({spec.client_id_setting}, {spec.client_secret_setting})")
         try:
             tokens = refresh(spec, refresh_token)
         except OAuthError as error:

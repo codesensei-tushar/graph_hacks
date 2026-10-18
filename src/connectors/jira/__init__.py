@@ -6,8 +6,8 @@
     CONNECTOR_JIRA_PROJECTS   PAY,PLAT: only these projects are read
     CONNECTOR_JIRA_PEOPLE     optional: accountId=email pairs for people whose email Jira hides
 
-An install connected from the console uses Atlassian OAuth (3LO) instead: its config holds
-``auth='oauth'``, ``cloud_id`` and ``site_url``, requests go to
+An install connected from the console uses Atlassian OAuth (3LO) instead (``auth='oauth'``): its
+config holds ``cloud_id`` and ``site_url``, requests go to
 ``api.atlassian.com/ex/jira/<cloudId>`` with ``oauth.bearer_for``, and ``site_url`` is used
 for links only (``jira/oauth.py``).
 
@@ -30,11 +30,11 @@ import logging
 import math
 from datetime import UTC, datetime, timedelta
 
-from src.connectors import oauth, registry
-from src.connectors.base import Connector, ConnectorError, Container, Edge, Install, InstallInfo, Page
+from src.connectors import registry
+from src.connectors.base import Connector, ConnectorError, Container, Edge, Install, InstallInfo, OAuthSpec, Page
 from src.connectors.jira import mapper
 from src.connectors.jira import oauth as jira_oauth
-from src.connectors.oauth import OAuthSpec
+from src.connectors.oauth import bearer_for
 from src.connectors.jira.client import PAGE_SIZE, PROJECT_KEY, JiraClient, site_host, site_problems
 
 log = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ OVERLAP_MINUTES = 5
 
 def client_for(install: Install) -> JiraClient:
     if jira_oauth.is_oauth(install):
-        return JiraClient.with_bearer(jira_oauth.api_base(install.get("cloud_id")), oauth.bearer_for(install, jira_oauth.SPEC))
+        return JiraClient.with_bearer(jira_oauth.api_base(install.get("cloud_id")), bearer_for(install, jira_oauth.SPEC))
     problems = site_problems(install.get("base_url"))
     if problems:
         raise ConnectorError(problems[0])
