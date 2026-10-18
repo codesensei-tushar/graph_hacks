@@ -58,7 +58,7 @@ Any other client: streamable HTTP at `https://brain.noobsurd.space/mcp`. A Pytho
 python scripts/replay_workspace.py --graph company_demo
 ```
 
-In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 17 replies, from "who owns billing" through "what changed this week" and its "only decisions" follow-up and the Sales questions to the heads-up a new pull request posts, and ends with `fake Slack calls=162 bot messages=19`: the 17 replies and the two Approve cards.
+In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 17 replies, from "who owns billing" through "what changed this week" and its "only decisions" follow-up and the Sales questions to the heads-up a new pull request posts, and ends with `fake Slack calls=<n> bot messages=19`: the 17 replies and the two Approve cards. The call count includes every lookup the bot makes, so it moves as the code does; the 19 messages do not.
 
 ## What it answers
 
