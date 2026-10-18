@@ -108,10 +108,14 @@ class FakeSlackRemote:
         return [m for m in self.messages_in(channel, thread_ts) if m.user == self.bot_user_id and not m.streaming]
 
 
-def fake_workspace_from_script() -> FakeSlackWorkspace:
-    """The scripted Quillfern workspace as fake Slack state."""
+def fake_workspace_from_script(team_id: str = script.TEAM_ID) -> FakeSlackWorkspace:
+    """The scripted Quillfern workspace as fake Slack state.
+
+    ``team_id`` lets two replays share one FalkorDB without sharing the team's Redis state
+    (thread turns, approvals), which one replay's ``clear_team_state`` would wipe for the other.
+    """
     fake = FakeSlackWorkspace(
-        team_id=script.TEAM_ID, team_name=script.TEAM_NAME, bot_user_id=script.BOT_USER_ID, bot_token=script.BOT_TOKEN
+        team_id=team_id, team_name=script.TEAM_NAME, bot_user_id=script.BOT_USER_ID, bot_token=script.BOT_TOKEN
     )
     for user in script.USERS:
         fake.add_user(FakeSlackUser(id=user.id, name=user.name, real_name=user.real_name, email=user.email))
@@ -121,13 +125,13 @@ def fake_workspace_from_script() -> FakeSlackWorkspace:
     return fake
 
 
-def register_fake_workspace() -> None:
+def register_fake_workspace(team_id: str = script.TEAM_ID) -> None:
     """Store the scripted workspace as an installed app, so events for its team are handled."""
     from src.domain.slack.token_crypto import encrypt_token
     from src.domain.slack.workspace import upsert_workspace
 
     upsert_workspace(
-        team_id=script.TEAM_ID,
+        team_id=team_id,
         bot_token_enc=encrypt_token(script.BOT_TOKEN),
         bot_user_id=script.BOT_USER_ID,
         team_name=script.TEAM_NAME,
@@ -135,15 +139,16 @@ def register_fake_workspace() -> None:
     )
 
 
-def clear_team_state(replayer: "WorkspaceReplayer | None" = None, team_id: str = script.TEAM_ID) -> None:
-    """Drop the scripted team's queued state (reaction outbox, thread turns, bot threads,
+def clear_team_state(replayer: "WorkspaceReplayer | None" = None, team_id: str | None = None) -> None:
+    """Drop the replayed team's queued state (reaction outbox, thread turns, bot threads,
     approval expiry jobs) from the shared Redis, so nothing from a replay leaks into
-    whatever runs next on the same FalkorDB."""
+    whatever runs next on the same FalkorDB. The team is the replayer's unless named."""
     from src.core import scheduler
     from src.domain.slack.channels.reset import reset_channel_state
     from src.domain.slack.turn.approval_expiry import _job_id
     from src.domain.slack.turn.reset import reset_turn_state
 
+    team_id = team_id or (replayer.team_id if replayer else script.TEAM_ID)
     reset_turn_state(team_id)
     reset_channel_state(team_id)
     for approval_id in (replayer.approval_ids if replayer else []):
