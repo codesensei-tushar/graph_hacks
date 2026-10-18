@@ -9,8 +9,13 @@ header's "Sign in" link stays hidden: production is unchanged until the console 
 
 The pages are sent with the console's CSP (no inline script or style, same-origin calls only),
 the same policy nginx sets on ``/console`` and ``/auth``, so a local run breaks where production would.
+
+
+``CONSOLE_FIXTURES=1`` (dev and screenshots only) also mounts ``console_fake``, the console API
+answered from ``tests/fixtures/console/``, so the pages can be built before the real API exists.
 """
 
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -34,6 +39,11 @@ HEADERS = {
 # for every id; the page reads the id from its own address.
 PAGES = {
     "/signin": "signin.html",
+    "/console": "index.html",
+    "/console/start": "start.html",
+    "/console/connect/jira/site": "site.html",
+    "/console/connectors/{connection_id}/projects": "projects.html",
+    "/console/connectors/{connection_id}": "connection.html",
 }
 
 # The public header's link, hidden in the files; shown when the console runs.
@@ -84,5 +94,14 @@ def privacy():
     return FileResponse(PRIVACY, media_type="text/html", headers=HEADERS)
 
 
+def fixtures_enabled() -> bool:
+    """Dev only: the fake console API (console_fake) answers /console/api from JSON fixtures."""
+    return console_enabled() and os.getenv("CONSOLE_FIXTURES", "").lower() in ("1", "true", "yes")
+
+
 def install(app: FastAPI) -> None:
+    if fixtures_enabled():
+        from src.api import console_fake
+
+        console_fake.install(app)
     app.include_router(router)
