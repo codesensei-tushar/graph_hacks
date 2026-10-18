@@ -41,14 +41,18 @@
   // --- Catalogue: example chips, the graph line, the tool list --------------------------------
 
   let company = null;
+  let catalogue = null;
   let teamIds = null;
+  // The stats' label counts once they arrive; {} when that call failed.
+  let counted = null;
 
   async function loadTools() {
     try {
       const data = await getJson("/api/ask/tools");
       company = data.company || null;
+      catalogue = { company, name: data.company_name || null };
       renderChips(data.examples || []);
-      renderGraphLine(data.company, data.company_name);
+      renderGraphLine();
       renderTools(data.tools || []);
       $("#onboard-slack").hidden = !(data.writes || []).includes("onboard_team");
       renderBeat();
@@ -88,10 +92,20 @@
     }
   }
 
-  function renderGraphLine(id, name) {
+  // The graph line names only what the live graph holds, in the brief's order: a plain seed
+  // has no pull requests or chat until GitHub and Slack add them.
+  const DEMO_KINDS = [["Person", "people"], ["Service", "services"], ["Decision", "decisions"], ["Ticket", "tickets"], ["PullRequest", "pull requests"], ["Memory", "chat"]];
+  const OWN_KINDS = [["Service", "services"], ["Decision", "decisions"], ["PullRequest", "pull requests"], ["Memory", "public chat"]];
+  const listed = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
+
+  function renderGraphLine() {
+    if (!catalogue || counted === null) return;
+    const own = catalogue.company === "company-brain";
+    const words = (own ? OWN_KINDS : DEMO_KINDS).filter(([label]) => counted[label] > 0).map(([, word]) => word);
+    const what = words.length ? `: its ${own ? "own " : ""}${listed(words)}` : "";
     const line = $("#graph-line");
-    if (id === "company-brain") line.textContent = "This page reads the live graph behind this project: its own services, decisions, pull requests and public chat.";
-    else if (name) line.textContent = `This page reads the live graph of ${name}, a synthetic company built for the demo: its people, services, decisions, tickets, pull requests and chat.`;
+    if (own) line.textContent = `This page reads the live graph behind this project${what}.`;
+    else if (catalogue.name) line.textContent = `This page reads the live graph of ${catalogue.name}, a synthetic company built for the demo${what}.`;
   }
 
   function renderTools(tools) {
@@ -124,6 +138,8 @@
     try {
       const data = await getJson("/api/graph/stats");
       const labels = data.labels || {};
+      counted = labels;
+      renderGraphLine();
       for (const cell of row.querySelectorAll("dd[data-stat]")) {
         const key = cell.dataset.stat;
         const value = key === "edges" ? data.edges : labels[key] || 0;
@@ -134,6 +150,8 @@
       }
       if (data.company_name) $("#live-name").textContent = `${data.company_name} · live sample of the graph`;
     } catch (error) {
+      counted = {};
+      renderGraphLine();
       row.dataset.state = "failed";
       row.setAttribute("aria-hidden", "true");
     }
