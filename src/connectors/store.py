@@ -252,3 +252,51 @@ def rewrap_all() -> int:
             )
             changed += 1
     return changed
+
+
+# --- the same, for a caller that names the org (the OAuth callbacks, src/connectors/oauth.py) ---
+
+
+def get_install(org: str, key: str) -> Install | None:
+    """The stored install ``key`` (``'<source>:<install>'``) of ``org``, secrets decrypted, or None."""
+    with tenancy.org_context(org):
+        stored = get(key)
+        return to_install(stored) if stored else None
+
+
+def read_secret(org: str, key: str) -> dict:
+    with tenancy.org_context(org):
+        stored = get(key)
+        return load_secrets(stored) if stored else {}
+
+
+def write_secret(org: str, key: str, secret: dict) -> bool:
+    with tenancy.org_context(org):
+        return set_secret(key, secret)
+
+
+def create_install(
+    org: str,
+    source: str,
+    install: str | None,
+    auth: str,
+    status: str = "connecting",
+    external_account: str | None = None,
+    site: str | None = None,
+    config: dict | None = None,
+    secret: dict | None = None,
+    created_by: str | None = None,
+) -> Install:
+    with tenancy.org_context(org):
+        stored = create(
+            source, auth=auth, created_by=created_by, install=install, config=config, secrets=secret,
+            status=status, external_account=external_account, site=site,
+        )
+        return to_install(stored)
+
+
+def claim_external_account(key: str, org: str) -> bool:
+    """Claim ``'jira:<cloudId>'``/``'hubspot:<hubId>'`` for ``org``; False when another org holds it."""
+    from src.domain import orgs
+
+    return orgs.claim_external_account(key, org)

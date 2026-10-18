@@ -157,10 +157,10 @@ class OAuthSpec:
     authorize_url: str
     token_url: str
     scopes: tuple[str, ...]
-    client_id_env: str
-    client_secret_env: str
+    client_id_setting: str
+    client_secret_setting: str
     # Extra query parameters for the authorize URL (Atlassian: audience, prompt).
-    authorize_params: Mapping[str, str] = field(default_factory=dict, compare=False, hash=False)
+    extra_params: Mapping[str, str] = field(default_factory=dict, compare=False, hash=False)
     # Whether the token response carries a refresh token that rotates on use.
     rotating_refresh: bool = False
 

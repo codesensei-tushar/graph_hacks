@@ -246,6 +246,8 @@ def claim_external_account(key: str, org_id: str) -> bool:
     True when it is now (or already was) this org's. One account feeds one org."""
     if not key or ":" not in key:
         raise ValueError("an external account key is '<source>:<id>'")
+    if org_id == LEGACY_ORG_ID:
+        ensure_legacy_org()
     graph = control_graph()
     graph.query(
         """
