@@ -131,6 +131,10 @@ class RouteTest(unittest.TestCase):
             "dependencies of the api gateway",
             "what does search need",
             "what does auth rely on",
+            "what does the invoice worker need to run",
+            "what does billing require",
+            "what is needed to run search",
+            "the invoice worker requires what",
         ):
             with self.subTest(question=question):
                 self.assertEqual(ask_service.route(question), ("blast_radius", {"name": question, "direction": "dependencies"}))
@@ -139,12 +143,13 @@ class RouteTest(unittest.TestCase):
             ("blast_radius", {"name": "what does the invoice worker depend on, one hop", "direction": "dependencies", "depth": 1}),
         )
         # What depends on a service, and questions that only share the words, are unchanged.
-        for question in ("what depends on billing", "what breaks if auth goes down", "who are the dependents of auth"):
+        for question in ("what depends on billing", "what breaks if auth goes down", "who are the dependents of auth", "what relies on billing"):
             with self.subTest(question=question):
                 self.assertEqual(ask_service.route(question), ("blast_radius", {"name": question}))
         self.assertEqual(ask_service.route("what do i need to know about billing")[0], "who_knows")
         self.assertEqual(ask_service.route("which service is most depended on")[0], "load_bearing")
         self.assertFalse(algorithms.asks_for_dependencies("what does billing need to know"))
+        self.assertEqual(ask_service.route("what does billing need to know")[0], "who_knows")
 
     def test_reworded_chips_route_like_the_chips(self):
         for question, tool in (
