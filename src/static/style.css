@@ -577,6 +577,8 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 
 /* --- Team pages ------------------------------------------------------------------------------------ */
 
+/* The team arrives after the page does: the footer starts below the fold so nothing visible moves. */
+.team-main { min-height: calc(100vh - var(--header)); }
 .page-head { padding: 56px 0 8px; }
 .page-head h1 { margin: 0 0 12px; font-size: clamp(2.2rem, 4.5vw, 3.25rem); line-height: 1.06; letter-spacing: -0.03em; font-weight: 600; }
 .page-head .lede { margin: 0; font-size: 1.06rem; color: var(--ink-2); max-width: 46em; }
