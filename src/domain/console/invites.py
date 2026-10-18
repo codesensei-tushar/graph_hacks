@@ -9,7 +9,7 @@ import hashlib
 import secrets
 import time
 
-from src.domain.console import contracts
+from src.core import tenancy
 
 DEFAULT_TTL_DAYS = 14
 MAX_TTL_DAYS = 90
@@ -27,7 +27,7 @@ def mint(ttl_days: int = DEFAULT_TTL_DAYS, created_by: str = "operator") -> tupl
     code = PREFIX + secrets.token_urlsafe(18)
     now = int(time.time() * 1000)
     expires_at = now + ttl_days * 24 * 60 * 60 * 1000
-    contracts.control_graph().query(
+    tenancy.control_graph().query(
         "CREATE (:InviteCode {code_hash: $hash, used_by: null, expires_at: $expires, created_by: $by, created_at: $now})",
         {"hash": _hash(code), "expires": expires_at, "by": created_by, "now": now},
     )
@@ -43,7 +43,7 @@ def consume(code: str, used_by: str) -> bool:
     code = (code or "").strip()
     if not code or len(code) > MAX_CODE_LENGTH:
         return False
-    rows = contracts.control_graph().query(
+    rows = tenancy.control_graph().query(
         """
         MATCH (i:InviteCode {code_hash: $hash})
         WHERE i.used_by IS NULL AND i.expires_at > $now
@@ -57,7 +57,7 @@ def consume(code: str, used_by: str) -> bool:
 
 def release(code: str, used_by: str) -> None:
     """Gives a code back after the org it was taken for could not be created."""
-    contracts.control_graph().query(
+    tenancy.control_graph().query(
         "MATCH (i:InviteCode {code_hash: $hash, used_by: $by}) SET i.used_by = null, i.used_at = null",
         {"hash": _hash(code), "by": used_by},
     )

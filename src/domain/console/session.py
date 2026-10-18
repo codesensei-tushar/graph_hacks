@@ -31,7 +31,9 @@ from starlette.concurrency import run_in_threadpool
 
 from src.core.config import settings
 from src.domain.access import roles
-from src.domain.console import contracts, csrf
+from src.core import tenancy
+from src.domain import orgs
+from src.domain.console import csrf
 from src.domain.slack.workspace import get_org_actor_by_slack_identity
 
 log = logging.getLogger(__name__)
@@ -85,15 +87,17 @@ def _kv():
     return kv()
 
 
-def _save(session: Session) -> bool:
+def _save(session: Session, *, new: bool = False) -> bool:
+    """Writes the record. An update only lands while the record exists, so a request that
+    loaded a session before a parallel logout or rotation can't bring it back."""
     now = time.time()
     remaining = session.created_at + settings.session_absolute_seconds - now
     ttl = int(min(settings.session_idle_seconds, remaining))
     if ttl <= 0:
         _kv().delete(_key(session.id_hash))
         return False
-    _kv().set(_key(session.id_hash), json.dumps({name: getattr(session, name) for name in _STORED}), ex=ttl)
-    return True
+    payload = json.dumps({name: getattr(session, name) for name in _STORED})
+    return bool(_kv().set(_key(session.id_hash), payload, ex=ttl, nx=new, xx=not new))
 
 
 def create(
@@ -125,7 +129,7 @@ def create(
         role_checked_at=now,
         id_hash=_hash(sid),
     )
-    _save(session)
+    _save(session, new=True)
     return sid, session
 
 
@@ -161,7 +165,7 @@ def load(sid: str | None) -> Session | None:
     return session
 
 
-def _current_role(session: Session, org: contracts.Org) -> str | None:
+def _current_role(session: Session, org: orgs.Org) -> str | None:
     """The role now, or None when the person is no longer in the org. Runs in the org's context."""
     if org.created_by and secrets.compare_digest(org.created_by, session.creator_id):
         return roles.ROLE_OWNER
@@ -180,10 +184,10 @@ def refresh(session: Session) -> Session | None:
     now = time.time()
     changes: dict = {"last_seen": now}
     if session.org and now - session.role_checked_at >= ROLE_REFRESH_SECONDS:
-        org = contracts.get_org(session.org)
+        org = orgs.get_org(session.org)
         role = None
         if org is not None:
-            with contracts.org_context(org.id):
+            with tenancy.org_context(org.ref()):
                 role = _current_role(session, org)
         if role is None:
             log.info("[console] session ended: org=%s person=%s is no longer a member", session.org, session.person)
@@ -230,8 +234,8 @@ def is_operator(request: Request) -> bool:
 
 
 def _operator_session(request: Request) -> Session:
-    org_id = request.query_params.get("org") or contracts.LEGACY_ORG_ID
-    if contracts.get_org(org_id) is None:
+    org_id = request.query_params.get("org") or tenancy.LEGACY_ORG_ID
+    if orgs.get_org(org_id) is None:
         raise HTTPException(status_code=404, detail="unknown_org")
     now = time.time()
     return Session(
@@ -257,7 +261,12 @@ async def console_session(request: Request) -> Session:
         csrf.check(request, session.csrf)
     request.state.console_session = session
     if session.org:
-        contracts.bind_org(session.org)
+        ref = await run_in_threadpool(orgs.get_org_ref, session.org)
+        if ref is None:
+            raise HTTPException(status_code=401, detail="signed_out")
+        # Set here, in the request's own task, so the endpoint (and its threadpool copy of the
+        # context) sees it. Not reset: the context ends with the request.
+        tenancy.set_org(ref)
     return session
 
 

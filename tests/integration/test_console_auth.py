@@ -27,7 +27,9 @@ from src.core.config import settings as real_settings
 from src.db import falkordb_client
 from src.db.falkordb_client import kv
 from src.domain.access import roles
-from src.domain.console import contracts, csrf, oidc
+from src.core import tenancy
+from src.domain import orgs
+from src.domain.console import csrf, oidc
 from src.domain.console import session as sessions
 from src.domain.slack import workspace as ws_module
 from src.domain.slack.token_crypto import encrypt_token
@@ -40,8 +42,7 @@ ORIGIN = "https://testserver"
 CLIENT_ID = "123.456"
 
 
-def _graph_for_org() -> str:
-    return f"console_test{tests.TEST_GRAPH_SUFFIX}_{RUN}_{contracts.current_org() or 'none'}"
+CREATED_GRAPHS: set[str] = set()
 
 
 SETTINGS = dataclasses.replace(
@@ -106,11 +107,11 @@ def _test_app() -> FastAPI:
 
     @app.get("/console/api/whoami")
     def whoami(session=Depends(sessions.console_user)):
-        return {"org": contracts.current_org(), "session_org": session.org, "graph": _graph_for_org()}
+        return {"org": tenancy.current_org(), "session_org": session.org, "graph": falkordb_client.graph_name()}
 
     @app.post("/console/api/connectors/fake/sync")
     def sync(session=Depends(sessions.console_admin)):
-        return {"ok": True, "org": contracts.current_org()}
+        return {"ok": True, "org": tenancy.current_org()}
 
     @app.post("/console/api/ping")
     def ping(session=Depends(sessions.console_user)):
@@ -123,8 +124,7 @@ class ConsoleAuthTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.patches = [
-            mock.patch.object(contracts, "CONTROL_GRAPH", CONTROL),
-            mock.patch.object(falkordb_client, "graph_name", side_effect=_graph_for_org),
+            mock.patch.object(tenancy, "CONTROL_GRAPH", CONTROL),
         ] + [mock.patch.object(module, "settings", SETTINGS) for module in (sessions, csrf, oidc, auth)]
         for patch in cls.patches:
             patch.start()
@@ -133,7 +133,7 @@ class ConsoleAuthTest(unittest.TestCase):
     def tearDownClass(cls):
         db = falkordb_client.client()
         for name in db.list_graphs():
-            if name == CONTROL or name.startswith(f"console_test{tests.TEST_GRAPH_SUFFIX}_{RUN}_"):
+            if name == CONTROL or name in CREATED_GRAPHS:
                 db.select_graph(name).delete()
         for patch in reversed(cls.patches):
             patch.stop()
@@ -146,11 +146,12 @@ class ConsoleAuthTest(unittest.TestCase):
         self._bot = mock.patch.object(ws_module, "_client_for", return_value=FakeBotClient(self.slack))
         self._bot.start()
         self.client = TestClient(_test_app(), base_url=ORIGIN, follow_redirects=False)
-        contracts.control_graph().query("MATCH (n) DETACH DELETE n")
+        tenancy.control_graph().query("MATCH (n) DETACH DELETE n")
+        orgs.clear_route_cache()
 
         self.team_x, self.team_y = f"TX{RUN.upper()}", f"TY{RUN.upper()}"
-        self.org_x = self._org("org_x", "Org X", self.team_x)
-        self.org_y = self._org("org_y", "Org Y", self.team_y)
+        self.org_x = self._org("Org X", self.team_x)
+        self.org_y = self._org("Org Y", self.team_y)
         self.slack.users = {
             "UADA": SlackUserInfo(id="UADA", real_name="Ada Park", team_id=self.team_x),
             "UBEA": SlackUserInfo(id="UBEA", real_name="Bea", team_id=self.team_x),
@@ -160,21 +161,20 @@ class ConsoleAuthTest(unittest.TestCase):
         }
 
     def tearDown(self):
+        rows = tenancy.control_graph().query("MATCH (o:Org) WHERE o.legacy = false RETURN o.graph").result_set
+        CREATED_GRAPHS.update(row[0] for row in rows)
         self._transport.stop()
         self._bot.stop()
 
-    def _org(self, org_id: str, name: str, team: str) -> str:
-        contracts.control_graph().query(
-            "CREATE (o:Org {id: $id, slug: $id, name: $name, graph: $id, legacy: false, created_by: 'TNOBODY:UNOBODY', created_at: 1})"
-            "<-[:OF]-(:WorkspaceRoute {team_id: $team})",
-            {"id": org_id, "name": name, "team": team},
-        )
-        with contracts.org_context(org_id):
+    def _org(self, name: str, team: str) -> str:
+        org = orgs.create_org(name, "TNOBODY:UNOBODY")
+        CREATED_GRAPHS.add(org.graph)
+        orgs.route_team(team, org.id)
+        with tenancy.org_context(org.id):
             _, graph = falkordb_client.connect()
-            graph.query("MATCH (n) DETACH DELETE n")
             graph.query("CREATE (:Person {id: 'p-ada', name: 'Ada Park', email: 'ada@x.example.com'})")
             upsert_workspace(team_id=team, bot_token_enc=encrypt_token("xoxb-test"), bot_user_id="UBOT", team_name=name, installed_by="UINSTALLER")
-        return org_id
+        return org.id
 
     # --- helpers ---------------------------------------------------------------------------
 
@@ -233,7 +233,7 @@ class ConsoleAuthTest(unittest.TestCase):
         return response.json()["code"]
 
     def _audit(self, action: str) -> list:
-        return contracts.control_graph().query(
+        return tenancy.control_graph().query(
             "MATCH (e:AuditEvent {action: $a}) RETURN e.org, e.actor, e.result ORDER BY e.at", {"a": action}
         ).result_set
 
@@ -262,14 +262,14 @@ class ConsoleAuthTest(unittest.TestCase):
         self.assertIsNone(kv().get(f"console:session:{sid}"))
         stored = json.loads(kv().get(self._session_key()))
         self.assertEqual({k: stored[k] for k in ("org", "person", "team", "slack_user", "role")},
-                         {"org": "org_x", "person": "p-ada", "team": self.team_x, "slack_user": "UADA", "role": "member"})
+                         {"org": self.org_x, "person": "p-ada", "team": self.team_x, "slack_user": "UADA", "role": "member"})
         self.assertLessEqual(kv().ttl(self._session_key()), 12 * 3600)
 
         me = self.client.get("/console/api/me").json()
-        self.assertEqual(me["org"], {"id": "org_x", "name": "Org X", "slug": "org_x"})
+        self.assertEqual(me["org"], {"id": self.org_x, "name": "Org X", "slug": "org-x"})
         self.assertEqual((me["person"]["id"], me["role"], me["slack_connected"]), ("p-ada", "member", True))
         self.assertTrue(me["csrf"])
-        self.assertEqual(self._audit("signin")[-1], ["org_x", f"slack:{self.team_x}:UADA", "ok"])
+        self.assertEqual(self._audit("signin")[-1], [self.org_x, f"slack:{self.team_x}:UADA", "ok"])
 
     def test_state_works_once(self):
         response, params = self._sign_in(self.team_x, "UADA")
@@ -324,7 +324,7 @@ class ConsoleAuthTest(unittest.TestCase):
         response, _ = self._sign_in(self.team_x, "UGHOST")
         self.assertEqual(response.headers["location"], "/signin?error=slack_unavailable")
         self._signed_in(self.team_x, "UADA")
-        with contracts.org_context("org_x"):
+        with tenancy.org_context(self.org_x):
             _, graph = falkordb_client.connect()
             graph.query("MATCH (p:Person {id: 'p-ada'}) SET p.org_member = false")
         self.client.cookies.clear()
@@ -364,7 +364,7 @@ class ConsoleAuthTest(unittest.TestCase):
     def test_role_is_re_read_after_a_minute(self):
         self._signed_in(self.team_x, "UBEA")
         self.assertEqual(self._mutate("/console/api/connectors/fake/sync").status_code, 403)
-        with contracts.org_context("org_x"):
+        with tenancy.org_context(self.org_x):
             roles.set_role("UBEA", roles.ROLE_ADMIN)
         self.assertEqual(self.client.get("/console/api/me").json()["role"], "member")
         self._age(role_checked_at=time.time() - 61)
@@ -373,7 +373,7 @@ class ConsoleAuthTest(unittest.TestCase):
 
     def test_a_person_who_leaves_is_signed_out_at_the_next_refresh(self):
         self._signed_in(self.team_x, "UADA")
-        with contracts.org_context("org_x"):
+        with tenancy.org_context(self.org_x):
             _, graph = falkordb_client.connect()
             graph.query("MATCH (m:SlackWorkspaceMember) SET m.status = 'revoked'")
         self._age(role_checked_at=time.time() - 61)
@@ -382,10 +382,18 @@ class ConsoleAuthTest(unittest.TestCase):
 
     def test_env_owner_is_not_owner_of_other_orgs(self):
         # tests/__init__ sets SLACK_OWNER_ID=UOWNER for the legacy deployment.
-        with contracts.org_context("org_x"):
+        with tenancy.org_context(self.org_x):
             self.assertEqual(roles.role_of("UOWNER", env_roles=False), roles.ROLE_MEMBER)
             self.assertEqual(roles.role_of("UOWNER"), roles.ROLE_OWNER)
             self.assertEqual(roles.role_of("UINSTALLER", env_roles=False), roles.ROLE_OWNER)
+
+    def test_a_request_racing_logout_cannot_revive_the_session(self):
+        self._signed_in(self.team_x, "UADA")
+        sid = self.client.cookies[sessions.COOKIE]
+        loaded = sessions.load(sid)
+        sessions.destroy(sid)
+        self.assertIsNone(sessions.refresh(loaded))
+        self.assertIsNone(kv().get(self._session_key()))
 
     def test_logout(self):
         self._signed_in(self.team_x, "UADA")
@@ -446,19 +454,19 @@ class ConsoleAuthTest(unittest.TestCase):
         self.client.cookies.clear()
         self._sign_in(f"TB{RUN.upper()}", "UB")
         expired = self._mint()
-        contracts.control_graph().query("MATCH (i:InviteCode {code_hash: $h}) SET i.expires_at = 1", {"h": hashlib.sha256(expired.encode()).hexdigest()})
+        tenancy.control_graph().query("MATCH (i:InviteCode {code_hash: $h}) SET i.expires_at = 1", {"h": hashlib.sha256(expired.encode()).hexdigest()})
         for code in (used, expired, "brain-made-up", "", "x" * 500):
             with self.subTest(code=code[:20]):
                 response = self._mutate("/console/api/orgs", {"name": "Second", "invite_code": code})
                 self.assertEqual((response.status_code, response.json()), (400, {"error": "invalid_invite"}))
         self.assertEqual(self._mutate("/console/api/orgs", {"name": "x", "invite_code": self._mint()}).status_code, 400)
-        stored = contracts.control_graph().query("MATCH (i:InviteCode) RETURN i.code_hash").result_set
+        stored = tenancy.control_graph().query("MATCH (i:InviteCode) RETURN i.code_hash").result_set
         self.assertNotIn(used, json.dumps(stored))
 
     def test_failed_org_creation_gives_the_invite_back(self):
         self._sign_in(f"TC{RUN.upper()}", "UC")
         code = self._mint()
-        with mock.patch.object(contracts, "create_org", side_effect=RuntimeError("boom")):
+        with mock.patch.object(orgs, "create_org", side_effect=RuntimeError("boom")):
             self.assertEqual(self._mutate("/console/api/orgs", {"name": "Crashy", "invite_code": code}).status_code, 500)
         self.assertEqual(self._mutate("/console/api/orgs", {"name": "Crashy", "invite_code": code}).status_code, 201)
 
@@ -473,15 +481,15 @@ class ConsoleAuthTest(unittest.TestCase):
 
     def test_session_in_org_x_cannot_act_in_org_y(self):
         self._signed_in(self.team_x, "UADA")
-        for path in ("/console/api/whoami", "/console/api/whoami?org=org_y"):
+        for path in ("/console/api/whoami", f"/console/api/whoami?org={self.org_y}"):
             body = self.client.get(path).json()
-            self.assertEqual((body["org"], body["session_org"]), ("org_x", "org_x"))
-            self.assertTrue(body["graph"].endswith("_org_x"))
+            self.assertEqual((body["org"], body["session_org"]), (self.org_x, self.org_x))
+            self.assertTrue(body["graph"] == f"org_{self.org_x}")
         # A team routed to org Y signs into org Y, never X, whatever the session before.
         self._signed_in(self.team_y, "UYAN")
-        self.assertEqual(self.client.get("/console/api/whoami").json()["org"], "org_y")
+        self.assertEqual(self.client.get("/console/api/whoami").json()["org"], self.org_y)
         # Org Y's admin rights don't come from org X's graph.
-        with contracts.org_context("org_x"):
+        with tenancy.org_context(self.org_x):
             roles.set_role("UYAN", roles.ROLE_ADMIN)
         self._age(role_checked_at=0)
         self.assertEqual(self._mutate("/console/api/connectors/fake/sync").status_code, 403)
@@ -493,10 +501,10 @@ class ConsoleAuthTest(unittest.TestCase):
 
     def test_operator_token_picks_the_org(self):
         headers = {"authorization": "Bearer admin-token"}
-        self.assertEqual(self.client.get("/console/api/whoami?org=org_y", headers=headers).json()["org"], "org_y")
-        self.assertEqual(self.client.post("/console/api/connectors/fake/sync?org=org_x", headers=headers).json()["org"], "org_x")
+        self.assertEqual(self.client.get(f"/console/api/whoami?org={self.org_y}", headers=headers).json()["org"], self.org_y)
+        self.assertEqual(self.client.post(f"/console/api/connectors/fake/sync?org={self.org_x}", headers=headers).json()["org"], self.org_x)
         self.assertEqual(self.client.get("/console/api/whoami?org=nope", headers=headers).status_code, 404)
-        self.assertEqual(self.client.get("/console/api/whoami?org=org_y", headers={"authorization": "Bearer wrong"}).status_code, 401)
+        self.assertEqual(self.client.get(f"/console/api/whoami?org={self.org_y}", headers={"authorization": "Bearer wrong"}).status_code, 401)
 
     def test_everything_is_404_when_the_console_is_off(self):
         off = dataclasses.replace(SETTINGS, console_enabled=False)

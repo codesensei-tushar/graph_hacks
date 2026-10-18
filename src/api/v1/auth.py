@@ -22,7 +22,9 @@ from pydantic import BaseModel
 
 from src.core.config import settings
 from src.domain.access import roles
-from src.domain.console import audit, contracts, csrf, invites, oidc
+from src.core import tenancy
+from src.domain import orgs
+from src.domain.console import audit, csrf, invites, oidc
 from src.domain.console import session as sessions
 from src.domain.console.session import COOKIE, Session, console_admin, console_session, require_console
 from src.domain.slack.workspace import (
@@ -59,6 +61,15 @@ def slack_start(request: Request):
     return RedirectResponse(oidc.begin(_origin(request)), status_code=302)
 
 
+def _unrouted_org_created_by(created_by: str) -> orgs.Org | None:
+    """An org this Slack identity created that no workspace routes to yet (its bot isn't installed)."""
+    rows = tenancy.control_graph().query(
+        "MATCH (o:Org {created_by: $by}) WHERE NOT ()-[:OF]->(o) RETURN o.id ORDER BY o.created_at LIMIT 1",
+        {"by": created_by},
+    ).result_set
+    return orgs.get_org(rows[0][0]) if rows else None
+
+
 class _Refused(Exception):
     def __init__(self, code: str, org: str | None = None) -> None:
         super().__init__(code)
@@ -70,16 +81,16 @@ def _resolve(identity: oidc.SlackIdentity) -> tuple[dict, str]:
     team, user = identity.team_id, identity.user_id
     base = {"team": team, "slack_user": user, "person": None, "person_name": identity.name}
 
-    org = contracts.org_for_team(team)
+    org = orgs.org_for_team(team)
     if org is None:
         # No workspace routes here yet. Either this person already created an org whose
         # bot isn't installed, or they start one (an invite code is needed for that).
-        created = contracts.org_created_by(f"{team}:{user}")
+        created = _unrouted_org_created_by(f"{team}:{user}")
         if created is not None:
             return {**base, "org": created.id, "role": roles.ROLE_OWNER}, START_PATH
         return {**base, "org": None, "role": roles.ROLE_MEMBER}, START_PATH
 
-    with contracts.org_context(org.id):
+    with tenancy.org_context(org.ref()):
         workspace = get_workspace_by_team_id(team)
         if workspace is None:
             raise _Refused("workspace_unavailable", org.id)
@@ -143,11 +154,11 @@ def logout(request: Request):
 # --- console JSON ------------------------------------------------------------------------
 
 
-def _me(session: Session, org: contracts.Org | None = None) -> dict:
-    org = org or (contracts.get_org(session.org) if session.org else None)
+def _me(session: Session, org: orgs.Org | None = None) -> dict:
+    org = org or (orgs.get_org(session.org) if session.org else None)
     connected = False
     if org is not None:
-        with contracts.org_context(org.id):
+        with tenancy.org_context(org.ref()):
             connected = get_workspace_by_team_id(session.team) is not None if session.team else bool(list_connected_workspaces())
     return {
         "org": {"id": org.id, "name": org.name, "slug": org.slug} if org else None,
@@ -182,13 +193,13 @@ def create_org(body: OrgIn, request: Request, session: Session = Depends(console
     name = _clean_name(body.name)
     if name is None:
         return JSONResponse({"error": "bad_name"}, status_code=400)
-    if session.org or contracts.org_for_team(session.team) or contracts.org_created_by(session.creator_id):
+    if session.org or orgs.org_for_team(session.team) or _unrouted_org_created_by(session.creator_id):
         return JSONResponse({"error": "already_in_org"}, status_code=409)
     if not invites.consume(body.invite_code, session.actor):
         audit.record(None, session.actor, "org.create", result="refused:invalid_invite")
         return JSONResponse({"error": "invalid_invite"}, status_code=400)
     try:
-        org = contracts.create_org(name, created_by=session.creator_id)
+        org = orgs.create_org(name, created_by=session.creator_id)
     except Exception:
         log.exception("[console] org creation failed")
         invites.release(body.invite_code, session.actor)

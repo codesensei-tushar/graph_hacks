@@ -53,9 +53,6 @@ class Settings:
     )
     # Bearer token for the install/status/disconnect routes; there is no web login.
     brain_admin_token: str = field(default_factory=lambda: os.getenv("BRAIN_ADMIN_TOKEN", ""))
-    # The web console (sign in with Slack, /console/api, /ops/invites). Off by default:
-    # while off, those routes answer 404 and production behaves as before.
-    console_enabled: bool = field(default_factory=lambda: os.getenv("CONSOLE_ENABLED", "").lower() in ("1", "true", "yes"))
     # Console sessions: signed out after this long without a request, and after this long regardless.
     session_idle_seconds: int = field(default_factory=lambda: int(os.getenv("SESSION_IDLE_SECONDS", "") or 12 * 60 * 60))
     session_absolute_seconds: int = field(default_factory=lambda: int(os.getenv("SESSION_ABSOLUTE_SECONDS", "") or 7 * 24 * 60 * 60))

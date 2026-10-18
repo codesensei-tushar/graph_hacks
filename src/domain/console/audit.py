@@ -7,7 +7,7 @@ BRAIN_ADMIN_TOKEN holder. Writing an event never fails the action it records.
 import logging
 import time
 
-from src.domain.console import contracts
+from src.core import tenancy
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ def slack_actor(team_id: str, slack_user_id: str) -> str:
 
 def record(org: str | None, actor: str, action: str, target: str | None = None, result: str = "ok") -> None:
     try:
-        contracts.control_graph().query(
+        tenancy.control_graph().query(
             "CREATE (:AuditEvent {at: $at, org: $org, actor: $actor, action: $action, target: $target, result: $result})",
             {"at": int(time.time() * 1000), "org": org, "actor": actor, "action": action, "target": target, "result": result},
         )
@@ -29,7 +29,7 @@ def record(org: str | None, actor: str, action: str, target: str | None = None, 
 
 
 def recent(org: str, limit: int = 100) -> list[dict]:
-    rows = contracts.control_graph().query(
+    rows = tenancy.control_graph().query(
         """
         MATCH (e:AuditEvent {org: $org})
         RETURN e.at, e.actor, e.action, e.target, e.result
