@@ -43,6 +43,33 @@ The whole first screen (between 640 and 940 px tall), on a curved horizon: navy 
 - Footer under each answer, from the response: "Tool `{tool}` · picked by keywords · read from public channels".
 - Small print: "Public and read-only: public channels only, no model, answers cached for a minute."
 
+#### Explore from any answer
+
+Every answer is a place to go next, and every next click lands on an answer.
+
+- **Ask next.** Up to three follow-up questions under every answer that was found, after the `A -[REL]-> B` lines and before the footer, so the answer text, the drawing and its head stay where the recording frames them. They come from the tool and the path: after `who owns billing` they are what breaks if Billing Service goes down, what if Arjun Mehta (its owner) leaves, and what Billing Service depends on. The tool's own steps live in `app.js`'s `NEXT`; the rest are the first question of each node drawn. The question just asked is never offered again.
+- **Try instead.** A refusal keeps the server's sentence word for word and turns its nearest names into questions: "who knows the payments gateway" offers `who knows Billing Service` and `who knows API Gateway`.
+- **Click a node.** Every node in an answer's drawing asks its first question on click, Enter or Space, and its tooltip says which ("Click to ask: what if Arjun Mehta leaves"). The hero graph asks the same question, from the same mapping. Team pages keep their drawings passive.
+- **Walk with the keys.** On a focused node of any drawing, the arrow keys move along its edges: Right to what it points at, Left to what points at it, Up and Down to its neighbours in the column. Focus moves; nothing is asked until Enter.
+- **Your walk.** Every question asked from the page is a step in the browser's history. Back and Forward show each step's answer again from memory, with no new ask and no scrolling, and a row after "Ask next" lists the earlier steps; a click goes back to one. A deep link starts the walk without adding an entry, and a reload starts a new walk.
+- **A refusal with no near name** still offers two questions: the first example chips, which `/api/ask/tools` lists only when they answer on the graph in use.
+- **The proof's questions** are buttons: each asks its question in the answer above.
+- **Team pages** link each person, thing, decision and ticket to its first question on the ask page (`/?q=what if Arjun Mehta leaves`), from the same mapping. Their drawings stay passive.
+
+One mapping, `BrainGraph.questionsFor(node)` in `graph.js` (its `QUESTIONS` table), says what to ask about a node by its label and, for a `Service`, its kind:
+
+| Node | Questions |
+| --- | --- |
+| Service (service, system, process, product, policy, playbook) | `who knows {name}`, `what breaks if {name} goes down`, `what does {name} depend on` |
+| Service, kind account | `who knows {name}` |
+| Person | `what if {name} leaves` |
+| Team | `who is on the {name} team` |
+| Decision | `why did we {name, first letter lowercased}` |
+| Ticket | `what is {name} about` |
+| Document, or a name with no label | `who knows {name}` |
+
+Pull requests, chats and memories offer nothing. Two tests hold the guarantee: `tests/unit/test_explore.py` routes every template to its tool and holds every `NEXT` step to a template, and `tests/integration/test_explore_questions.py` asks every question offered by every node of every example chip's answer and of the hero's sample, on a fresh Quillfern seed with and without its Sales team, and requires each to be found. A question that fails is fixed in the mapping, never in the test. Nothing is asked ahead: each click is one ask, inside the page's 30 a minute.
+
 ### 2.2b The graph behind every answer
 
 - Eyebrow: `The graph`. Heading: **The graph behind every answer.**
@@ -176,6 +203,8 @@ Default to the operating system's setting, with a toggle in the header that reme
 - Every interactive element is reachable by keyboard and has a visible focus ring in the accent colour.
 - The answer region is an `aria-live="polite"` region.
 - The SVG drawing has a `<title>` and `<desc>`. The `A -[REL]-> B` list stays as the accessible text version of the path.
+- "Ask next" and "Try instead" are buttons in a list named by its `aria-label`. A node that asks is named "{name}, {kind}. Click to ask: {question}" and asks on Enter or Space as well as on click. The arrow keys move focus along a drawing's edges.
+- "Your walk" is a `nav` holding an ordered list; the step on screen carries `aria-current="step"`.
 - Never use colour as the only signal: node labels name the label ("Service", "Person").
 - Headings run in order, `h1` once. Landmarks: `header`, `main`, `footer`.
 - Tap targets are at least 44 px at 390 px.

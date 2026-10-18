@@ -7,7 +7,7 @@
 (() => {
   "use strict";
 
-  const { el, svgEl, familyOf, kindOf } = window.BrainGraph;
+  const { el, svgEl, familyOf, kindOf, questionsFor } = window.BrainGraph;
 
   const CYCLES = 4;
   const TRAVEL = 760; // ms for a pulse to cross one edge
@@ -17,7 +17,6 @@
   const START = 900; // let the entrance settle first
   const MAX_DEPTH = 3;
   const MAX_FAN = 3;
-  const ASKABLE = new Set(["Service", "Document", "Ticket"]);
   const FAMILY_NAME = { person: "People", service: "What teams run", knowledge: "Knowledge", other: "Teams and the rest" };
 
   const reducedMotion = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -239,7 +238,8 @@
     const nodeEls = new Map();
     for (const node of nodes) {
       const family = familyOf(node.label);
-      const askable = ASKABLE.has(node.label);
+      // A node is askable when the shared mapping has a question for it (graph.js, questionsFor).
+      const askable = questionsFor(node).length > 0;
       const group = svgEl("g", { class: `n ${family}${askable ? " askable" : ""}` });
       group.append(svgEl("circle", { class: "ring", r: (radius(node.id) + 4.5).toFixed(1) }));
       group.append(shape(family, radius(node.id)));
@@ -307,7 +307,6 @@
     const tip = el("div", { class: "tip", "aria-hidden": "true" });
     const said = el("p", { class: "sr", "aria-live": "polite" });
     let focused = null;
-    const questionFor = (node) => `who knows ${node.name}`;
 
     function show(id) {
       clear();
@@ -321,7 +320,7 @@
       const kind = node.kind && node.kind !== "service" ? ` · ${node.kind}` : "";
       const count = degree.get(id);
       tip.replaceChildren(el("b", {}, node.name), el("span", {}, `${kindOf(node.label)}${kind} · ${count} edge${count === 1 ? "" : "s"} here`));
-      if (nodeEls.get(id).askable && options.onAsk) tip.append(el("em", {}, `Click to ask: ${questionFor(node)}`));
+      if (nodeEls.get(id).askable && options.onAsk) tip.append(el("em", {}, `Click to ask: ${questionsFor(node)[0]}`));
       const [x, y] = pos.get(id);
       const { w } = box();
       tip.classList.add("show");
@@ -341,7 +340,7 @@
     }
     function ask(id) {
       const node = nodes[index.get(id)];
-      if (nodeEls.get(id).askable && options.onAsk) options.onAsk(questionFor(node));
+      if (nodeEls.get(id).askable && options.onAsk) options.onAsk(questionsFor(node)[0]);
     }
 
     for (const node of nodes) {
