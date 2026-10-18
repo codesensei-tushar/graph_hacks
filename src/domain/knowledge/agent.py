@@ -32,6 +32,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+from src.core import query_metrics
 from src.domain.knowledge import algorithms, ask_service, catalogue, coordination, resolve
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 from src.domain.knowledge.resolve import Entity
@@ -379,10 +380,16 @@ def run_choice(
     return result, ran
 
 
+def _run_tool(name: str, args: dict, scopes: list[str]) -> ToolResult:
+    """One tool run, its graph queries counted under the tool on /ops/metrics (not read off the call stack)."""
+    with query_metrics.tool_scope(name):
+        return catalogue.get_tool(name).run(args, scopes)
+
+
 def _run_choice(
     choice: ToolChoice, question: str, scopes: list[str], thread: list[dict] | None = None, bot_ids: frozenset[str] = frozenset()
 ) -> tuple[ToolResult, ToolChoice]:
-    result = catalogue.get_tool(choice.tool).run(choice.args, scopes)
+    result = _run_tool(choice.tool, choice.args, scopes)
     if result.found or result.candidates or not thread:
         return result, choice
     if choice.tool == coordination.TOOL:
@@ -393,7 +400,7 @@ def _run_choice(
         if named is not None:
             retry = ToolChoice(choice.tool, {**choice.args, "name": named.name}, "thread")
             log.info("[agent] %r named nothing; asking %s about %s from the thread", question, retry.tool, named.name)
-            retried = catalogue.get_tool(retry.tool).run(retry.args, scopes)
+            retried = _run_tool(retry.tool, retry.args, scopes)
             if retried.found:
                 return retried, retry
     subject = thread_subject(thread, scopes, bot_ids, skip_text=question)
@@ -403,7 +410,7 @@ def _run_choice(
     if retry is None:
         return result, choice
     log.info("[agent] %r named nothing; asking %s about %s from the thread", question, retry.tool, subject.entity.name)
-    retried = catalogue.get_tool(retry.tool).run(retry.args, scopes)
+    retried = _run_tool(retry.tool, retry.args, scopes)
     return (retried, retry) if retried.found else (result, choice)
 
 
