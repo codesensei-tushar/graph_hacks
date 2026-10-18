@@ -78,7 +78,7 @@ def install_from_env(connector: Connector, env: Mapping[str, str]) -> Install | 
 
 def load(env: Mapping[str, str]) -> list[Install]:
     """Import the connectors that have variables set and configure each complete install."""
-    sources = {key[len(PREFIX) :].split("_", 1)[0].lower() for key in env if key.startswith(PREFIX)}
+    sources = {key[len(PREFIX) :].split("_", 1)[0].lower() for key, value in env.items() if key.startswith(PREFIX) and value.strip()}
     for source in sorted(sources & KNOWN_MODULES.keys()):
         if source in _connectors:
             continue

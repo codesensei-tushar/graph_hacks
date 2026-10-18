@@ -73,3 +73,117 @@ for a GitHub issue.
 
 **Scopes.** Connector data is `org_internal`: every Slack asker reads it, in channels and DMs.
 The public ask page, the team pages and MCP read `org_shared` only, so they never see it.
+
+## Who reads connector data
+
+| Surface | Reads | Sees connector data |
+| --- | --- | --- |
+| Slack, any channel or DM | `org_shared`, `org_internal`, the room's own scope; a DM adds the asker's private channels, private repos and restricted projects | yes |
+| Public ask page (`/`, `/api/ask`), team pages, graph overview, `/api/proof` | `org_shared` | no |
+| MCP (`/mcp`) | `org_shared` | no |
+
+`org_internal` means "everyone in the Slack workspace". A Slack Connect channel or a guest in a
+public channel can therefore read it; sync only projects everyone in the workspace may see, or
+mark a project `restricted`. A restricted container gets its own scope
+(`connector_<hash of its id>`), and only a DM whose asker's `SlackUser -[:IS]-> Person <-[:IS]-
+ExternalUser` is one of its `readers()` reads it. With readers unknown, nobody does.
+
+## How it runs
+
+- **Startup.** `registry.load` reads every `CONNECTOR_*` variable, imports the modules of the
+  sources that have any set, and configures each source whose `required` fields are all set
+  (a missing one is logged by name, never by value). `sync.schedule_all` arms each install's job.
+- **Sync** (`src/connectors/sync.py`, scheduler job `runConnectorSync`, id `connector:sync:<source>`).
+  Each step fetches one page. Credentials are checked and containers listed hourly and after
+  a restart; a container that disappears is deleted with its items. Then one page for the
+  container most in need: one with pages waiting, else the one due soonest. The cursor,
+  due time, counts and last error live on a `ConnectorState` node per container and one per
+  install (scope `system`, which no read set holds). The job is re-armed in `finally`.
+  `RetryLater` waits as asked without moving the cursor; a 401 waits an hour; other failures
+  wait 1, 5, 15, then 60 minutes, per container, so one broken project does not hold up the
+  rest. A container keeps at most 1000 items.
+- **Webhooks.** `POST /connectors/<source>/webhook`: 404 unless the source is configured and
+  accepts webhooks, 413 over 1 MB, 401 unless `verify_webhook` passes, then answered at once.
+  The page is written in the background. A delivery is identified by its body's SHA-256
+  (`connector:delivery:*`, kept 24 h) and marked seen only after it ran.
+- **Writes** (`src/connectors/graph.py`) MERGE on `id` only, so a page written twice changes
+  nothing, and refuse any id outside the install.
+
+## Operate it
+
+Both routes need `BRAIN_ADMIN_TOKEN`:
+
+```bash
+# Accounts, containers, item counts, cursors, last errors. Never a configured value.
+curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/connectors
+# Fetch now; full=true starts every container over (a re-backfill; writes are idempotent).
+curl -s -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "https://brain.noobsurd.space/ops/connectors/jira/sync?full=true"
+```
+
+Logs: `[connectors] synced container=... items=... more=...`, `[connectors] <source> delivery ...`,
+`[connectors] ... credentials rejected`.
+
+## Production
+
+Each field is one Secret Manager secret named like its variable. `deploy.sh` writes every one
+that exists into `/opt/brain/.env`, and the backend reads it from there. It always tries the
+names in its `CONNECTOR_SECRETS` list (the Jira and HubSpot fields). Any other `CONNECTOR_` secret
+is picked up only if the VM is allowed to list secrets (step 3). Values may not contain a
+newline or a single quote. Every `gcloud` command uses `--configuration=graphhacks`, never
+the default configuration.
+
+1. Create one secret per field, typing each value at the silent prompt so it stays out of
+   shell history (Jira shown; see [JIRA.md](JIRA.md) for where each value comes from):
+
+   ```bash
+   read -rs V && printf '%s' "$V" | gcloud secrets create CONNECTOR_JIRA_BASE_URL --data-file=- --configuration=graphhacks; unset V
+   read -rs V && printf '%s' "$V" | gcloud secrets create CONNECTOR_JIRA_EMAIL --data-file=- --configuration=graphhacks; unset V
+   read -rs V && printf '%s' "$V" | gcloud secrets create CONNECTOR_JIRA_API_TOKEN --data-file=- --configuration=graphhacks; unset V
+   read -rs V && printf '%s' "$V" | gcloud secrets create CONNECTOR_JIRA_PROJECTS --data-file=- --configuration=graphhacks; unset V
+   # Only if Jira will send webhooks:
+   read -rs V && printf '%s' "$V" | gcloud secrets create CONNECTOR_JIRA_WEBHOOK_SECRET --data-file=- --configuration=graphhacks; unset V
+   ```
+
+2. Make sure `BRAIN_ADMIN_TOKEN` exists (it gates the status route). Then redeploy, and check:
+
+   ```bash
+   gh workflow run deploy.yml
+   curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/connectors
+   ```
+
+   The status names the account the token acts as and each project's item count. An empty
+   list means a required field is missing. The backend log names the missing variable.
+
+3. Optional, once: let the VM list secret names (not read more values) so a new
+   connector's `CONNECTOR_` secrets are picked up without editing `deploy.sh`:
+
+   ```bash
+   gcloud projects add-iam-policy-binding graphhacks-brain-8490 \
+     --member=serviceAccount:brain-vm-sa@graphhacks-brain-8490.iam.gserviceaccount.com \
+     --role=roles/secretmanager.viewer --condition=None --configuration=graphhacks
+   ```
+
+To rotate a value, add a version and redeploy:
+
+```bash
+read -rs V && printf '%s' "$V" | gcloud secrets versions add CONNECTOR_JIRA_API_TOKEN --data-file=- --configuration=graphhacks; unset V
+gh workflow run deploy.yml
+```
+
+To turn a source off, delete one of its required secrets and redeploy: the sync stops, and
+what it wrote stays in the graph (still `org_internal`). To remove that too, run this in the
+graph browser (every node a connector writes carries its install):
+
+```cypher
+MATCH (n) WHERE n.install = 'jira:default' DETACH DELETE n
+```
+
+Dropping one project from `CONNECTOR_JIRA_PROJECTS` and redeploying deletes that project's
+items at the next container listing.
+
+## Adding a connector
+
+1. `src/connectors/<source>/__init__.py` defines the `Connector` subclass and calls `registry.register`.
+2. Add the module to `registry.KNOWN_MODULES`, and its secret names to `CONNECTOR_SECRETS` in
+   `deploy/deploy.sh` (unless the VM may list secrets).
+3. Tests drive `sync.sync_step(source)` against a fake source, as `tests/integration/test_connectors.py` does.
