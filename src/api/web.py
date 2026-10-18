@@ -1,4 +1,4 @@
-"""The judge-facing page at ``/``, the team pages at ``/team/<id>``, and their files under ``/static``.
+"""The judge-facing page at ``/``, the team pages at ``/team/<id>``, the graph explorer at ``/explore``, and their files under ``/static``.
 
 ``install`` adds the ask routes, the page route and the static mount in one call, so
 ``main.py`` needs one line. The page route is a plain route and the mount sits under its
@@ -12,11 +12,12 @@ from fastapi import APIRouter, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.api.v1 import ask, graph, teams
+from src.api.v1 import ask, explorer, graph, teams
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 INDEX = STATIC_DIR / "index.html"
 TEAM = STATIC_DIR / "team.html"
+EXPLORER = STATIC_DIR / "explorer.html"
 
 router = APIRouter(tags=["web"], include_in_schema=False)
 
@@ -32,9 +33,16 @@ def team(team_id: str):
     return FileResponse(TEAM, media_type="text/html", headers={"Cache-Control": "no-cache"})
 
 
+@router.get("/explore")
+def explore():
+    # The page reads ?node=<id> itself and fetches /api/explore; an unknown node gets the nearest names there.
+    return FileResponse(EXPLORER, media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
 def install(app: FastAPI) -> None:
     app.include_router(ask.router)
     app.include_router(teams.router)
     app.include_router(graph.router)
+    app.include_router(explorer.router)
     app.include_router(router)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

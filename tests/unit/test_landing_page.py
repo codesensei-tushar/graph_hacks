@@ -22,6 +22,8 @@ STATIC = ROOT / "src" / "static"
 PAGE_SCRIPTS = ("shell.js", "graph.js", "hero.js", "riskmap.js", "app.js")
 STYLESHEETS = ("style.css", "riskmap.css", "explore.css")
 ALLOWED_ROUTES = {"/api/ask", "/api/ask/tools", "/api/ask/proof", "/api/teams", "/api/team/", "/api/graph/stats", "/api/graph/sample"}
+# The explorer page at /explore.
+ALLOWED_ROUTES |= {"/api/explore", "/api/explore/neighbors", "/api/explore/start"}
 VOID = {"meta", "link", "input", "br", "img", "hr", "source", "path", "circle", "rect", "polygon", "line"}
 
 
@@ -128,7 +130,7 @@ class NoTypedNumbersTest(unittest.TestCase):
 
 class RequestsTest(unittest.TestCase):
     def test_the_page_loads_only_its_own_files(self):
-        for name in ("index.html", "team.html"):
+        for name in ("index.html", "team.html", "explorer.html"):
             for resource in _parse(name).resources:
                 self.assertTrue(resource.startswith("/static/") or resource.startswith("data:"), f"{name}: {resource}")
 

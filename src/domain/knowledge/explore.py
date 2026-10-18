@@ -245,9 +245,14 @@ def cite(nodes: dict[str, Entity], link: Link) -> PathStep:
     return PathStep(shown, link.rel, source.name, from_id=link.id, to_id=source.id, from_label=link.label, to_label=source.label)
 
 
-def _phrase(rel: str, outgoing: bool, label: str) -> str:
+def plural(label: str) -> str:
+    """"tickets", "pull requests", "people": a label as a plural noun."""
+    return _NOUNS.get(label, (label.lower(), label.lower() + "s"))[1]
+
+
+def phrase(rel: str, outgoing: bool, label: str) -> str:
     if (rel, outgoing) == ("ABOUT", False):
-        return f"{_NOUNS.get(label, (label.lower(), label.lower() + 's'))[1]} about it:"
+        return f"{plural(label)} about it:"
     return PHRASES.get((rel, outgoing)) or rel.lower().replace("_", " ")
 
 
@@ -345,12 +350,12 @@ def explore_node(graph, target: Entity, scopes: list[str], depth=None, candidate
         if label == "Memory":
             lines = memory_lines(graph, [link.id for link in members], scopes)
             result.memories.extend(line for line in lines if line not in result.memories)
-            clauses.append(f"{_phrase(rel, outgoing, label)} {_count('Memory', len(members))}")
+            clauses.append(f"{phrase(rel, outgoing, label)} {_count('Memory', len(members))}")
             shown = sorted(members, key=lambda link: link.name)[: len(lines)]
         else:
             shown = sorted(members, key=lambda link: (_LABEL_ORDER.get(link.label, 99), link.name.lower()))
             names = [item(link.node) + (" (replaced)" if link.id in replaced else "") for link in shown]
-            clauses.append(f"{_phrase(rel, outgoing, label)} {_listing(names)}")
+            clauses.append(f"{phrase(rel, outgoing, label)} {_listing(names)}")
             shown = shown[:GROUP_CAP]
         for link in shown:
             if len(result.path) < budget:
