@@ -146,6 +146,24 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("which service is most depended on")[0], "load_bearing")
         self.assertFalse(algorithms.asks_for_dependencies("what does billing need to know"))
 
+    def test_reworded_chips_route_like_the_chips(self):
+        for question, tool in (
+            ("how are maya and the invoice worker related", "path_between"),
+            ("path from maya to the invoice worker", "path_between"),
+            ("which service matters most", "load_bearing"),
+            ("who works with who", "working_groups"),
+            ("which people work together?", "working_groups"),
+            ("who collaborates with whom", "working_groups"),
+            ("is the billing retries decision still valid?", "decision_pressure"),
+            ("what does sales own", "onboarding_brief"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+        # Unchanged neighbours.
+        self.assertEqual(ask_service.route("how is maya connected to the invoice worker")[0], "path_between")
+        self.assertEqual(ask_service.route("who actually works together")[0], "working_groups")
+        self.assertEqual(ask_service.route("who owns billing")[0], "who_owns")
+
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)
         self.assertEqual(algorithms.depth_in("and 3 hops out"), 3)
