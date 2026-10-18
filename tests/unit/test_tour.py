@@ -112,3 +112,24 @@ class WiringTest(unittest.TestCase):
         self.assertIn('role: "dialog", "aria-modal": "false", "aria-labelledby": "tour-title"', self.tour_js)
         self.assertIn('el("p", { class: "tour-text", id: "tour-text", "aria-live": "polite" })', self.tour_js)
         self.assertIn('"aria-label": `Step ${index + 1}: ${step.title}`', self.tour_js)
+
+
+class PhoneTest(unittest.TestCase):
+    """At phone width the card folds to one line (step, title, Next, close) and opens on a tap; Esc leaves."""
+
+    def setUp(self):
+        self.js = (STATIC / "tour.js").read_text()
+        self.css = (STATIC / "tour.css").read_text()
+
+    def test_the_card_folds_to_one_line_on_a_phone_and_opens_on_a_tap(self):
+        self.assertIn('line.append(expand, button("tour-line-next", "Next", next), button("tour-close", "×", stop));', self.js)
+        self.assertIn('expand.addEventListener("click", () => fold(!card.classList.contains("open")));', self.js)
+        self.assertIn('line.lastChild.setAttribute("aria-label", "Close the tour");', self.js)
+        self.assertIn(".tour-line { display: none;", self.css)
+        phone = self.css[self.css.index("@media (max-width: 760px)"):]
+        self.assertIn(".tour-line { display: flex; }", phone)
+        self.assertIn(".tour-card:not(.open) > :not(.tour-line) { display: none !important; }", phone)
+
+    def test_escape_leaves_even_while_the_tour_is_opening(self):
+        self.assertIn('if (event.key === "Escape") {\n      event.preventDefault();\n      stop();', self.js)
+        self.assertIn("if (!steps.length || tour || cancelled) return;", self.js)
