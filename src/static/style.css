@@ -484,8 +484,9 @@ h3 { letter-spacing: -0.01em; }
 .answer .status.error { color: var(--danger); }
 /* Larger and narrower than before; the bar above and the gap below are tighter, so a four-line answer
    still fits a 1080p frame at 125% with its path. */
-.answer .text { font-size: var(--fs-lg); line-height: 1.55; white-space: pre-wrap; margin: 0 0 8px; max-width: 46em; }
-.answer .text.refused { padding-left: 12px; border-left: 2px solid var(--line-2); }
+/* p.text: the answer paragraph only, never a grid cell that happens to carry a "text" class. */
+.answer p.text { font-size: var(--fs-lg); line-height: 1.55; white-space: pre-wrap; margin: 0 0 8px; max-width: 46em; }
+.answer p.text.refused { padding-left: 12px; border-left: 2px solid var(--line-2); }
 .answer .notice { margin: 0 0 12px; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--line); border-left: 3px solid var(--path); background: var(--surface-2); color: var(--ink-2); font-size: var(--fs-md); }
 .answer h3 { font-size: var(--fs-md); margin: 20px 0 10px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .path-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin: 12px 0 10px; }
