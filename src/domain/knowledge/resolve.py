@@ -146,6 +146,17 @@ class _Match:
     kind: int
 
 
+_LABEL_NAME = re.compile(r"[A-Z][A-Za-z0-9_]*")
+
+
+def label_of(entity: "Entity") -> str:
+    """The entity's label, checked, to write into a query's text: ``MATCH (n:{label_of(e)} {id: $id})``
+    seeks the label's id index where ``(n {id: $id})`` scans every node."""
+    if not _LABEL_NAME.fullmatch(entity.label or ""):
+        raise ValueError(f"not a node label: {entity.label!r}")
+    return entity.label
+
+
 def tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", (text or "").lower())
 

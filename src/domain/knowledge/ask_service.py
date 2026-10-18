@@ -462,7 +462,7 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     if target.label != "Service":
         rows = graph.ro_query(
             f"""
-            MATCH (node {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
             WHERE {SCOPED.format(var="service")}
             RETURN service.id, service.name, type(rel), service.kind
             LIMIT 1
@@ -563,7 +563,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
         result = ToolResult(tool="who_knows", answer="")
         rows = graph.ro_query(
             f"""
-            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node)
             WHERE {SCOPED.format(var="person")}
             RETURN person.id, person.name, type(rel), node.name
             ORDER BY person.name, type(rel)
@@ -576,7 +578,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
         # worked on an account but is not linked to a person (HubSpot).
         account_rows = graph.ro_query(
             f"""
-            MATCH (account)-[rel:{ACCOUNT_RELS}]->(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (account)-[rel:{ACCOUNT_RELS}]->(node)
             WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
             OPTIONAL MATCH (account)-[:IS]->(person:Person)
             RETURN {_ACCOUNT_ID}, {_ACCOUNT_NAME}, {_ACCOUNT_LABEL}, account.source, type(rel), node.name
@@ -588,7 +592,7 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
             result.add(PathStep(account_name(who, who_label, source), rel, node, from_id=who_id, to_id=target.id, from_label=who_label, to_label=target.label))
         links = graph.ro_query(
             f"""
-            MATCH (node {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
             WHERE {SCOPED.format(var="service")}
             RETURN node.name, type(rel), service.id, service.name
             """,
@@ -599,7 +603,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
             result.add(PathStep(source, rel, service, from_id=target.id, to_id=service_id, from_label=target.label, to_label="Service"))
         via = graph.ro_query(
             f"""
-            MATCH (person:Person)-[rel:OWNS|WORKED_ON|KNOWS]->(service:Service)<-[:DESCRIBES|ABOUT]-(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (person:Person)-[rel:OWNS|WORKED_ON|KNOWS]->(service:Service)<-[:DESCRIBES|ABOUT]-(node)
             WHERE {SCOPED.format(var="service")}
             RETURN person.id, person.name, type(rel), service.id, service.name
             ORDER BY person.name
