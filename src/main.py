@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
-from src.api.v1 import auth, connectors, console_connectors, github, health, org_ops, proof, slack, slack_install
+from src.api.v1 import auth, connectors, console_connectors, console_oauth, github, health, org_ops, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
 from src.connectors import store as connector_store
@@ -27,7 +27,7 @@ from src.domain.slack.channels import reset as channel_reset
 from src.domain.slack.compute import register_turn_agent
 from src.domain.slack.turn import approval_expiry, reaction_queue  # noqa: F401  register expiry and reaction jobs
 from src.domain.slack.turn import reset as turn_reset
-from src.domain.slack.workspace import list_all_connected_workspaces
+from src.domain.slack.workspace import list_all_connected_workspaces, rollback_stale_pending_workspaces
 from src.seed.seed import company_module, reset_and_seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -75,6 +75,12 @@ def _recover() -> None:
             job()
         except Exception:
             log.exception("startup recovery failed: %s", name)
+    for org in [tenancy.legacy_org(), *_other_orgs()]:
+        try:
+            with tenancy.org_context(org):
+                rollback_stale_pending_workspaces()
+        except Exception:
+            log.exception("rolling back unverified installs failed org=%s", org.id)
     for org, workspace in list_all_connected_workspaces():
         with tenancy.org_context(org):
             # Token-mode installs never hit the OAuth callback; run its after-install steps once.
@@ -118,11 +124,20 @@ async def lifespan(_app: FastAPI):
         yield
 
 
-app = FastAPI(title="Company Brain", lifespan=lifespan)
+# The API docs list every route, admin ones included: served only when DOCS_ENABLED is set.
+_docs = settings.docs_enabled
+app = FastAPI(
+    title="Company Brain",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+)
 app.include_router(slack.router)
 app.include_router(slack_install.router)
 app.include_router(github.router)
 app.include_router(connectors.router)
+app.include_router(console_oauth.router)
 app.include_router(health.router)
 app.include_router(proof.router)
 app.include_router(org_ops.router)

@@ -31,14 +31,18 @@ from src.domain.console import session as console_session
 from src.domain.slack import account_link
 from src.domain.slack.bootstrap import bootstrap_slack_workspace
 from src.domain.slack.install_greeting import greet_slack_installer
-from src.domain.slack.lifecycle_api import exchange_slack_oauth
+from src.domain.slack.lifecycle_api import exchange_slack_oauth, revoke_slack_token
 from src.domain.slack.manifest import SLACK_SCOPES, oauth_callback_url, slack_app_manifest
-from src.domain.slack.token_crypto import encrypt_token
+from src.domain.slack.token_crypto import decrypt_token, encrypt_token
+from src.integrations.slack.client import SlackClient
 from src.domain.slack.workspace import (
     bot_identity,
     disconnect_slack_workspace,
-    forget_workspace_row,
+    confirm_workspace,
     get_workspace_row,
+    rollback_pending_workspace,
+    stage_workspace,
+    verifying,
     get_workspace_by_team_id,
     get_workspace_status,
     list_connected_slack_installs,
@@ -89,6 +93,14 @@ async def _console_install_org(request: Request) -> tenancy.OrgRef | None:
         return tenancy.resolve(org_id) if org_id else None
     except (LookupError, TypeError):
         return None
+
+
+def _revoke(token_enc: str) -> None:
+    """auth.revoke a refused install's token, so nothing holds a working credential for it."""
+    try:
+        revoke_slack_token(SlackClient(decrypt_token(token_enc)).web)
+    except Exception:
+        log.warning("[slack] revoking a refused install's token failed", exc_info=True)
 
 
 def _legacy_serves(team_id: str) -> bool:
@@ -203,29 +215,40 @@ def oauth_callback(request: Request, background: BackgroundTasks, code: str | No
     if routed is not None and routed != ref.id:
         log.warning("[slack] install of team=%s into org=%s refused: routed to org=%s", oauth.team_id, ref.id, routed)
         return HTMLResponse("<!doctype html><title>Company Brain</title><p>This Slack workspace is already connected to another Company Brain org.</p>", status_code=409)
+    fields = dict(
+        team_id=oauth.team_id,
+        bot_token_enc=encrypt_token(oauth.bot_token),
+        bot_user_id=oauth.bot_user_id,
+        team_name=oauth.team_name,
+        installed_by=oauth.authed_user_id,
+        scopes=oauth.scopes,
+        app_id=oauth.app_id,
+        source="oauth",
+    )
     with tenancy.org_context(ref):
-        existed = get_workspace_row(oauth.team_id) is not None
-        upsert_workspace(
-            team_id=oauth.team_id,
-            bot_token_enc=encrypt_token(oauth.bot_token),
-            bot_user_id=oauth.bot_user_id,
-            team_name=oauth.team_name,
-            installed_by=oauth.authed_user_id,
-            scopes=oauth.scopes,
-            app_id=oauth.app_id,
-            source="oauth",
-        )
-        # A's check asks Slack with the bot token just stored, so it runs after the store; a refused
-        # first install is taken back out, and the team is never routed to the org.
-        refusal = _install_refusal(ref, oauth.team_id, oauth.authed_user_id) if not tenancy.is_legacy(ref) else None
-        if refusal is not None:
-            if not existed:
-                forget_workspace_row(oauth.team_id)
-            log.warning("[slack] install of team=%s into org=%s refused: %s", oauth.team_id, ref.id, refusal)
-            return HTMLResponse(
-                "<!doctype html><title>Company Brain</title><p>Only a full member of this Slack workspace who belongs to the org can connect it.</p>",
-                status_code=403,
-            )
+        if tenancy.is_legacy(ref):
+            upsert_workspace(**fields)
+        else:
+            # The membership check asks Slack with the new token, so the install is stored first, as
+            # pending: no reader sees it until it passes, and a refusal (or a crash before the check
+            # ends, at the next startup) puts back the row it replaced.
+            stage_workspace(**fields)
+            try:
+                with verifying(oauth.team_id):
+                    refusal = _install_refusal(ref, oauth.team_id, oauth.authed_user_id)
+            except Exception:
+                rollback_pending_workspace(oauth.team_id)
+                raise
+            if refusal is not None:
+                refused = rollback_pending_workspace(oauth.team_id)
+                if refused:
+                    _revoke(refused)
+                log.warning("[slack] install of team=%s into org=%s refused: %s", oauth.team_id, ref.id, refusal)
+                return HTMLResponse(
+                    "<!doctype html><title>Company Brain</title><p>Only a full member of this Slack workspace who belongs to the org can connect it.</p>",
+                    status_code=403,
+                )
+            confirm_workspace(oauth.team_id)
     if not tenancy.is_legacy(ref):
         orgs.route_team(oauth.team_id, ref.id)
 

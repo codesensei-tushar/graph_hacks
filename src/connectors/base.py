@@ -163,6 +163,8 @@ class OAuthSpec:
     extra_params: Mapping[str, str] = field(default_factory=dict, compare=False, hash=False)
     # Whether the token response carries a refresh token that rotates on use.
     rotating_refresh: bool = False
+    # How the token endpoint takes its fields: "form" (RFC 6749; HubSpot) or "json" (Atlassian).
+    token_body: str = "form"
 
 
 @dataclass(frozen=True)

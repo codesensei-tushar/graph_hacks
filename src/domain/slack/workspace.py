@@ -25,6 +25,8 @@ another org's workspaces are always stored OAuth installs.
 import json
 import logging
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -394,21 +396,116 @@ def _default_team_id() -> str | None:
 _FIELDS = ("team_id", "team_name", "bot_user_id", "bot_token_enc", "installed_by", "scopes", "app_id", "home_channel_id", "source", "created_at")
 
 
+# An install stored but not yet verified (the installer's membership is checked with its own token):
+# no reader sees it, except the check itself (``verifying``). Its node keeps the row it replaced, so
+# a refusal, or a crash before the check finished, puts that row back (``rollback_pending_workspace``).
+_verifying: ContextVar[str | None] = ContextVar("slack_verifying_team", default=None)
+PENDING_STALE_MS = 10 * 60 * 1000
+
+
+@contextmanager
+def verifying(team_id: str):
+    """Within the block, ``team_id``'s pending install is visible, so its token can be used to check it."""
+    token = _verifying.set(team_id)
+    try:
+        yield
+    finally:
+        _verifying.reset(token)
+
+
+_RETURN_ROW = f"coalesce(w.pending_verification, false), w.previous_json, {', '.join('w.' + f for f in _FIELDS)}"
+
+
+def _visible(values) -> dict | None:
+    """The row readers see: a pending install shows the row it replaces (none for a first install),
+    except to its own membership check."""
+    pending, previous_json, *fields = values
+    row = dict(zip(_FIELDS, fields, strict=True))
+    if not pending or _verifying.get() == row["team_id"]:
+        return row
+    return json.loads(previous_json) if previous_json else None
+
+
 def list_workspace_rows() -> list[dict]:
     _, graph = connect()
-    rows = graph.query(
-        f"MATCH (w:SlackWorkspace) RETURN {', '.join('w.' + f for f in _FIELDS)} ORDER BY w.team_name, w.team_id"
-    ).result_set
-    return [dict(zip(_FIELDS, row, strict=True)) for row in rows]
+    rows = graph.query(f"MATCH (w:SlackWorkspace) RETURN {_RETURN_ROW} ORDER BY w.team_name, w.team_id").result_set
+    return [row for row in (_visible(values) for values in rows) if row is not None]
 
 
 def get_workspace_row(team_id: str) -> dict | None:
     _, graph = connect()
-    rows = graph.query(
-        f"MATCH (w:SlackWorkspace {{team_id: $team}}) RETURN {', '.join('w.' + f for f in _FIELDS)}",
+    rows = graph.query(f"MATCH (w:SlackWorkspace {{team_id: $team}}) RETURN {_RETURN_ROW}", {"team": team_id}).result_set
+    return _visible(rows[0]) if rows else None
+
+
+def stage_workspace(**fields) -> None:
+    """``upsert_workspace``, held as pending until ``confirm_workspace``. The row it replaces is kept on the node."""
+    team_id = fields["team_id"]
+    identity_lock.slack_workspace_advisory_lock()
+    _, graph = connect()
+    current = graph.query(
+        f"MATCH (w:SlackWorkspace {{team_id: $team}}) RETURN coalesce(w.pending_verification, false), w.previous_json, "
+        f"{', '.join('w.' + f for f in _FIELDS)}",
         {"team": team_id},
     ).result_set
-    return dict(zip(_FIELDS, rows[0], strict=True)) if rows else None
+    if current and current[0][0]:
+        previous = current[0][1]  # already staged: keep the row from before the first attempt
+    elif current:
+        previous = json.dumps(dict(zip(_FIELDS, current[0][2:], strict=True)))
+    else:
+        previous = None
+    upsert_workspace(**fields)
+    graph.query(
+        "MATCH (w:SlackWorkspace {team_id: $team}) SET w.pending_verification = true, w.previous_json = $previous, w.staged_at = $now",
+        {"team": team_id, "previous": previous, "now": int(time.time() * 1000)},
+    )
+
+
+def confirm_workspace(team_id: str) -> None:
+    _, graph = connect()
+    graph.query(
+        "MATCH (w:SlackWorkspace {team_id: $team}) REMOVE w.pending_verification, w.previous_json, w.staged_at", {"team": team_id}
+    )
+
+
+def rollback_pending_workspace(team_id: str) -> str | None:
+    """Undo a staged install: put back the row it replaced, or delete it if there was none.
+    Returns the staged (refused) token, encrypted, unless it is the one being restored."""
+    _, graph = connect()
+    rows = graph.query(
+        "MATCH (w:SlackWorkspace {team_id: $team}) WHERE w.pending_verification = true RETURN w.previous_json, w.bot_token_enc",
+        {"team": team_id},
+    ).result_set
+    if not rows:
+        return None
+    previous_json, staged_token = rows[0]
+    if previous_json:
+        previous = json.loads(previous_json)
+        graph.query(
+            f"MATCH (w:SlackWorkspace {{team_id: $team}}) SET {', '.join(f'w.{f} = $row.{f}' for f in _FIELDS if f != 'team_id')} "
+            "REMOVE w.pending_verification, w.previous_json, w.staged_at",
+            {"team": team_id, "row": previous},
+        )
+        return None if staged_token == previous.get("bot_token_enc") else staged_token
+    graph.query("MATCH (w:SlackWorkspace {team_id: $team}) DETACH DELETE w", {"team": team_id})
+    return staged_token
+
+
+def rollback_stale_pending_workspaces(now: int | None = None) -> list[str]:
+    """Startup: installs left pending by a crash mid-check are rolled back, never bootstrapped."""
+    cutoff = (now or int(time.time() * 1000)) - PENDING_STALE_MS
+    _, graph = connect()
+    teams = [
+        row[0]
+        for row in graph.query(
+            "MATCH (w:SlackWorkspace) WHERE w.pending_verification = true AND coalesce(w.staged_at, 0) < $cutoff RETURN w.team_id",
+            {"cutoff": cutoff},
+        ).result_set
+    ]
+    for team in teams:
+        rollback_pending_workspace(team)
+        log.warning("[slack] rolled back an install left unverified team=%s", team)
+    return teams
 
 
 def _workspace_from_row(row: dict) -> SlackWorkspace | None:

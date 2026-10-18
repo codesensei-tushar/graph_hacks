@@ -175,15 +175,25 @@ class TeamPageTest(unittest.TestCase):
         self.assertIn("/static/graph.js", page.text)
         self.assertEqual(self.http.get("/static/team.js").status_code, 200)
         self.assertEqual(self.http.get("/static/graph.js").status_code, 200)
+        # A team the graph does not have: still the page, which says so, but with a 404 status.
+        for unknown in ("/team/nope", "/team/" + "x" * 200):
+            missing_page = self.http.get(unknown)
+            self.assertEqual(missing_page.status_code, 404, unknown)
+            self.assertTrue(missing_page.headers["content-type"].startswith("text/html"))
+            self.assertIn("/static/team.js", missing_page.text)
         landing = self.http.get("/").text
         self.assertIn('id="teams"', landing)
         self.assertIn("onboard team:", landing)
 
-    def test_team_routes_share_the_public_rate_limit_and_cache(self):
+    def test_one_team_is_counted_the_team_list_is_cached_and_not(self):
+        here = {"X-Real-IP": "203.0.113.7"}
         with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=2, window=60)):
-            self.assertEqual(self.http.get("/api/teams", headers={"X-Real-IP": "203.0.113.7"}).status_code, 200)
-            self.assertEqual(self.http.get("/api/team/data", headers={"X-Real-IP": "203.0.113.7"}).status_code, 200)
-            self.assertEqual(self.http.get("/api/team/data", headers={"X-Real-IP": "203.0.113.7"}).status_code, 429)
+            self.assertEqual(self.http.get("/api/team/data", headers=here).status_code, 200)
+            self.assertEqual(self.http.get("/api/team/data", headers=here).status_code, 200)
+            self.assertEqual(self.http.get("/api/team/data", headers=here).status_code, 429)
+            listed = self.http.get("/api/teams", headers=here)
+            self.assertEqual(listed.status_code, 200)
+            self.assertEqual(listed.headers["cache-control"], ask_api.CACHE_CONTROL)
         with mock.patch.object(team_page, "team_page", wraps=team_page.team_page) as build:
             self.get("/api/team/platform")
             self.get("/api/team/platform")

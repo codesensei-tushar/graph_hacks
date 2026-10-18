@@ -50,16 +50,35 @@ class TtlCacheTest(unittest.TestCase):
 
 
 class RateLimiterTest(unittest.TestCase):
-    def test_each_client_gets_the_limit_per_window_and_a_retry_time(self):
+    def test_each_client_gets_its_burst_then_the_steady_rate_and_a_retry_time(self):
         clock = Clock()
-        limiter = ask_api.RateLimiter(limit=30, window=60, clock=clock)
+        limiter = ask_api.RateLimiter(limit=60, window=60, clock=clock, burst=30)
         self.assertTrue(all(limiter.check("203.0.113.7").allowed for _ in range(30)))
-        clock.now += 20
         refused = limiter.check("203.0.113.7")
-        self.assertEqual((refused.allowed, refused.retry_after), (False, 40))
+        self.assertEqual((refused.allowed, refused.retry_after), (False, 1))
         self.assertTrue(limiter.check("198.51.100.9").allowed)
-        clock.now += 40
-        self.assertTrue(limiter.check("203.0.113.7").allowed)
+        # One call a second is the steady rate: it never runs out.
+        for _ in range(120):
+            clock.now += 1
+            self.assertTrue(limiter.check("203.0.113.7").allowed)
+        # Idle long enough, the whole burst is back, and no more than that.
+        clock.now += 3600
+        self.assertTrue(all(limiter.check("203.0.113.7").allowed for _ in range(30)))
+        self.assertFalse(limiter.check("203.0.113.7").allowed)
+
+    def test_without_a_burst_the_limit_is_the_burst_and_the_retry_is_the_refill_time(self):
+        clock = Clock()
+        limiter = ask_api.RateLimiter(limit=3, window=60, clock=clock)
+        self.assertTrue(all(limiter.check("a").allowed for _ in range(3)))
+        self.assertEqual(limiter.check("a").retry_after, 20)
+        clock.now += 20
+        self.assertTrue(limiter.check("a").allowed)
+
+    def test_the_default_budget_covers_ten_rapid_page_views(self):
+        # The home page with ?q= makes one counted call; the rest are cached reads.
+        limiter = ask_api.RateLimiter(ask_api.RATE_LIMIT, ask_api.RATE_WINDOW_SECONDS, clock=Clock(), burst=ask_api.RATE_BURST)
+        self.assertTrue(all(limiter.check("office-nat").allowed for _ in range(10)))
+        self.assertGreaterEqual(ask_api.RATE_LIMIT, 60)
 
     def test_stale_clients_are_dropped_when_the_table_is_full(self):
         clock = Clock()
@@ -68,7 +87,7 @@ class RateLimiterTest(unittest.TestCase):
         limiter.check("b")
         clock.now += 61
         limiter.check("c")
-        self.assertEqual(set(limiter._windows), {"c"})
+        self.assertEqual(set(limiter._buckets), {"c"})
 
     def test_admit_counts_clients_without_an_address_together(self):
         with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=1, window=60)):

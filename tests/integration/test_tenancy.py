@@ -274,6 +274,45 @@ class TenancyTest(unittest.TestCase):
         with tenancy.org_context(self.x.id):
             self.assertIsNone(workspace_module.get_workspace_row(team))
 
+    def test_a_refused_reinstall_restores_the_previous_install_and_revokes_the_new_token(self):
+        team = f"TRE{uuid.uuid4().hex[:6].upper()}"
+        with tenancy.org_context(self.x.id):
+            workspace_module.upsert_workspace(team_id=team, bot_token_enc="plain:xoxb-old", bot_user_id="UOLD", team_name="Before")
+            workspace_module.set_home_channel(team, "CHOME")
+        with mock.patch.object(slack_install, "_revoke") as revoke:
+            self.assertEqual(self._install(self.x.id, team, refusal=lambda ref, team_id, user: "not_a_member").status_code, 403)
+        refused = revoke.call_args.args[0]
+        self.assertNotEqual(refused, "plain:xoxb-old")
+        from src.domain.slack.token_crypto import decrypt_token
+
+        self.assertEqual(decrypt_token(refused), "xoxb-routed")
+        with tenancy.org_context(self.x.id):
+            row = workspace_module.get_workspace_row(team)
+            self.assertEqual((row["bot_token_enc"], row["bot_user_id"], row["team_name"], row["home_channel_id"]), ("plain:xoxb-old", "UOLD", "Before", "CHOME"))
+            workspace_module.forget_workspace_row(team)
+
+    def test_an_install_left_unverified_by_a_crash_is_never_read_and_rolled_back_at_startup(self):
+        first, again = f"TCR{uuid.uuid4().hex[:6].upper()}", f"TCR{uuid.uuid4().hex[:6].upper()}"
+        with tenancy.org_context(self.x.id):
+            workspace_module.upsert_workspace(team_id=again, bot_token_enc="plain:xoxb-kept", team_name="Kept")
+            for team in (first, again):
+                workspace_module.stage_workspace(team_id=team, bot_token_enc="plain:xoxb-unverified", team_name="Staged")
+            # A crash here: nothing reads the staged rows.
+            self.assertIsNone(workspace_module.get_workspace_row(first))
+            self.assertEqual(workspace_module.get_workspace_row(again)["bot_token_enc"], "plain:xoxb-kept")
+            self.assertNotIn(first, [row["team_id"] for row in workspace_module.list_workspace_rows()])
+            with workspace_module.verifying(first):
+                self.assertIsNotNone(workspace_module.get_workspace_row(first))
+            # Too recent to be a crash: left alone.
+            self.assertEqual(workspace_module.rollback_stale_pending_workspaces(), [])
+            rolled = workspace_module.rollback_stale_pending_workspaces(now=int(time.time() * 1000) + workspace_module.PENDING_STALE_MS + 1000)
+            self.assertEqual(sorted(rolled), sorted([first, again]))
+            _, graph = connect()
+            self.assertEqual(graph.query("MATCH (w:SlackWorkspace {team_id: $t}) RETURN count(w)", {"t": first}).result_set[0][0], 0)
+            row = workspace_module.get_workspace_row(again)
+            self.assertEqual((row["bot_token_enc"], row["team_name"]), ("plain:xoxb-kept", "Kept"))
+            workspace_module.forget_workspace_row(again)
+
     def test_the_installer_and_the_orgs_creator_must_both_belong_to_the_workspace(self):
         asked = []
 

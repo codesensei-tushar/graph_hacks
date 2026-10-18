@@ -23,6 +23,8 @@ class Settings:
     tenancy_strict: bool = field(default_factory=lambda: os.getenv("TENANCY_STRICT", "").lower() in ("1", "true", "yes"))
     # The org console (/console, /auth). Off by default: production is unchanged until it is turned on.
     console_enabled: bool = field(default_factory=lambda: os.getenv("CONSOLE_ENABLED", "").lower() in ("1", "true", "yes"))
+    # /docs, /redoc and /openapi.json list every route, admin ones included. Off by default; local development only.
+    docs_enabled: bool = field(default_factory=lambda: os.getenv("DOCS_ENABLED", "").lower() in ("1", "true", "yes"))
     # Seed the company graph on startup when it's empty. Local development only; off in production.
     seed_on_startup: bool = field(default_factory=lambda: os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"))
     # Post a heads-up to the Slack home channel when a new public pull request reaches people who weren't on it.

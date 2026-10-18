@@ -8,7 +8,8 @@ streamable HTTP at ``/mcp`` (stateless, JSON responses), gates each request, and
 SDK's session manager inside the app's lifespan.
 
 ``/mcp`` is public, like the ask page: the tools are read-only and read ``org_shared``.
-The gate, per request:
+The server is stateless JSON-RPC over POST: it has no stream to hold open for a GET and no
+session to end with a DELETE, so both are 405 before anything else. The gate, per request:
 
 - no bearer token: counted against the address's ask-page budget (``ask_api.admit``);
   over it, 429 with ``Retry-After``;
@@ -77,8 +78,12 @@ async def _reply(send: Send, status: int, body: dict, headers: list[tuple[bytes,
     await send({"type": "http.response.body", "body": payload})
 
 
+# Stateless JSON-RPC: every call is a POST. A GET would otherwise hold an empty 200 open.
+ALLOWED_METHODS = ("POST",)
+
+
 class CallerGate:
-    """Pure ASGI: the right token passes uncounted, a wrong one is 403, anyone else is rate-limited."""
+    """Pure ASGI: only POST is served, the right token passes uncounted, a wrong one is 403, anyone else is rate-limited."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -86,6 +91,10 @@ class CallerGate:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
+            return
+        if scope.get("method") not in ALLOWED_METHODS:
+            allow = [(b"allow", ", ".join(ALLOWED_METHODS).encode())]
+            await _reply(send, 405, {"error": "this MCP server is stateless JSON-RPC: POST each call"}, allow)
             return
         headers = dict(scope.get("headers") or [])
         header = headers.get(b"authorization", b"").decode("latin-1")
