@@ -15,6 +15,10 @@ features:
     display_name: company-brain
     always_online: true
 oauth_config:
+  # Multi-workspace install (/slack/oauth/install) and Sign in with Slack for the console.
+  redirect_urls:
+    - https://brain.noobsurd.space/slack/oauth/callback
+    - https://brain.noobsurd.space/auth/slack/callback
   scopes:
     # Read-mostly: every extra scope is another line on the install consent screen.
     bot:
@@ -34,6 +38,11 @@ oauth_config:
       - team:read
       - users:read
       - users:read.email
+    # Sign in with Slack (OpenID Connect) for the console. Never used to read Slack.
+    user:
+      - openid
+      - email
+      - profile
 settings:
   event_subscriptions:
     request_url: https://brain.noobsurd.space/slack/events
