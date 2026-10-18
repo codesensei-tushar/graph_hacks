@@ -13,7 +13,6 @@ and routes the team to it (a ``WorkspaceRoute``; the legacy org's teams need non
 already routed to another org is refused: one Slack workspace feeds one org.
 """
 
-import inspect
 
 import html
 import json
@@ -21,13 +20,14 @@ import logging
 import secrets
 from urllib.parse import parse_qs, urlencode
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from src.core import tenancy
 from src.core.config import settings
 from src.db.falkordb_client import kv
 from src.domain import orgs
+from src.domain.console import session as console_session
 from src.domain.slack import account_link
 from src.domain.slack.bootstrap import bootstrap_slack_workspace
 from src.domain.slack.install_greeting import greet_slack_installer
@@ -77,20 +77,14 @@ def _admin_org(org: str | None) -> tenancy.OrgRef | None:
 
 async def _console_install_org(request: Request) -> tenancy.OrgRef | None:
     """The org of a signed-in console session that may add the bot: the org's creator before its
-    first install, or its owner (package A's ``console_pending``). None otherwise."""
+    first install, or its owner (``console_pending``). None otherwise."""
     if not settings.console_enabled:
         return None
     try:
-        from src.domain.console.session import console_pending  # package A
-    except ImportError:
+        session = await console_session.console_pending(request)
+    except HTTPException:
         return None
-    try:
-        session = console_pending(request)
-        if inspect.isawaitable(session):
-            session = await session
-    except Exception:
-        return None
-    org_id = session.get("org") if isinstance(session, dict) else getattr(session, "org", None)
+    org_id = session.org
     try:
         return tenancy.resolve(org_id) if org_id else None
     except (LookupError, TypeError):
@@ -123,13 +117,10 @@ def _install_refusal(ref: tenancy.OrgRef, team_id: str, installer: str | None) -
 
 
 def _membership_refusal(team_id: str, slack_user_id: str | None):
-    """Package A's check that the installer belongs to the org (in the org's context): None when they do.
-    Until A is in this build, nobody is refused."""
-    try:
-        from src.domain.console.session import slack_membership_refusal
-    except ImportError:
-        return None
-    return slack_membership_refusal(team_id, slack_user_id)
+    """Whether ``slack_user_id`` is a full member of ``team_id`` (asked in the org's context): None when they are."""
+    if not slack_user_id:
+        return "no_installer"
+    return console_session.slack_membership_refusal(team_id, slack_user_id)
 
 
 @router.get("/manifest.json")
