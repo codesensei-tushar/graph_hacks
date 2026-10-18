@@ -1,0 +1,1 @@
+This product includes software derived from Company Brain by Supermemory (https://github.com/supermemoryai/company-brain), licensed under the Apache License 2.0. Modifications: memory, scopes and agent state moved to FalkorDB; ported from TypeScript to Python.

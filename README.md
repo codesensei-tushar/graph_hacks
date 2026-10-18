@@ -452,3 +452,7 @@ async with create_mcp_http_client(headers={"Authorization": f"Bearer {token}"}) 
 ```
 
 The mapping is `src/domain/knowledge/mcp_tools.py`; the mount, token check and session lifespan are `src/api/mcp.py`. `tests/integration/test_mcp_server.py` runs this exact exchange against a local server.
+
+## License
+
+Apache-2.0, see [LICENSE](LICENSE). The Slack layer is adapted from [supermemoryai/company-brain](https://github.com/supermemoryai/company-brain) (Apache-2.0); see [NOTICE](NOTICE).
