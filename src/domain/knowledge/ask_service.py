@@ -536,11 +536,12 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
             parts.append(f"{named} is in the graph, and no owner or team is recorded for it.")
         if teams:
             parts.append(f"Run by {run_by}.")
+    parts.append(account_line(graph, service, scopes))
     if kinds.kind_or_default(service.kind) in ("policy", "playbook"):
         summary = graph.ro_query("MATCH (s:Service {id: $id}) RETURN coalesce(s.summary, '')", {"id": service.id}).result_set
         if summary and summary[0][0].strip():
             parts.append(summary[0][0].strip().rstrip(".") + ".")
-    result.answer = " ".join(parts)
+    result.answer = " ".join(part for part in parts if part)
     return result
 
 
@@ -640,6 +641,7 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
     else:
         named = kinds.capitalized(kinds.subject(target.name, target.kind))
         parts = [f"{named} is {kinds.owned(target.kind)} {join_names(owners)}." if owners else f"{named} has no named owner."]
+        parts.append(account_line(graph, target, scopes))
     ranked = rank_people_tiered(result.path, target)
     if ranked:
         # Assignees whose only tie is tickets come after everyone who knows the thing, a few by name.
@@ -653,8 +655,45 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
         parts.append(f"Ask first: {first}" + (f", then {join_names(rest)}" if rest else "") + ".")
     if open_tickets:
         parts.append(f"Open tickets: {join_names(open_tickets + ([f'{more_open} more'] if more_open else []))}.")
-    result.answer = " ".join(parts)
+    result.answer = " ".join(part for part in parts if part)
     return result
+
+
+def account_line(graph, thing: Entity, scopes: list[str]) -> str:
+    """An account's place in the CRM: "It is a customer (open); deals: Contract Sent (Priya Shah)." "" for anything else."""
+    if kinds.kind_or_default(thing.kind) != "account":
+        return ""
+    rows = graph.ro_query(
+        f"""
+        MATCH (s:Service {{id: $id}})
+        OPTIONAL MATCH (who)-[r:WORKED_ON]->(s)
+        WHERE r.evidence = 'deal' AND labels(who)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="who")}
+        RETURN coalesce(s.status, ''), s.state, coalesce(s.source, ''), collect(DISTINCT [who.name, labels(who)[0], who.source, r.stage])
+        """,
+        {"id": thing.id, "scopes": scopes},
+    ).result_set
+    if not rows:
+        return ""
+    status, state, source, deals = rows[0]
+    if source != "hubspot":
+        # Only a CRM's lifecycle stage is a lifecycle: another tool's status means something else.
+        return ""
+    sentences = []
+    if status:
+        stage = LIFECYCLE_LABELS.get(status.lower(), status.replace("_", " ").lower())
+        sentences.append(f"HubSpot lifecycle stage: {stage}" + (f", {state}" if state else "") + ".")
+    told = sorted(f"{stage} ({account_name(who, label, who_source)})" if stage else account_name(who, label, who_source) for who, label, who_source, stage in deals if who)
+    if told:
+        sentences.append(f"Deals: {join_names(told)}.")
+    return " ".join(sentences)
+
+
+# HubSpot's lifecycle stage ids as people say them.
+LIFECYCLE_LABELS = {
+    "subscriber": "subscriber", "lead": "lead", "marketingqualifiedlead": "marketing qualified lead",
+    "salesqualifiedlead": "sales qualified lead", "opportunity": "opportunity", "customer": "customer",
+    "evangelist": "evangelist", "other": "other",
+}
 
 
 def account_name(name: str, label: str, source: str | None) -> str:

@@ -15,7 +15,7 @@ from src.connectors.base import Install  # noqa: E402
 from src.connectors.hubspot.connector import HubSpotConnector  # noqa: E402
 from src.core import scheduler  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_service, brief, catalogue, find, team_page  # noqa: E402
+from src.domain.knowledge import ask_service, brief, catalogue, find, team_page, what_changed  # noqa: E402
 from src.seed import quillfern, quillfern_sales, seed  # noqa: E402
 from tests.fixtures.hubspot.fake_hubspot import SERVER_MS, FakeHubSpot  # noqa: E402
 
@@ -125,6 +125,11 @@ class CrmQuestionsTest(unittest.TestCase):
 
     def test_a_team_that_does_not_run_hubspot_has_none(self):
         self.assertEqual(team_page.team_page("payments", SLACK).synced_total, 0)
+
+    def test_what_changed_includes_crm_accounts_with_their_stage(self):
+        result = what_changed.what_changed("what changed", SLACK, days=365)
+        self.assertIn("the Larkspur Freightways account changed in the CRM (customer, open); deals: Closed Won (Dev Patel) and Contract Sent (Priya Shah)", result.answer)
+        self.assertNotIn("Larkspur", what_changed.what_changed("what changed", ORG, days=365).answer)
 
 
 if __name__ == "__main__":
