@@ -167,7 +167,7 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
         if not write_tag:
             return TurnOutcome(reply="I can't save anything from here.")
         memory_service.write(match.group(1).strip(), write_tag, asker, scope.channel_id or "", request.event.ts or "")
-        return TurnOutcome(reply=f"Saved. Anyone who can read {scope_label(write_tag, names)} can recall it.")
+        return TurnOutcome(reply="Saved. Only you can recall it, in your DMs with me." if write_tag.startswith("user_") else f"Saved. Anyone who can read {scope_label(write_tag, names)} can recall it.")
 
     if match := _TICKET.match(text):
         title, about = _split_ticket(match.group(1).strip())
