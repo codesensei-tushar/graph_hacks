@@ -19,6 +19,8 @@ A step returns a found ``ToolResult`` or None. A step that raises is logged and 
 """
 
 import logging
+import re
+from dataclasses import replace
 from collections.abc import Callable
 
 from src.domain.knowledge.dto import ToolResult
@@ -66,6 +68,7 @@ def _recall(question: str, scopes: list[str]) -> ToolResult | None:
     found.memories = [memory for memory in found.memories if all(_said(word, memory.text) for word in words)]
     if not found.memories:
         return None
+    found.memories = [replace(memory, author=_speaker(memory.author)) for memory in found.memories]
     first = found.memories[0]
     when = f", {first.learned_at}" if first.learned_at else ""
     found.answer = f"From what was said in chat: “{first.text}” ({first.author}{when})." + (
@@ -76,6 +79,22 @@ def _recall(question: str, scopes: list[str]) -> ToolResult | None:
 
 # Question words the resolver keeps that say what is asked, not about what.
 _ASKING = frozenset({"when", "does", "time", "run", "runs", "happen", "happens", "often", "much", "many", "long"})
+
+
+_SLACK_ID = re.compile(r"^[UW][A-Z0-9]{2,}$")
+
+
+def _speaker(author: str) -> str:
+    """Who said it, by name: a Slack user id ("U0123") is shown as their person, or their Slack name."""
+    if not _SLACK_ID.match(author or ""):
+        return author or "someone"
+    from src.db.falkordb_client import connect
+
+    _, graph = connect()
+    rows = graph.ro_query(
+        "MATCH (u:SlackUser {id: $id}) OPTIONAL MATCH (u)-[:IS]->(p:Person) RETURN coalesce(p.name, u.real_name, u.name)", {"id": author}
+    ).result_set
+    return rows[0][0] if rows and rows[0][0] else "someone"
 
 
 def _said(word: str, text: str) -> bool:
