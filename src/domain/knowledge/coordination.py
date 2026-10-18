@@ -2,7 +2,7 @@
 
 ``who_should_know`` takes a pull request (``notebook#45``, ``#45``, ``PR 45``) or a service.
 For a pull request, what changed is every service it ``TOUCHES`` and the people in the loop
-are its author and reviewers. For a service, what changed is the service and the people in
+are its author, its reviewers, and anyone asked to review it. For a service, what changed is the service and the people in
 the loop are its owners. The owners of what changed come first (0 hops); then the walk
 follows ``DEPENDS_ON`` back from what changed for up to two hops, with every node readable
 and accounts kept off every route as in ``blast_radius``, and names the owners of each
@@ -332,7 +332,7 @@ def _pull_request(graph, pr: Entity, scopes: list[str]) -> Change:
     state, merged = (rows[0][0], rows[0][1]) if rows else ("", False)
     people = graph.ro_query(
         f"""
-        MATCH (gh:GitHubUser)-[r:AUTHORED|REVIEWED]->(:PullRequest {{id: $id}})
+        MATCH (gh:GitHubUser)-[r:AUTHORED|REVIEWED|REVIEW_REQUESTED]->(:PullRequest {{id: $id}})
         WHERE {SCOPED.format(var="gh")}
         OPTIONAL MATCH (gh)-[:IS]->(p:Person)
         WHERE {SCOPED.format(var="p")}

@@ -70,7 +70,14 @@ Check deliveries under the app's **Advanced → Recent Deliveries**. A green tic
 
 ## Heads-up on a new pull request
 
-With `COORDINATION_ALERTS=true`, a public repo's pull request that is opened, reopened or marked ready for review is ingested first, then `who_should_know` runs for it with the public read scope. If it flags anyone, the bot posts to each installed workspace's home channel: "Heads-up on <title> (<url>):", then the reply and its path. A pull request posts once (`github:coordination:<repo_id>:<number>`, SET NX for seven days; the key is given back if nothing reached Slack). Private repos never post, drafts wait until they are ready for review, and the title is escaped, so it cannot ping a channel. A failure is logged as `[github] coordination alert failed` and never affects ingestion; each run logs its outcome (`posted`, `nobody`, `duplicate`, `private`, ...).
+With `COORDINATION_ALERTS=true`, a public repo's pull request that is opened, reopened or marked ready for review is ingested first, then `who_should_know` runs for it with the public read scope. Its author, its reviewers and anyone asked to review it (`requested_reviewers`, including CODEOWNERS) count as in the loop. If it flags anyone, the bot posts to each installed workspace's home channel: "Heads-up on <title> (<url>):", then the reply and its path.
+
+- **At most once per pull request every seven days:** `github:coordination:<repo_id>:<number>`, SET NX with a seven-day expiry. If nothing reached Slack the key is given back and the post is retried on the scheduler after one, five and thirty minutes.
+- **Only for people the company knows:** the author is linked to a person in the graph, or GitHub marks them as an owner, member or collaborator. A stranger opening pull requests on a public repo cannot make the bot post.
+- **Never for private repos**, so their details stay out of shared channels. Drafts wait until they are ready for review.
+- **Titles are anyone's text:** they are escaped, and markdown links are split, so a title cannot ping a channel or hide a link.
+
+A failure is logged as `[github] coordination alert failed` and never affects ingestion; each run logs its outcome (`posted to 1 workspace for ...`, `nobody`, `duplicate`, `private`, `outside_author`, `failed`, ...).
 
 ## Graph
 

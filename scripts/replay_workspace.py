@@ -134,7 +134,8 @@ def _play_heads_up(replayer, fake) -> None:
     from src.core.config import settings
     from src.db.falkordb_client import kv
     from src.domain.github import alerts, webhooks
-    from src.domain.slack.workspace import set_home_channel
+    from src.db.falkordb_client import connect
+    from src.domain.slack.workspace import get_home_channel, set_home_channel
     from src.seed import quillfern_workspace as script
     from src.seed.quillfern_workspace import RepoPullRequest
     from scripts.replay.github_api import FakeGitHubClient, pull_request_payload, repo_payload
@@ -145,6 +146,7 @@ def _play_heads_up(replayer, fake) -> None:
     github = FakeGitHubClient((dataclasses.replace(notebook, pull_requests=notebook.pull_requests + (pr,)), *script.REPOS[1:]), script.INSTALLATION_ID)
     if HOME_CHANNEL not in fake.channels:
         fake.add_channel(FakeSlackChannel(id=HOME_CHANNEL, name="company-brain", members=[script.BOT_USER_ID]))
+    previous_home = (get_home_channel(script.TEAM_ID) or {}).get("channel_id")
     set_home_channel(script.TEAM_ID, HOME_CHANNEL)
     # A rerun on the same graph posts again.
     kv().delete(alerts.dedupe_key(notebook.id, pr.number))
@@ -161,6 +163,9 @@ def _play_heads_up(replayer, fake) -> None:
         print(f"    bot in #company-brain:\n{indented}")
     if not posted:
         print("    (no heads-up was posted)")
+    # The demo graph keeps the scripted install; a live instance on it must not post to a channel only the fake has.
+    _, graph = connect()
+    graph.query("MATCH (w:SlackWorkspace {team_id: $team}) SET w.home_channel_id = $home", {"team": script.TEAM_ID, "home": previous_home})
 
 
 def run_in_process(args) -> None:
