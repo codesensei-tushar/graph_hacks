@@ -46,10 +46,13 @@ _HOPS = re.compile(r"\b(\d+|one|two|three|four|five|six)\s+hops?\b", re.IGNORECA
 _DEPTH = re.compile(r"\bdepth\s+(\d+)\b", re.IGNORECASE)
 _DIRECT = re.compile(r"\b(?:directly|direct dependents|immediate(?:ly)?|first hop)\b", re.IGNORECASE)
 # What a service needs, not what needs it: "what does the invoice worker depend on", "billing's
-# dependencies", "what does search need". "what depends on billing" and "dependents" are the other way.
+# dependencies", "what does search need", "what does it need to run", "what does billing require".
+# "what depends on billing", "what relies on it" and "dependents" are the other way, and "what do I
+# need to know about billing" asks for people.
 _NEEDS = re.compile(
-    r"\bwhat (?:does|do|did) .+ (?:depend|rely) on\b|\b(?:depends|relies) on what\b|\bdependenc(?:y|ies)\b|\bupstream of\b"
-    r"|\bwhat (?:does|do) (?!i\b|we\b|you\b|they\b)[\w' ]+? need\b(?! to\b)",
+    r"\bwhat (?:does|do|did) .+ (?:depend|rely) on\b|\b(?:depends|relies|requires) on what\b|\brequires what\b"
+    r"|\bdependenc(?:y|ies)\b|\bupstream of\b|\bneed(?:s|ed)? to run\b"
+    r"|\bwhat (?:does|do) (?!i\b|we\b|you\b|they\b)[\w' ]+? (?:need|require)\b(?! to\b)",
     re.IGNORECASE,
 )
 # blast_radius walks DEPENDS_ON one way or the other.
