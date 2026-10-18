@@ -1,4 +1,6 @@
 falkordb>=1.0.0
+# C reply parser for redis-py (and so falkordb): picked up automatically, much faster on large result sets.
+hiredis==3.4.2
 python-dotenv>=1.0.0
 fastapi>=0.115.0
 uvicorn>=0.32.0
