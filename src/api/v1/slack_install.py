@@ -93,6 +93,16 @@ async def _console_admin_org(request: Request) -> tenancy.OrgRef | None:
         return None
 
 
+def _membership_refusal(team_id: str, slack_user_id: str | None):
+    """Package A's check that the installer belongs to the org (in the org's context): None when they do.
+    Until A is in this build, nobody is refused."""
+    try:
+        from src.domain.console.session import slack_membership_refusal
+    except ImportError:
+        return None
+    return slack_membership_refusal(team_id, slack_user_id)
+
+
 @router.get("/manifest.json")
 def manifest(request: Request):
     return slack_app_manifest(_origin(request))
@@ -169,6 +179,13 @@ def oauth_callback(request: Request, background: BackgroundTasks, code: str | No
         log.warning("[slack] install of team=%s into org=%s refused: routed to org=%s", oauth.team_id, ref.id, routed)
         return HTMLResponse("<!doctype html><title>Company Brain</title><p>This Slack workspace is already connected to another Company Brain org.</p>", status_code=409)
     with tenancy.org_context(ref):
+        refusal = _membership_refusal(oauth.team_id, oauth.authed_user_id) if not tenancy.is_legacy(ref) else None
+        if refusal is not None:
+            log.warning("[slack] install of team=%s into org=%s refused: %s", oauth.team_id, ref.id, refusal)
+            return HTMLResponse(
+                "<!doctype html><title>Company Brain</title><p>Only a full member of this Slack workspace who belongs to the org can connect it.</p>",
+                status_code=403,
+            )
         upsert_workspace(
             team_id=oauth.team_id,
             bot_token_enc=encrypt_token(oauth.bot_token),

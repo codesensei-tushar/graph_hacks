@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Company Brain</title>
+<meta name="description" content="Sign in to the Company Brain console with your Slack account.">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/static/console/icon.svg" type="image/svg+xml">
+<link rel="preload" href="/static/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<script src="/static/theme.js?v=1"></script>
+<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/console.css?v=1">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Company Brain, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path class="mark-edge" d="M9.5 17.6 22.5 23.4" stroke-width="2.2" stroke-linecap="round"/><path class="mark-walk" d="M9.5 14.4 22.5 8.6" stroke-width="2.4" stroke-linecap="round"/><circle cx="6" cy="16" r="4.2" fill="var(--person)"/><rect x="21.5" y="3" width="8.5" height="8.5" rx="2" fill="var(--service)"/><path d="M25.8 20.5l4.5 4.5-4.5 4.5-4.5-4.5z" fill="var(--knowledge)"/></svg>
+      Company Brain
+    </a>
+    <div class="top-actions">
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="console-main">
+  <div class="wrap narrow">
+    <section class="page-head" aria-labelledby="signin-title">
+      <p class="eyebrow">Console</p>
+      <h1 id="signin-title">Sign in to Company Brain</h1>
+      <p class="lede">Connect your company's tools, see what is synced, and ask the graph with your own access. You sign in with the Slack account you use at work.</p>
+    </section>
+
+    <div class="panel signin-panel">
+      <p class="banner error" id="signin-message" role="alert" hidden></p>
+      <a class="btn btn-slack" href="/auth/slack/start">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5.1 15.1a2.1 2.1 0 1 1-2.1-2.1h2.1v2.1zm1 0a2.1 2.1 0 0 1 4.2 0v5.3a2.1 2.1 0 1 1-4.2 0v-5.3zM8.9 5.1A2.1 2.1 0 1 1 11 3v2.1H8.9zm0 1a2.1 2.1 0 0 1 0 4.2H3.6a2.1 2.1 0 1 1 0-4.2h5.3zm10 2.1a2.1 2.1 0 1 1 2.1 2.1h-2.1V8.2zm-1 0a2.1 2.1 0 0 1-4.2 0V3a2.1 2.1 0 1 1 4.2 0v5.2zm-2.1 10a2.1 2.1 0 1 1-2.1 2.1v-2.1h2.1zm0-1a2.1 2.1 0 0 1 0-4.2h5.3a2.1 2.1 0 1 1 0 4.2h-5.3z"/></svg>
+        Sign in with Slack
+      </a>
+      <p class="small">Full members of a workspace can sign in. Guests and people from other organisations in shared Slack Connect channels cannot.</p>
+    </div>
+
+    <p class="fineprint">New to Company Brain? Sign in first; if your workspace has no company yet, you will set one up with an invite code (it is in beta). See what we store and why in the <a href="/privacy">privacy notice</a>.</p>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>Company Brain answers from one graph per company and shows the path behind every answer.</p>
+    <p class="foot-links"><a href="/">Home</a><a href="/privacy">Privacy</a></p>
+  </div>
+</footer>
+<script src="/static/shell.js?v=4"></script>
+<script src="/static/console/signin.js?v=1"></script>
+</body>
+</html>

@@ -112,6 +112,8 @@ class SlackUserInfo:
     team_id: str | None = None
     # Slack Connect / external user relative to the queried workspace.
     is_stranger: bool = False
+    # Deactivated in the workspace: users.info still answers, and the person is not a member.
+    deleted: bool = False
 
 
 @dataclass
@@ -344,6 +346,8 @@ def map_slack_member(m: dict) -> SlackMember | None:
 
 
 def _slack_user_info_from_member(user: dict) -> SlackUserInfo | None:
+    if user.get("deleted") is True and user.get("id"):
+        return SlackUserInfo(id=user["id"], name=user.get("name") or None, team_id=user.get("team_id") or None, deleted=True)
     mapped = map_slack_member(user)
     if mapped is None:
         return None

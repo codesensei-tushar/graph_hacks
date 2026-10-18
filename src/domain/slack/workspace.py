@@ -280,9 +280,10 @@ def _person_is_org_member(person_id: str | None) -> bool:
 
 
 def is_workspace_member(user: SlackUserInfo) -> bool:
-    """Bots, guests and external (Slack Connect) users are not members."""
+    """Bots, guests, external (Slack Connect) and deactivated users are not members."""
     return not (
-        getattr(user, "is_bot", False)
+        getattr(user, "deleted", False)
+        or getattr(user, "is_bot", False)
         or getattr(user, "is_restricted", False)
         or getattr(user, "is_ultra_restricted", False)
         or getattr(user, "is_stranger", False)

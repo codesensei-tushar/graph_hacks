@@ -127,7 +127,9 @@ Optional secrets, written to `.env` only if you create them: `SLACK_OWNER_ID`,
 `SLACK_ADMIN_IDS`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `BRAIN_ADMIN_TOKEN` (gates `/slack/status`, `/api/proof` and `POST /ops/seed`), `MCP_TOKEN` (lifts `/mcp`'s per-address rate limit; `/mcp` is public without it),
 `TOKEN_ENCRYPTION_KEY`, `LLM_MODEL` (see [SLACK.md](SLACK.md) for what each does), and the GitHub App's
 `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_PRIVATE_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
-(see [GITHUB.md](GITHUB.md); the private key is stored on one line). Connector settings are
+(see [GITHUB.md](GITHUB.md); the private key is stored on one line), and the org console's
+`CONSOLE_ENABLED`, `TOKEN_ENCRYPTION_KEYS`, `JIRA_OAUTH_CLIENT_ID`, `JIRA_OAUTH_CLIENT_SECRET`,
+`HUBSPOT_OAUTH_CLIENT_ID` and `HUBSPOT_OAUTH_CLIENT_SECRET` (see [CONSOLE.md](CONSOLE.md)). Connector settings are
 secrets named `CONNECTOR_<SOURCE>_<FIELD>` (`CONNECTOR_JIRA_API_TOKEN`, ...): `deploy.sh` writes the
 names in its `CONNECTOR_SECRETS` list that exist, plus any other `CONNECTOR_` secret when the VM may
 list secrets; see [CONNECTORS.md](CONNECTORS.md#production).

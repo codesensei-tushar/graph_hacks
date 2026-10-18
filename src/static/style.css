@@ -230,6 +230,16 @@ code { font-variant-ligatures: none; }
 .top nav a { color: var(--ink-2); text-decoration: none; font: 500 var(--fs-xs)/1 var(--font); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 4px; border-radius: 8px; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
 .top nav a:hover { color: var(--ink); background: var(--surface-2); }
 .top-actions { display: flex; align-items: center; gap: 8px; }
+/* "Sign in" to the console: shown only when the server runs it (console_web unhides it). */
+.top-signin {
+  display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line);
+  color: var(--ink); text-decoration: none; font: 500 var(--fs-sm)/1 var(--font); background: var(--surface);
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.top-signin[hidden] { display: none; }
+.top-signin:hover { border-color: var(--line-2); }
+:root[data-over-hero] .top-signin { color: var(--hero-ink); background: transparent; border-color: rgba(230, 232, 255, 0.22); }
+:root[data-over-hero] .top-signin:hover { border-color: rgba(230, 232, 255, 0.4); }
 .icon-btn {
   display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border-radius: 10px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer;
