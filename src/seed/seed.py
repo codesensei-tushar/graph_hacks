@@ -79,10 +79,12 @@ def _link(graph, from_label: str, from_id: str, rel: str, to_label: str, to_id: 
 
 
 COMPANIES: dict[str, ModuleType] = {"company_brain": company_brain}
+# Every seed a name may pick: ``SEED_COMPANY``, and ``POST /ops/seed?company=``.
+SEED_NAMES = ("company_brain", "quillfern")
 
 
 def company_module(name: str) -> ModuleType:
-    """The seed module for a company name (``company_brain`` or ``quillfern``)."""
+    """The seed module for a company name (``company_brain`` or ``quillfern``). KeyError for any other."""
     if name == "quillfern":
         from src.seed import quillfern
 
@@ -196,6 +198,7 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
             _link(graph, "Decision", decision["id"], "SUPERSEDES", "Decision", decision["supersedes"])
         if decision.get("decided_in") and (label := _label_of(graph, decision["decided_in"], known)) is not None:
             _link(graph, "Decision", decision["id"], "DECIDED_IN", label, decision["decided_in"])
+        _link_pull_requests(graph, getattr(company, "REPO", None), decision)
 
     for chat in company.CHATS:
         _merge_node(graph, "Chat", {key: chat[key] for key in ("id", "name", "summary")})
@@ -220,6 +223,26 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
 
     report.nodes = int(real_graph.query("MATCH (n) RETURN count(n)").result_set[0][0])
     return report
+
+
+def _link_pull_requests(graph, repo: str | None, decision: dict) -> None:
+    """``BASED_ON`` the pull requests a decision cites by number (``pull_requests``), in the seed's ``REPO``.
+
+    Only pull requests GitHub ingest has already written are linked, matched by number and by the
+    full name of the repo they are ``IN_REPO``, so a same-numbered pull request in another repo never
+    is. One not ingested yet is skipped; the next seed run links it."""
+    numbers = [int(number) for number in decision.get("pull_requests") or []]
+    if not repo or not numbers:
+        return
+    graph.query(
+        """
+        MATCH (d:Decision {id: $id})
+        UNWIND $numbers AS number
+        MATCH (pr:PullRequest {number: number})-[:IN_REPO]->(:Repo {full_name: $repo})
+        MERGE (d)-[:BASED_ON]->(pr)
+        """,
+        {"id": decision["id"], "numbers": numbers, "repo": repo},
+    )
 
 
 def _merge_memories(graph, real_graph, company: ModuleType) -> None:
