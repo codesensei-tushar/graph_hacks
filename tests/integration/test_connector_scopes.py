@@ -49,7 +49,7 @@ class ConnectorScopeTest(unittest.TestCase):
                    (contractor:ExternalUser {id: 'jira:default:user:z9', name: 'Zed Contractor', source: 'jira', scope: 'org_internal'}),
                    (namesake:ExternalUser {id: 'jira:default:user:hidden', name: 'Arjun Mehta', source: 'jira', scope: 'org_internal'}),
                    (linked)-[:ASSIGNED]->(pay), (contractor)-[:OPENED]->(pay), (namesake)-[:OPENED]->(pay),
-                   (:Ticket {id: 'TKT-900', name: 'TKT-900', title: 'Books drift'})-[:ABOUT]->(ledger),
+                   (:Ticket {id: 'TKT-900', name: 'TKT-900', title: 'Ledger drift'})-[:ABOUT]->(ledger),
                    (:Ticket {id: 'github:1:issue:5000', name: 'app#5000', title: 'An issue', source: 'github'}),
                    (:Decision {id: 'decision-ledger', name: 'Close the books nightly', scope: 'org_shared'})-[:ABOUT]->(ledger)
             """
@@ -156,7 +156,8 @@ class ConnectorScopeTest(unittest.TestCase):
     def test_a_public_node_about_a_hidden_service_does_not_name_it(self):
         for result in (ask_service.who_owns("who owns TKT-900", ORG), ask_service.who_knows("who knows TKT-900", ORG)):
             self.assertTrue(result.found)
-            self.assertNotIn("Ledger", result.answer)
+            # The public ticket's own title ("Ledger drift") may be shown; the hidden service never is.
+            self.assertNotIn("Ledger", result.answer.replace("“Ledger drift”", ""))
             self.assertFalse([cite for cite in _cites(result) if "Ledger" in cite])
         trace = decisions.decision_trace("why did we close the books nightly", ORG)
         self.assertNotIn("Ledger", trace.answer)

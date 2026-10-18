@@ -195,8 +195,11 @@ READING_LIST = re.compile(
 )
 
 
-def route(question: str) -> tuple[str, dict]:
-    """Pick a tool and its arguments from the question's words. The fallback when no model is configured."""
+def route(question: str, tickets: bool = True) -> tuple[str, dict]:
+    """Pick a tool and its arguments from the question's words. The fallback when no model is configured.
+
+    ``tickets=False`` skips the single-ticket route: ``ticket_status`` asks again that way when the
+    key it was given ("q3-2026", "utf-8") is no ticket the asker can read."""
     text = question.strip()
     if not text:
         return "none", {}
@@ -239,9 +242,10 @@ def route(question: str) -> tuple[str, dict]:
         if depth is not None:
             args["depth"] = min(depth, 2)
         return "explore", args
-    if ticket_status.asks_about_one_ticket(text):
+    if tickets and ticket_status.asks_about_one_ticket(text):
         # "what is PAY-12", "is PAY-12 fixed", "who is working on PAY-11", "what blocks PAY-11": the
-        # ticket itself, before the people and decision routes that would only list who knows it.
+        # ticket itself, before the people and decision routes that would only list who knows it. A key
+        # that is no readable ticket ("billing for q3-2026") falls through to the route below it.
         return "ticket_status", {"name": text}
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.

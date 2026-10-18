@@ -33,6 +33,9 @@ HANDLE = re.compile(r"\b(?!pr-\d)[a-z][a-z0-9]{1,9}-\d+\b", re.IGNORECASE)
 _FIXED = re.compile(r"\b(?:fixed|resolved|done|closed|finished|shipped|merged|complete[d]?)\b", re.IGNORECASE)
 _WHO = re.compile(r"\bwho(?:'s| is| are)? (?:working on|assigned(?: to)?|on|handling|has|owns|took|picked up)\b|\bassignee\b", re.IGNORECASE)
 _BLOCKS = re.compile(r"\bblock(?:s|ed|ing|ers?)?\b|\bwaiting on\b|\bdepends on\b", re.IGNORECASE)
+# The ticket as the blocker, not the blocked: "what does PAY-13 block", "is PAY-13 blocking anything",
+# "what is PAY-13 blocking". "what blocks PAY-11" and "is PAY-11 blocked" ask the other way.
+_BLOCKING = re.compile(r"\b(?:does|do|did|will)\s+\S+\s+block\b|\bblocking\b|\bblocks\s+(?:anything|what|any)\b", re.IGNORECASE)
 # The question shapes routed here when they name a ticket handle.
 ASKS = re.compile(
     r"\b(?:what|which) is\b|\bwhat'?s\b|\bstatus\b|\bstate of\b|\bpriority\b|\bprogress\b|\btell me about\b|\bdetails\b"
@@ -64,17 +67,31 @@ class Ticket:
     blocked_by: list[str] = field(default_factory=list)
     blocks: list[str] = field(default_factory=list)
     references: list[str] = field(default_factory=list)
+    # Assigned, but only to someone outside the asker's scopes.
+    assignee_hidden: bool = False
 
 
 def ticket_status(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = resolve.resolve_name(question, ("Ticket",), scopes, graph=graph)
     if not resolution.found:
-        return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "ticket"), found=False, candidates=resolution.candidate_names())
+        miss = ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "ticket"), found=False, candidates=resolution.candidate_names())
+        return _not_a_ticket(question, scopes, miss)
     result = ToolResult(tool=TOOL, answer="", candidates=resolution.candidate_names())
     ticket = read(graph, resolution.entity, scopes, result)
     result.answer = _answer(question, ticket)
     return result
+
+
+def _not_a_ticket(question: str, scopes: list[str], miss: ToolResult) -> ToolResult:
+    """What a word-number token ("q3-2026", "utf-8", "gpt-4") that names no readable ticket was really
+    asking: the route the question takes without the single-ticket rule, else the refusal fallback."""
+    from src.domain.knowledge import ask_service, fallback  # ask_service imports this module
+
+    tool, args = ask_service.route(question, tickets=False)
+    if tool not in ("none", TOOL):
+        return ask_service._ROUTED[tool](args, scopes)
+    return fallback.before_refusing(question, scopes, miss)
 
 
 def read(graph, target: Entity, scopes: list[str], result: ToolResult) -> Ticket:
@@ -98,6 +115,7 @@ def read(graph, target: Entity, scopes: list[str], result: ToolResult) -> Ticket
         MATCH (who)-[r:ASSIGNED|OPENED|WORKED_ON]->(:Ticket {{id: $id}})
         WHERE labels(who)[0] IN ['Person', 'GitHubUser', 'ExternalUser'] AND {SCOPED.format(var="who")}
         OPTIONAL MATCH (who)-[:IS]->(person:Person)
+        WHERE {SCOPED.format(var="person")}
         RETURN type(r), coalesce(person.id, who.id), coalesce(person.name, CASE WHEN labels(who)[0] = 'GitHubUser' THEN '@' + who.login ELSE who.name END),
                CASE WHEN person IS NOT NULL THEN 'Person' ELSE labels(who)[0] END, who.source
         ORDER BY type(r), coalesce(person.name, who.name)
@@ -109,6 +127,11 @@ def read(graph, target: Entity, scopes: list[str], result: ToolResult) -> Ticket
         if shown not in bucket:
             bucket.append(shown)
             cite(who_id, shown, who_label, rel, target.id, name, "Ticket")
+
+    if not ticket.assigned:
+        # Assigned to someone the asker cannot read: said so, never "no one".
+        hidden = graph.ro_query("MATCH (who)-[:ASSIGNED]->(:Ticket {id: $id}) RETURN count(who)", {"id": target.id}).result_set
+        ticket.assignee_hidden = bool(hidden and hidden[0][0])
 
     for service_id, service in graph.ro_query(
         f"MATCH (:Ticket {{id: $id}})-[:ABOUT]->(s:Service) WHERE {SCOPED.format(var='s')} RETURN s.id, s.name ORDER BY s.name",
@@ -161,7 +184,10 @@ def lead_line(ticket: Ticket) -> str:
     details = [state]
     if ticket.priority:
         details.append(f"priority {ticket.priority}")
-    details.append(f"assigned to {join_names(ticket.assigned)}" if ticket.assigned else "assigned to no one")
+    if ticket.assigned:
+        details.append(f"assigned to {join_names(ticket.assigned)}")
+    else:
+        details.append("the assignee isn't visible to you" if ticket.assignee_hidden else "assigned to no one")
     return f"{ticket.name}{titled}: {', '.join(details)}." if titled else f"{ticket.name} is {', '.join(details)}."
 
 
@@ -171,6 +197,12 @@ def _answer(question: str, ticket: Ticket) -> str:
         done = ticket.state == "closed"
         status = f" ({ticket.status})" if ticket.status else ""
         parts.append(f"Yes: {ticket.name} is closed{status}." if done else f"Not yet: {ticket.name} is still open{status}.")
+    elif _BLOCKING.search(question):
+        # The ticket as the blocker: "what does PAY-13 block", "is PAY-13 blocking anything".
+        if ticket.blocks:
+            parts.append(f"{ticket.name} blocks {_some(ticket.blocks)}.")
+        else:
+            parts.append(f"{ticket.name} blocks nothing you can read.")
     elif _BLOCKS.search(question):
         if ticket.blocked_by:
             parts.append(f"{ticket.name} is blocked by {_some(ticket.blocked_by)}.")
@@ -194,8 +226,10 @@ def _answer(question: str, ticket: Ticket) -> str:
         parts.append(f"About {join_names(ticket.about)}.")
     if ticket.blocked_by and not _BLOCKS.search(question):
         parts.append(f"Blocked by {_some(ticket.blocked_by)}.")
-    if ticket.blocks:
+    if ticket.blocks and not _BLOCKING.search(question):
         parts.append(f"It blocks {_some(ticket.blocks)}.")
+    if ticket.blocked_by and _BLOCKING.search(question):
+        parts.append(f"Blocked by {_some(ticket.blocked_by)}.")
     if ticket.references:
         parts.append(f"Pull requests: {_some(ticket.references)}.")
     return " ".join(parts)
