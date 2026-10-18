@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from src.db.falkordb_client import connect
 from src.domain.knowledge import ask_service, bus_factor, decisions, kinds, resolve
 from src.domain.knowledge.dto import MemoryLine, PathStep, ToolResult, day_from
-from src.domain.knowledge.memories import _LIVE
+from src.domain.knowledge.memories import LIVE as _LIVE
 from src.domain.knowledge.resolve import SCOPED, Entity, join_names
 
 TOOL = "person_profile"

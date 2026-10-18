@@ -104,6 +104,16 @@ _SEARCH = re.compile(
     r"^\s*(?:search(?: the graph| everything)? for|look ?up)\b|\banything (?:about|on|mentioning)\b|\bmentions? of\b",
     re.IGNORECASE,
 )
+# What changed lately, around a thing, a team or the company. A time word is what makes "what
+# happened" or "decided" a question about change; "what is new hire onboarding" names a process.
+_WHEN = r"(?:recently|lately|today|yesterday|this (?:week|month)|last (?:week|month)|past (?:week|month))"
+_CHANGED = re.compile(
+    r"\bwhat(?:'s| has)? changed\b|\bwhat'?s new\b(?! hire)|\bwhat is new\b(?= in\b| on\b| for\b| with\b| this\b| since\b|\s*\??$)"
+    r"|\brecent changes?\b|\bchangelog\b|\bcatch me up\b|\bwhat did i miss\b"
+    rf"|\bwhat happened\b.*\b{_WHEN}\b|\b(?:decided?|decisions?)\b.*\b{_WHEN}\b"
+    r"|\b(?:failing|broken|erroring|flaky)\b.*\bchanged?\b",
+    re.IGNORECASE,
+)
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:
 # reading_list strips it from the question before resolving the name.
 READING_LIST = re.compile(
@@ -124,6 +134,11 @@ def route(question: str) -> tuple[str, dict]:
         return "working_groups", {}
     if _RISK.search(text):
         return "risk_map", {}
+    if _CHANGED.search(text):
+        from src.domain.knowledge.what_changed import only_in
+
+        only = only_in(text)
+        return "what_changed", {"name": text, **({"only": only} if only else {})}
     if _LEAVES.search(text):
         # Before blast radius: "what breaks if Arjun leaves" is about a person.
         return "if_person_leaves", {"name": text}
@@ -193,8 +208,8 @@ def ingest_ticket(title: str, about: str, scope: str) -> TicketCreated:
     target = ticket_target(title, about, graph=graph)
     ticket_id = _next_ticket_id(graph)
     graph.query(
-        "CREATE (ticket:Ticket {id: $id, name: $id, title: $title, summary: $title, scope: $scope})",
-        {"id": ticket_id, "title": title, "scope": scope},
+        "CREATE (ticket:Ticket {id: $id, name: $id, title: $title, summary: $title, scope: $scope, created_at: $now})",
+        {"id": ticket_id, "title": title, "scope": scope, "now": _now_millis()},
     )
     if target is None:
         return TicketCreated(id=ticket_id, about_name=None)
@@ -480,6 +495,20 @@ def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
     return brief.onboarding_brief(question, scopes)
 
 
+def _now_millis() -> int:
+    """The decisions clock, so a filed ticket is dated the way a recorded decision is."""
+    from src.domain.knowledge.decisions import now_millis
+
+    return now_millis()
+
+
+def what_changed(question: str, scopes: list[str], days=None, only=None) -> ToolResult:
+    """Lives in ``what_changed.py``, which follows decisions forward (and so imports the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import what_changed as changed
+
+    return changed.what_changed(question, scopes, days, only)
+
+
 def reading_list(question: str, scopes: list[str]) -> ToolResult:
     """Lives in ``reading_list.py``, which follows decisions forward (and so imports the catalogue). Kept here for the keyword router."""
     from src.domain.knowledge import reading_list as reading
@@ -506,6 +535,7 @@ _ROUTED = {
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "reading_list": lambda args, scopes: reading_list(args["name"], scopes),
+    "what_changed": lambda args, scopes: what_changed(args.get("name") or "", scopes, args.get("days"), args.get("only")),
     "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth"), args.get("direction")),
     "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),
