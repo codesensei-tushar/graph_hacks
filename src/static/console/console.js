@@ -242,8 +242,12 @@
   const NOTICES = {
     oauth_denied: ["Access was not granted, so nothing was connected.", "error"],
     oauth_state: ["That connection attempt expired. Start it again.", "error"],
-    account_claimed: ["That Jira site or HubSpot portal is already connected to another company in Company Brain.", "error"],
+    account_claimed: ["That account (a Jira site, HubSpot portal or GitHub account) is already connected to another company in Company Brain.", "error"],
     oauth_failed: ["The connection did not complete. Try again in a minute.", "error"],
+    github_state: ["That GitHub connection attempt expired, or was opened in another browser. Start it again.", "error"],
+    github_denied: ["GitHub sign-in was declined, so nothing was connected.", "error"],
+    github_not_yours: ["The GitHub account you signed in with cannot reach that installation, so it was not connected.", "error"],
+    github_failed: ["The GitHub connection did not complete. Try again in a minute.", "error"],
   };
   const notice = (code) => NOTICES[code] || NOTICES.oauth_failed;
 

@@ -46,6 +46,7 @@ PAGES = {
     "/console": "index.html",
     "/console/start": "start.html",
     "/console/connect/jira/site": "site.html",
+    "/console/github": "github.html",
     "/console/connectors/{connection_id}/projects": "projects.html",
     "/console/connectors/{connection_id}": "connection.html",
     "/console/ask": "ask.html",
