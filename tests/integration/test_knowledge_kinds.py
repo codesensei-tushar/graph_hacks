@@ -90,7 +90,7 @@ class KindsTest(unittest.TestCase):
         self.assertTrue(renewals.answer.startswith("The Renewals process is run by Priya Shah for the Sales team."), renewals.answer)
         self.assertIn("Priya Shah -[OWNS]-> Renewals", [step.cite() for step in renewals.path])
         self.assertTrue(ask_service.ask("who handles hubspot", ORG).answer.startswith("The HubSpot system is owned by Dev Patel."))
-        self.assertTrue(ask_service.ask("who is responsible for enterprise accounts", ORG).answer.startswith("The Enterprise accounts is owned by Dev Patel."))
+        self.assertTrue(ask_service.ask("who is responsible for enterprise accounts", ORG).answer.startswith("Enterprise accounts is owned by Dev Patel."))
         knows = ask_service.ask("who knows renewals", ORG)
         self.assertTrue(knows.answer.startswith("The Renewals process is run by Priya Shah. Ask first: Priya Shah (owns it), then Dev Patel (worked on it)."), knows.answer)
 

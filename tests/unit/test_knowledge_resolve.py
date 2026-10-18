@@ -119,6 +119,9 @@ class ResolveRowsTest(unittest.TestCase):
         self.assertEqual((found.entity, found.reason, found.candidates), (None, "no_match", []))
         self.assertEqual(describe_miss(found), "Nothing in the graph matches “espresso machine”. Name a service, document, or ticket that exists in the graph.")
         self.assertEqual(core("Who owns the espresso machine?"), "espresso machine")
+        # Depth and reporting words are not names.
+        self.assertEqual(core("and two hops out"), "")
+        self.assertEqual(core("what did anyone say about billing"), "billing")
 
     def test_a_title_word_alone_is_not_a_near_miss(self):
         # "out" appears in a ticket title; a candidate needs a shared word of four letters or more.

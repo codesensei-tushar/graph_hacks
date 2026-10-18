@@ -58,6 +58,9 @@ def subject(name: str, kind: str | None) -> str:
     kind = kind_or_default(kind)
     if kind == DEFAULT_KIND:
         return name
+    if name.strip() and name.lower().split()[-1] == f"{kind}s":
+        # A plural name is the name alone: "Enterprise accounts is owned by", not "The Enterprise accounts is".
+        return name
     return f"the {name}" if _named_by_kind(name, kind) else f"the {name} {kind}"
 
 

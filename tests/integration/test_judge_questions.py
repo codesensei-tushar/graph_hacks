@@ -12,7 +12,7 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from src.db import falkordb_client  # noqa: E402
 from src.domain.knowledge import ask_api  # noqa: E402
-from src.seed import quillfern, seed  # noqa: E402
+from src.seed import quillfern, quillfern_sales, seed  # noqa: E402
 
 GRAPH = f"company_judge_questions_test{tests.TEST_GRAPH_SUFFIX}"
 
@@ -53,6 +53,16 @@ class JudgeQuestionsTest(unittest.TestCase):
             "what does the payments team own": ("onboarding_brief", "The Payments team is Arjun Mehta (Billing engineer) and Lena Fischer"),
             "who is on the platform team": ("onboarding_brief", "The Platform team is Maya Ortiz (Platform lead), Sara Lindqvist"),
             "what does the invoice worker depend on": ("blast_radius", "Invoice Worker depends on Billing Service and Notification Service (1 hop)"),
+            # Round 2: the hero chips and README questions, reworded.
+            "why did we leave postgres": ("decision_trace", "Move the memory layer off Postgres."),
+            "how are maya and the invoice worker related": ("path_between", "Maya Ortiz reaches Invoice Worker in 3 hops"),
+            "path from maya to the invoice worker": ("path_between", "Maya Ortiz reaches Invoice Worker in 3 hops"),
+            "which service matters most": ("load_bearing", "Postgres carries the most weight"),
+            "who works with who": ("working_groups", "Label propagation over who owns or worked on the same service"),
+            "which people work together?": ("working_groups", "Label propagation over who owns or worked on the same service"),
+            "who collaborates with whom": ("working_groups", "Label propagation over who owns or worked on the same service"),
+            "is the billing retries decision still valid?": ("decision_pressure", "*Retry renewal webhooks inside the billing service* is the standing decision"),
+            "is the retries decision still current": ("decision_pressure", "*Retry renewal webhooks inside the billing service* is the standing decision"),
         }
         for question, (tool, start) in cases.items():
             with self.subTest(question=question):
@@ -68,7 +78,52 @@ class JudgeQuestionsTest(unittest.TestCase):
         # Postgres has no decision about it, so there is nothing to stand for.
         self.assertFalse(self._ask("what decisions have we made about postgres").found)
 
+    def test_a_refusal_quotes_only_what_was_named(self):
+        # No thread on the page, so a follow-up names nothing; recall quotes the thing, not "say billing".
+        follow_up = self._ask("and two hops out")
+        self.assertEqual((follow_up.found, follow_up.answer), (False, "I can't tell what that refers to. Name a service, document, or ticket."))
+        self.assertEqual(self._ask("what did anyone say about billing").answer, "Nothing in the memories I can read mentions “billing”.")
+
     def test_the_graph_store_alias_on_the_decision_does_not_take_the_service(self):
         owner = self._ask("who owns the graph store")
         self.assertEqual((owner.tool, owner.found), ("who_owns", True))
         self.assertTrue(owner.answer.startswith("Graph Store is owned by Sara Lindqvist."), owner.answer)
+
+
+class JudgeQuestionsWithSalesTest(unittest.TestCase):
+    """The same, with the Sales team imported, as production may have it for the recording."""
+
+    @classmethod
+    def setUpClass(cls):
+        graph = f"company_judge_questions_sales_test{tests.TEST_GRAPH_SUFFIX}"
+        cls._patches = [
+            mock.patch.object(falkordb_client, "graph_name", return_value=graph),
+            mock.patch.object(seed, "graph_name", return_value=graph),
+        ]
+        for patch in cls._patches:
+            patch.start()
+        seed.reset_and_seed(quillfern)
+        quillfern_sales.seed_sales()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            falkordb_client.client().select_graph(falkordb_client.graph_name()).delete()
+        finally:
+            for patch in cls._patches:
+                patch.stop()
+
+    def setUp(self):
+        ask_api.ANSWERS.clear()
+
+    def test_sales_questions_in_judges_words(self):
+        cases = {
+            "what does sales own": ("onboarding_brief", "Sales: Renewals, pricing and the enterprise accounts that pay for Quillfern. The Sales team is"),
+            "who owns enterprise accounts": ("who_owns", "Enterprise accounts is owned by Dev Patel."),
+            "is the annual plans decision still current": ("decision_pressure", "*Sell annual plans only at renewal* is the standing decision"),
+        }
+        for question, (tool, start) in cases.items():
+            with self.subTest(question=question):
+                answer = ask_api.answer_question(question)
+                self.assertEqual((answer.tool, answer.found), (tool, True), answer.answer)
+                self.assertTrue(answer.answer.startswith(start), answer.answer)
