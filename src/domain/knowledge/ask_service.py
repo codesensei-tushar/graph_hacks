@@ -561,7 +561,10 @@ def account_name(name: str, label: str, source: str | None) -> str:
     """How an account is named in a reply: a person's name, ``@login``, or a connector account with its tool."""
     if label != "ExternalUser":
         return name
-    return f"{name} ({SOURCE_NAMES.get(source or '', (source or 'external').capitalize())})"
+    # A connector account synced before names fell back to the email's local part may still be
+    # named by its address: an answer never shows one.
+    shown = name.split("@", 1)[0].strip() if "@" in (name or "") else name
+    return f"{shown or 'unnamed account'} ({SOURCE_NAMES.get(source or '', (source or 'external').capitalize())})"
 
 
 def rank_people(path: list[PathStep], target: Entity) -> list[tuple[str, int, str]]:
