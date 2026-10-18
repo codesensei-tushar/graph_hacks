@@ -356,7 +356,11 @@ def ask(question: str, scopes: list[str]) -> ToolResult:
     tool, args = route(question)
     if tool == "none":
         return ToolResult(tool="none", answer="Ask a question about the company graph.")
-    return offer_rest(question, _ROUTED[tool](args, scopes))
+    with resolve.noting_taken() as taken:
+        result = _ROUTED[tool](args, scopes)
+    if result.found and taken:
+        result.answer = resolve.taken_note(taken, result.answer) + result.answer
+    return offer_rest(question, result)
 
 
 def ticket_target(title: str, about: str, graph=None) -> Entity | None:

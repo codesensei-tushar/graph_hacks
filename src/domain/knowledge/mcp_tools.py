@@ -14,7 +14,7 @@ query runs past FalkorDB's timeout is a ``ToolError`` saying so (``tool_guard.TI
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from src.domain.knowledge import catalogue, tool_guard
+from src.domain.knowledge import catalogue, resolve, tool_guard
 from src.domain.knowledge.ask_api import MAX_QUESTION_CHARS
 from src.domain.knowledge.dto import ToolSpec
 
@@ -136,8 +136,10 @@ def call_tool(name: str, arguments: dict | None, scopes: Sequence[str] = DEFAULT
     arguments = dict(arguments or {})
     _check_arguments(spec, arguments)
     try:
-        with tool_guard.public("mcp", f"{spec.name} {arguments}"):
+        with tool_guard.public("mcp", f"{spec.name} {arguments}"), resolve.noting_taken() as taken:
             result = spec.run(arguments, list(scopes))
     except tool_guard.ToolTimedOut as error:
         raise ToolError(str(error)) from error
+    if result.found and taken:
+        result.answer = resolve.taken_note(taken, result.answer) + result.answer
     return {**result.to_dict(), "found": result.found, "candidates": list(result.candidates), "next": next_calls(spec.name, result)}

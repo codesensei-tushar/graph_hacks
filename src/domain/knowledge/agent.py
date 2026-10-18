@@ -369,7 +369,11 @@ def run_choice(
     """Run the chosen tool. A question that names nothing is retried about the thread's subject.
 
     A compound question the keyword router answered in its first part offers the second as the next question."""
-    result, ran = _run_choice(choice, question, scopes, thread, bot_ids)
+    with resolve.noting_taken() as taken:
+        result, ran = _run_choice(choice, question, scopes, thread, bot_ids)
+    if result.found and taken:
+        # A name taken from part of it ("billing" for Billing Service) is said, so a wrong guess shows.
+        result.answer = resolve.taken_note(taken, result.answer) + result.answer
     if ran.via == "keywords":
         ask_service.offer_rest(question, result)
     return result, ran
