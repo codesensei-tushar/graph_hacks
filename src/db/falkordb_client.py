@@ -12,6 +12,11 @@ query passes through. It does two things and forwards everything else untouched:
   the public and MCP surfaces), each ``query`` and ``ro_query`` that names no timeout of its
   own gets that one, so a public caller cannot hold a worker for FalkorDB's full ``TIMEOUT``.
   Outside it (Slack turns, sync, jobs) queries keep the server default.
+- **Per-request deadline.** While ``request_deadline(ms)`` is active, every query's timeout
+  (its own, or the context's) is cut to the time left before the deadline, so a request that
+  sends many queries (``risk_map``) stops at the deadline too, not after many full timeouts.
+  Once the deadline has passed, a query is not sent: ``DeadlineExceeded`` is raised, which
+  reads as a timeout (``Query timed out``) to ``tool_guard``.
 - **Hooks.** ``BEFORE_QUERY`` and ``AFTER_QUERY`` are lists of callbacks, each called with the
   same ``QueryCall`` for every query: before it runs, and after it returns or raises (with
   ``duration_ms``, and ``result`` or ``error``, filled in). Register with ``add_query_hook``.
@@ -29,6 +34,7 @@ from functools import lru_cache
 from typing import Any
 
 from falkordb import FalkorDB
+from redis.exceptions import ResponseError
 
 from src.core.config import settings
 
@@ -41,7 +47,42 @@ graph_reads_disabled: ContextVar[bool] = ContextVar("graph_reads_disabled", defa
 # The timeout, in milliseconds, for queries that name none of their own; None is the server's TIMEOUT.
 query_timeout_ms: ContextVar[int | None] = ContextVar("query_timeout_ms", default=None)
 
+# When the request running in this context must be done by (time.monotonic()); None is no deadline.
+query_deadline: ContextVar[float | None] = ContextVar("query_deadline", default=None)
+
 _WRITE = re.compile(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE)\b", re.IGNORECASE)
+
+
+class DeadlineExceeded(ResponseError):
+    """The request's deadline passed before this query could be sent. Reads like FalkorDB's own timeout."""
+
+    def __init__(self) -> None:
+        super().__init__("Query timed out: the request's deadline has passed")
+
+
+@contextmanager
+def request_deadline(ms: int | None) -> Iterator[None]:
+    """Within the block, every query must finish ``ms`` from now. Nested blocks keep the earlier deadline."""
+    current = query_deadline.get()
+    wanted = None if ms is None else time.monotonic() + ms / 1000
+    token = query_deadline.set(wanted if current is None or (wanted is not None and wanted < current) else current)
+    try:
+        yield
+    finally:
+        query_deadline.reset(token)
+
+
+def _timeout_for(timeout: int | None) -> int | None:
+    """The timeout to send: the query's own or the context's, cut to what is left of the request's deadline."""
+    if timeout is None:
+        timeout = query_timeout_ms.get()
+    deadline = query_deadline.get()
+    if deadline is None:
+        return timeout
+    left = int((deadline - time.monotonic()) * 1000)
+    if left <= 0:
+        raise DeadlineExceeded()
+    return left if timeout is None else min(timeout, left)
 
 
 @contextmanager
@@ -116,8 +157,7 @@ class _GraphProxy:
         return self._run("ro_query", q, params, timeout, kwargs)
 
     def _run(self, method: str, q: str, params, timeout, kwargs):
-        if timeout is None:
-            timeout = query_timeout_ms.get()
+        timeout = _timeout_for(timeout)
         call = QueryCall(getattr(self._graph, "name", ""), method, q, params, timeout)
         _run_hooks(BEFORE_QUERY, call)
         started = time.perf_counter()

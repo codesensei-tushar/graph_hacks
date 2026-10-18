@@ -705,7 +705,7 @@ MCP callers read the company-wide `org_shared` scope only. There is no Slack ide
 
 `/mcp` is public, like the ask page. Each request is gated four ways:
 
-- No bearer token: allowed, and counted against the address's budget of about 60 calls a minute (bursts of 30), the same budget as the ask page's questions and explorer walks. Over it, 429 with `Retry-After`.
+- No bearer token: allowed, and counted against the address's budget of about 60 calls a minute (bursts of 30), the same budget as the ask page's questions and explorer walks. A call to a heavy tool (`path_between`, `risk_map`, `onboarding_brief`, or `explore` at depth 2) counts as 5. Over it, 429 with `Retry-After`. Each graph query of a public call stops at 2 seconds, and the whole call at 4.
 - A bearer token while `MCP_TOKEN` is unset: treated as no token.
 - `MCP_TOKEN` as the bearer token: allowed, never counted.
 - Any other bearer token while `MCP_TOKEN` is set: 403.

@@ -136,7 +136,7 @@ def call_tool(name: str, arguments: dict | None, scopes: Sequence[str] = DEFAULT
     arguments = dict(arguments or {})
     _check_arguments(spec, arguments)
     try:
-        with tool_guard.guard("mcp", f"{spec.name} {arguments}", timeout_ms=tool_guard.PUBLIC_QUERY_TIMEOUT_MS):
+        with tool_guard.public("mcp", f"{spec.name} {arguments}"):
             result = spec.run(arguments, list(scopes))
     except tool_guard.ToolTimedOut as error:
         raise ToolError(str(error)) from error
