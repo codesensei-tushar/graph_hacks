@@ -417,9 +417,11 @@
   // Up to three follow-ups after an answer, built from its own nodes and path: the tool's next
   // steps first, filled from the roles rolesOf reads, then the first question of each other node in
   // order. A filled step is offered only when it is one of BrainGraph.questionsFor's questions for
-  // that node, or names no node, so every chip is a question the integration test has asked on a
-  // fresh seed (tests/integration/test_explore_questions.py). {service} is what the answer is about,
-  // {owner} the person who OWNS it, {proposer} who PROPOSED the decision, {person} the first person.
+  // that node (in its words: a decision keeps its title's case), or names no node, so every chip is
+  // a question the integration test has asked on a fresh seed (tests/integration/
+  // test_explore_questions.py). {service} is what the answer is about, {owner} the person who OWNS
+  // it, {team} the team that RUNS it, {decision} the first decision, {proposer} who PROPOSED it, and
+  // {person} the first person.
   const NEXT = {
     who_owns: ["what breaks if {service} goes down", "what if {owner} leaves", "what does {service} depend on"],
     who_knows: ["what breaks if {service} goes down", "what if {owner} leaves", "what does {service} depend on"],
@@ -429,11 +431,19 @@
     path_between: ["what if {person} leaves", "who knows {service}"],
     load_bearing: ["what breaks if {service} goes down", "who knows {service}"],
     onboarding_brief: ["what if {person} leaves", "what breaks if {service} goes down"],
+    who_should_know: ["what breaks if {service} goes down", "what if {owner} leaves"],
+    decision_pressure: ["why did we {decision}", "who knows {service}"],
+    working_groups: ["who is on the {team} team", "what if {person} leaves"],
+    reading_list: ["who knows {service}", "what breaks if {service} goes down"],
+    risk_map: ["what if {owner} leaves", "what breaks if {service} goes down", "who is on the {team} team"],
+    related_memories: ["who knows {service}", "what breaks if {service} goes down"],
   };
   const MAX_NEXT = 3;
   // The answer text names its subject first where the drawing does not start with it: "If Auth
   // Service goes down, ..." draws its dependents first, and load_bearing draws the edges into the top.
   const SUBJECT_IN_TEXT = new Set(["blast_radius", "load_bearing"]);
+  // A decision's answer is about what the decision is ABOUT.
+  const ABOUT_A_DECISION = new Set(["decision_trace", "decision_pressure"]);
   const spoken = (question) => question.toLowerCase().replace(/[\s?.!]+$/, "").replace(/\s+/g, " ").trim();
 
   function rolesOf(data) {
@@ -443,7 +453,7 @@
     const labelOf = (id) => (byId.get(id) || {}).label;
     const services = nodes.filter((node) => node.label === "Service");
     let service = services[0];
-    if (data.tool === "decision_trace") {
+    if (ABOUT_A_DECISION.has(data.tool)) {
       const about = edges.find((edge) => edge.rel === "ABOUT" && labelOf(edge.source) === "Decision" && labelOf(edge.target) === "Service");
       if (about) service = byId.get(about.target);
     } else if (SUBJECT_IN_TEXT.has(data.tool)) {
@@ -456,9 +466,12 @@
       const edge = edges.find((e) => e.rel === rel && (!target || e.target === target.id) && labelOf(e.source) === "Person");
       return edge ? byId.get(edge.source) : undefined;
     };
+    const runs = service && edges.find((edge) => edge.rel === "RUNS" && edge.target === service.id && labelOf(edge.source) === "Team");
     return {
       service,
       owner: service ? personWith("OWNS", service) : undefined,
+      team: runs ? byId.get(runs.source) : nodes.find((node) => node.label === "Team"),
+      decision: nodes.find((node) => node.label === "Decision"),
       proposer: personWith("PROPOSED"),
       person: nodes.find((node) => node.label === "Person"),
     };
@@ -472,9 +485,11 @@
     };
     for (const step of NEXT[data.tool] || []) {
       const slot = (step.match(/\{(\w+)\}/) || [])[1];
-      const node = slot && roles[slot];
-      if (!slot) offer(step);
-      else if (node && BrainGraph.questionsFor(node).includes(step.replace(`{${slot}}`, () => node.name))) offer(step.replace(`{${slot}}`, () => node.name));
+      if (!slot) { offer(step); continue; }
+      const node = roles[slot];
+      const wanted = node && spoken(step.replace(`{${slot}}`, () => node.name));
+      const question = node && BrainGraph.questionsFor(node).find((q) => spoken(q) === wanted);
+      if (question) offer(question);
     }
     // The rest come from the drawing, skipping what the answer is already about: a node the
     // question names, and the subject of a tool whose steps above already ask about it.

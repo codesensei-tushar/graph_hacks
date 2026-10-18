@@ -45,7 +45,7 @@ NAMES = {
     "": ["Billing Service", "API Gateway"],
 }
 # A NEXT step names one node by its role; the role's label says which QUESTIONS it must come from.
-SLOT_LABEL = {"service": "Service", "owner": "Person", "proposer": "Person", "person": "Person"}
+SLOT_LABEL = {"service": "Service", "owner": "Person", "proposer": "Person", "person": "Person", "team": "Team", "decision": "Decision"}
 # A NEXT step that names no node is a question on its own.
 STANDALONE = {"which services are load-bearing": "load_bearing"}
 
@@ -94,7 +94,10 @@ class NextStepsTest(unittest.TestCase):
                         self.assertEqual(ask_service.route(step)[0], STANDALONE[step])
                         continue
                     self.assertEqual(len(slots), 1)
-                    self.assertIn(step.replace(f"{{{slots[0]}}}", "{name}"), QUESTIONS[SLOT_LABEL[slots[0]]])
+                    # The page matches a filled step to the node's question whatever the case, so a
+                    # decision's {lower} title counts as its name.
+                    templates = QUESTIONS[SLOT_LABEL[slots[0]]]
+                    self.assertTrue(any(step.replace(f"{{{slots[0]}}}", hole) in templates for hole in ("{name}", "{lower}")), templates)
 
 
 class WiringTest(unittest.TestCase):
