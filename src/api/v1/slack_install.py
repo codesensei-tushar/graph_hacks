@@ -36,6 +36,8 @@ from src.domain.slack.manifest import SLACK_SCOPES, oauth_callback_url, slack_ap
 from src.domain.slack.token_crypto import encrypt_token
 from src.domain.slack.workspace import (
     disconnect_slack_workspace,
+    forget_workspace_row,
+    get_workspace_row,
     get_workspace_by_team_id,
     get_workspace_status,
     list_connected_slack_installs,
@@ -179,13 +181,7 @@ def oauth_callback(request: Request, background: BackgroundTasks, code: str | No
         log.warning("[slack] install of team=%s into org=%s refused: routed to org=%s", oauth.team_id, ref.id, routed)
         return HTMLResponse("<!doctype html><title>Company Brain</title><p>This Slack workspace is already connected to another Company Brain org.</p>", status_code=409)
     with tenancy.org_context(ref):
-        refusal = _membership_refusal(oauth.team_id, oauth.authed_user_id) if not tenancy.is_legacy(ref) else None
-        if refusal is not None:
-            log.warning("[slack] install of team=%s into org=%s refused: %s", oauth.team_id, ref.id, refusal)
-            return HTMLResponse(
-                "<!doctype html><title>Company Brain</title><p>Only a full member of this Slack workspace who belongs to the org can connect it.</p>",
-                status_code=403,
-            )
+        existed = get_workspace_row(oauth.team_id) is not None
         upsert_workspace(
             team_id=oauth.team_id,
             bot_token_enc=encrypt_token(oauth.bot_token),
@@ -196,6 +192,17 @@ def oauth_callback(request: Request, background: BackgroundTasks, code: str | No
             app_id=oauth.app_id,
             source="oauth",
         )
+        # A's check asks Slack with the bot token just stored, so it runs after the store; a refused
+        # first install is taken back out, and the team is never routed to the org.
+        refusal = _membership_refusal(oauth.team_id, oauth.authed_user_id) if not tenancy.is_legacy(ref) else None
+        if refusal is not None:
+            if not existed:
+                forget_workspace_row(oauth.team_id)
+            log.warning("[slack] install of team=%s into org=%s refused: %s", oauth.team_id, ref.id, refusal)
+            return HTMLResponse(
+                "<!doctype html><title>Company Brain</title><p>Only a full member of this Slack workspace who belongs to the org can connect it.</p>",
+                status_code=403,
+            )
     if not tenancy.is_legacy(ref):
         orgs.route_team(oauth.team_id, ref.id)
 

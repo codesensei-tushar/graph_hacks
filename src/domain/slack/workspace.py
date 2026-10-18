@@ -542,6 +542,12 @@ def upsert_workspace(
     )
 
 
+def forget_workspace_row(team_id: str) -> None:
+    """Delete a stored install that never went live (a refused install), without the teardown steps."""
+    _, graph = connect()
+    graph.query("MATCH (w:SlackWorkspace {team_id: $team}) DETACH DELETE w", {"team": team_id})
+
+
 def ensure_workspace_bot_user_id(workspace: SlackWorkspace, prefetched_user_id: str | None = None) -> str | None:
     """Backfill the bot user id for installs stored before it was persisted."""
     if workspace.bot_user_id:

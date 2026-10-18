@@ -263,12 +263,13 @@ class TenancyTest(unittest.TestCase):
         seen = []
 
         def refusal(team_id, user):
-            seen.append((team_id, user, tenancy.current_org()))
-            return "guest"
+            # Called after the token is stored, as A's check reads the workspace to ask Slack.
+            seen.append((team_id, user, tenancy.current_org(), workspace_module.get_workspace_row(team_id) is not None))
+            return "not_a_member"
 
         with mock.patch.object(slack_install, "_membership_refusal", side_effect=refusal):
             self.assertEqual(self._install(self.x.id, team).status_code, 403)
-        self.assertEqual(seen, [(team, "UADMIN", self.x.id)])
+        self.assertEqual(seen, [(team, "UADMIN", self.x.id, True)])
         self.assertIsNone(orgs.routed_org_id(team))
         with tenancy.org_context(self.x.id):
             self.assertIsNone(workspace_module.get_workspace_row(team))
