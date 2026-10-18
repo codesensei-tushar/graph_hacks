@@ -14,6 +14,7 @@ minute before running it twice.
 """
 
 import argparse
+import http.client
 import json
 import sys
 import urllib.error
@@ -105,6 +106,9 @@ def http_fetch(base: str) -> Fetch:
             # A slow read raises the socket's own timeout, not a URLError.
             return 0, {"error": "timeout"}
         except OSError as error:
+            return 0, {"error": str(error) or type(error).__name__}
+        except http.client.HTTPException as error:
+            # A body cut short (IncompleteRead) is not an OSError.
             return 0, {"error": str(error) or type(error).__name__}
         try:
             return status, json.loads(body)
