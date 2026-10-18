@@ -227,30 +227,37 @@ def reset_memory_registry() -> int:
 
 
 def _link_mentions(graph, memory_id: str, text: str, scopes: list[str]) -> None:
-    for node_id in mentioned_ids(graph, text, scopes):
+    for label, node_id in mentioned(graph, text, scopes):
+        # label is one of MENTIONABLE: both ends are id-index seeks.
         graph.query(
-            "MATCH (m:Memory {id: $memory}), (n {id: $node}) MERGE (m)-[:MENTIONS]->(n)",
+            f"MATCH (m:Memory {{id: $memory}}), (n:{label} {{id: $node}}) MERGE (m)-[:MENTIONS]->(n)",
             {"memory": memory_id, "node": node_id},
         )
 
 
 def mentioned_ids(graph, text: str, scopes: list[str]) -> list[str]:
     """The services, documents, tickets and decisions in ``scopes`` that ``text`` names, by name or alias."""
-    rows = graph.query(
+    return [node_id for _label, node_id in mentioned(graph, text, scopes)]
+
+
+def mentioned(graph, text: str, scopes: list[str]) -> list[tuple[str, str]]:
+    """``mentioned_ids`` with each node's label: ``(label, id)``, in node order. One scan per label
+    in MENTIONABLE (UNION ALL), never a scan of every node."""
+    query = " UNION ALL ".join(
+        f"""
+        MATCH (n:{label})
+        WHERE labels(n)[0] = '{label}' AND n.name IS NOT NULL AND coalesce(n.scope, $shared) IN $scopes
+        RETURN ID(n) AS node, '{label}' AS label, n.id AS id, n.name AS name, coalesce(n.aliases, '') AS aliases
         """
-        MATCH (n)
-        WHERE labels(n)[0] IN $labels AND n.name IS NOT NULL
-          AND coalesce(n.scope, $shared) IN $scopes
-        RETURN n.id, n.name, coalesce(n.aliases, '')
-        """,
-        {"labels": list(MENTIONABLE), "scopes": scopes, "shared": SHARED_TEAM_BRAIN_CONTAINER_TAG},
-    ).result_set
+        for label in MENTIONABLE
+    )
+    rows = sorted(graph.query(query, {"scopes": scopes, "shared": SHARED_TEAM_BRAIN_CONTAINER_TAG}).result_set)
     lowered = text.lower()
     found = []
-    for node_id, name, aliases in rows:
+    for _node, label, node_id, name, aliases in rows:
         names = [name] + [alias.strip() for alias in aliases.split(",") if alias.strip()]
         if any(len(candidate) > 3 and _contains_word(lowered, candidate.lower()) for candidate in names):
-            found.append(node_id)
+            found.append((label, node_id))
     return found
 
 

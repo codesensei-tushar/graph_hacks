@@ -48,18 +48,30 @@ def issue_count(project: dict) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
+# Jira's accountType for a bot ("Automation for Jira", an installed app's user): never a person.
+BOT_ACCOUNT_TYPES = frozenset({"app"})
+
+
 def user(install: Install, raw: dict | None, people: dict[str, str] | None = None) -> ExternalUser | None:
     """The account, with the email Jira shows, else the one an admin mapped to its accountId
-    (``CONNECTOR_JIRA_PEOPLE``). Either way it links to a Person only on a unique email match."""
+    (``CONNECTOR_JIRA_PEOPLE``). Either way it links to a Person only on a unique email match.
+    None for no account, and for a bot (``accountType`` "app"): its tickets are written without it."""
     account_id = (raw or {}).get("accountId")
     if not account_id:
         return None
+    account_type = str(raw.get("accountType") or "").strip().lower()
+    if account_type in BOT_ACCOUNT_TYPES:
+        return None
+    shown = (raw.get("emailAddress") or "").strip()
+    mapped = ((people or {}).get(account_id) or "").strip()
     return ExternalUser(
         id=install.user_id(account_id),
         source=SOURCE,
         external_id=account_id,
         name=raw.get("displayName") or account_id,
-        email=(raw.get("emailAddress") or (people or {}).get(account_id) or "").strip(),
+        email=shown or mapped,
+        email_from="api" if shown or not mapped else "admin",
+        account_type=account_type,
     )
 
 

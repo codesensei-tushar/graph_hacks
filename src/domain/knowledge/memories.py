@@ -37,16 +37,21 @@ def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResul
     target = resolution.entity
     limit = _clamp(k)
 
+    label = resolve.label_of(target)
     rows = graph.ro_query(
         f"""
-        MATCH (m:Memory)-[:MENTIONS]->(e {{id: $id}})
+        MATCH (e:{label} {{id: $id}})
+        WITH e
+        MATCH (m:Memory)-[:MENTIONS]->(e)
         WHERE m.scope IN $scopes AND {LIVE}
         OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
         RETURN m.id AS id, m.text AS text, m.scope AS scope, m.channel_id AS channel_id, m.created_at AS learned_at,
                0 AS hops, e.id AS via_id, e.name AS via, labels(e)[0] AS via_label, '' AS bridge, true AS forward,
                coalesce(a.name, a.id) AS author
         UNION
-        MATCH (e {{id: $id}})-[r]-(n)
+        MATCH (e:{label} {{id: $id}})
+        WITH e
+        MATCH (e)-[r]-(n)
         WHERE (n:Service OR n:Document OR n:Ticket OR n:Decision) AND {resolve.SCOPED.format(var="n")}
         MATCH (m:Memory)-[:MENTIONS]->(n)
         WHERE m.scope IN $scopes AND {LIVE} AND NOT (m)-[:MENTIONS]->(e)

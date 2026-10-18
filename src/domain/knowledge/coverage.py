@@ -82,13 +82,18 @@ def capped_note(graph, scopes: list[str], node_ids: list[str]) -> str:
     ids = [node_id for node_id in dict.fromkeys(node_ids) if node_id]
     if not ids:
         return ""
+    # From the rare side: nothing is read when no container is capped.
     rows = graph.ro_query(
         f"""
-        MATCH (n)-[:IN_CONTAINER]->(c:Container)
-        WHERE n.id IN $ids AND {SCOPED.format(var="c")}
-        WITH DISTINCT c
-        MATCH (state:ConnectorState {{id: c.id}})
+        MATCH (state:ConnectorState)
         WHERE state.capped = true
+        WITH state
+        MATCH (c:Container {{id: state.id}})
+        WHERE {SCOPED.format(var="c")}
+        WITH c
+        MATCH (n)-[:IN_CONTAINER]->(c)
+        WHERE n.id IN $ids
+        WITH DISTINCT c
         RETURN coalesce(c.external_id, c.name, c.id), coalesce(c.source, '')
         ORDER BY coalesce(c.external_id, c.name, c.id)
         """,

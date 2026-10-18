@@ -128,8 +128,8 @@ def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple
     others = "other:Person" if person.label == "Person" else "other"
     rows = graph.ro_query(
         f"""
-        MATCH {_me(person)}-[mine:OWNS|WORKED_ON|KNOWS]->(s:Service)
-        WHERE me.id IN $ids AND {SCOPED.format(var="s")}
+        {_me_from(person)}-[mine:OWNS|WORKED_ON|KNOWS]->(s:Service)
+        WHERE {SCOPED.format(var="s")}
         WITH s, collect(DISTINCT type(mine)) AS mine
         OPTIONAL MATCH ({others})-[:OWNS]->(s)
         WHERE NOT other.id IN $ids AND labels(other)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="other")}
@@ -168,8 +168,8 @@ def _decisions(graph, person: Entity, params: dict, reach: dict[str, int]) -> tu
     """Standing decisions no one else proposed or approved. Also how many standing decisions they are on."""
     rows = graph.ro_query(
         f"""
-        MATCH {_me(person)}-[mine:PROPOSED|APPROVED]->(d:Decision)
-        WHERE me.id IN $ids AND {SCOPED.format(var="d")}
+        {_me_from(person)}-[mine:PROPOSED|APPROVED]->(d:Decision)
+        WHERE {SCOPED.format(var="d")}
         OPTIONAL MATCH (newer:Decision)-[:SUPERSEDES]->(d)
         WHERE {SCOPED.format(var="newer")}
         WITH d, collect(DISTINCT type(mine)) AS mine, count(newer) AS newer
@@ -208,8 +208,8 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
     # An unlinked account's tickets are its own: it is assigned them, or worked on them.
     assigned = (
         f"""
-        MATCH {_me(person)}-[:ASSIGNED]->(k:Ticket)
-        WHERE me.id IN $ids AND {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
+        {_me_from(person)}-[:ASSIGNED]->(k:Ticket)
+        WHERE {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
         RETURN k.id AS ticket, 'ASSIGNED' AS rel
         """
         if people.is_account(person)
@@ -222,8 +222,8 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
     )
     for ticket_id, rel in graph.ro_query(
         f"""
-        MATCH {_me(person)}-[:WORKED_ON]->(k:Ticket)
-        WHERE me.id IN $ids AND {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
+        {_me_from(person)}-[:WORKED_ON]->(k:Ticket)
+        WHERE {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
         RETURN k.id AS ticket, 'WORKED_ON' AS rel
         UNION
         {assigned}
@@ -278,10 +278,12 @@ def _subject_of(about: list) -> str:
     return kinds.listed(*about[0]) if len(about) == 1 else "it"
 
 
-def _me(person: Entity) -> str:
-    """The node leaving, by its label: a person, or an unlinked connector account. Never text from a question."""
+def _me_from(person: Entity) -> str:
+    """``MATCH (me)`` for each id in $ids of the node leaving, by its label (a person, or an unlinked
+    connector account; never text from a question): every id is an index seek, then walked from,
+    rather than ``me.id IN $ids`` over a scan of the label."""
     label = "ExternalUser" if people.is_account(person) else "Person"
-    return f"(me:{label})"
+    return f"UNWIND $ids AS me_id MATCH (me:{label} {{id: me_id}}) WITH me MATCH (me)"
 
 
 def _reach_clause(dependents: int, subject: str) -> str:
