@@ -191,27 +191,35 @@ class Rows(list):
         super().__init__(rows)
         self._lock = threading.Lock()
         self._keys: list | None = None
-        self._first: dict[str, list[int]] = {}
-        self._real: dict[str, list[int]] = {}
-        self._near: dict[tuple[str, int], list[int]] = {}
+        self._first: dict[str, list[int]] | None = None
+        self._fuzzy: tuple[dict[str, list[int]], dict[tuple[str, int], list[int]]] | None = None
         self._words: dict[str, set[str]] | None = None
 
     def keys(self) -> list[tuple[Entity, str, tuple[str, ...], int]]:
-        self._index()
+        with self._lock:
+            if self._keys is None:
+                self._keys = _build_keys(self)
         return self._keys
 
     def by_first_word(self) -> dict[str, list[int]]:
-        self._index()
+        """Keys by each form of their first word: where a match can start. Every question reads it."""
+        keys = self.keys()
+        with self._lock:
+            if self._first is None:
+                first: dict[str, list[int]] = {}
+                for position, (_entity, _key, key_words, _kind) in enumerate(keys):
+                    for form in _forms(key_words[0]):
+                        first.setdefault(form, []).append(position)
+                self._first = first
         return self._first
 
     def by_real_word(self) -> dict[str, list[int]]:
-        self._index()
-        return self._real
+        """Keys by each form of each real word (``_fuzzy_candidates``). Built on the first miss only."""
+        return self._fuzzy_indexes()[0]
 
     def by_first_letter_and_length(self) -> dict[tuple[str, int], list[int]]:
         """Keys by each real word's first letter and length: where a ``near_word`` typo can be."""
-        self._index()
-        return self._near
+        return self._fuzzy_indexes()[1]
 
     def words(self) -> dict[str, set[str]]:
         """Every token of a name, alias or title, under each form ``same_word`` can meet it by."""
@@ -226,24 +234,20 @@ class Rows(list):
                 self._words = words
         return self._words
 
-    def _index(self) -> None:
+    def _fuzzy_indexes(self) -> tuple[dict[str, list[int]], dict[tuple[str, int], list[int]]]:
+        keys = self.keys()
         with self._lock:
-            if self._keys is not None:
-                return
-            keys = _build_keys(self)
-            first: dict[str, list[int]] = {}
-            real: dict[str, list[int]] = {}
-            near: dict[tuple[str, int], list[int]] = {}
-            for position, (_entity, _key, key_words, _kind) in enumerate(keys):
-                for form in _forms(key_words[0]):
-                    first.setdefault(form, []).append(position)
-                real_words = [word for word in key_words if len(word) >= 4 and word not in STOPWORDS]
-                for form in {form for word in real_words for form in _forms(word)}:
-                    real.setdefault(form, []).append(position)
-                for bucket in {(word[0], len(word)) for word in real_words}:
-                    near.setdefault(bucket, []).append(position)
-            self._keys, self._first, self._real, self._near = keys, first, real, near
-
+            if self._fuzzy is None:
+                real: dict[str, list[int]] = {}
+                near: dict[tuple[str, int], list[int]] = {}
+                for position, (_entity, _key, key_words, _kind) in enumerate(keys):
+                    real_words = [word for word in key_words if len(word) >= 4 and word not in STOPWORDS]
+                    for form in {form for word in real_words for form in _forms(word)}:
+                        real.setdefault(form, []).append(position)
+                    for bucket in {(word[0], len(word)) for word in real_words}:
+                        near.setdefault(bucket, []).append(position)
+                self._fuzzy = (real, near)
+        return self._fuzzy
 
 def _forms(word: str) -> set[str]:
     """The word and the shorter words ``same_word`` may equate it with ("payments" ~ "payment",
