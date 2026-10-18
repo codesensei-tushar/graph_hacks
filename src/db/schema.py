@@ -40,6 +40,13 @@ INDEXES: tuple[tuple[str, str], ...] = (
     ("Container", "install"),
     ("ExternalUser", "id"),
     ("ExternalUser", "email"),
+    # Accounts link to people on the lower-cased email, never on a toLower() scan.
+    ("ExternalUser", "email_lc"),
+    ("Person", "email_lc"),
+    # what_changed reads a window of time: WHERE t.changed_at_ms >= $since.
+    ("Ticket", "changed_at_ms"),
+    ("Service", "changed_at_ms"),
+    ("Document", "changed_at_ms"),
     ("ConnectorState", "id"),
     ("ConnectorInstall", "id"),
     # Memory layer

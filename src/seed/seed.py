@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from types import ModuleType
 
+from src.db import falkordb_client
 from src.db.falkordb_client import connect, graph_name
 from src.domain.knowledge.kinds import NOT_DEPENDABLE, normalize_kind
 from src.seed import company_brain
@@ -107,13 +108,21 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
     """Merge one company's seed into the graph as it is: every node and edge is MERGEd by
     id, so re-running it refreshes names, summaries and new decisions and leaves
     everything else (memories, workspaces, pull requests, tickets written from Slack)
-    alone. Nothing here deletes."""
+    alone. Nothing here deletes. The whole seed is one generation bump (a seed that changed
+    nothing is none), not one per write."""
+    with falkordb_client.deferred_generation():
+        return _seed_company(company)
+
+
+def _seed_company(company: ModuleType) -> SeedReport:
     _, real_graph = connect()
     report = SeedReport(company=company.COMPANY["id"])
     graph = _Writer(real_graph, report)
     _merge_node(graph, "Company", company.COMPANY)
     for person in company.PEOPLE:
-        _merge_node(graph, "Person", person)
+        # email_lc is what connector accounts link on (indexed): written with the email, never stale.
+        email = (person.get("email") or "").strip()
+        _merge_node(graph, "Person", {**person, "email_lc": email.lower() or None})
 
     for team in company.TEAMS:
         # ``scope`` is set only by a team onboarded from a private room; seeds leave it out.
