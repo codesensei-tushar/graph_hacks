@@ -80,8 +80,9 @@ Slack workspace may see.** Within them:
 A Jira account links to a Person only when its email matches exactly one Person's email,
 case-insensitively. Never by name: two people can share a name, and a name is anyone's to
 type. An account that links counts as that Person everywhere (who knows, who should know,
-ownership). One that doesn't still counts under its Jira display name, labelled
-`ExternalUser` in the path.
+if they leave, ownership). One that doesn't still counts, named with its tool ("Robin
+Contractor (Jira)", `ExternalUser` in the path), so it is never folded into a Person who happens
+to share its name.
 
 Jira often hides emails: the API returns `emailAddress` only when the person's profile
 visibility allows it. For those people an admin can assert the email in `CONNECTOR_JIRA_PEOPLE`:

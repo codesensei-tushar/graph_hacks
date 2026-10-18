@@ -112,10 +112,13 @@ class JiraSyncTest(unittest.TestCase):
         slack = ask_service.who_knows("who knows the billing service", SLACK)
         cited = [step.cite() for step in slack.path]
         self.assertIn("PAY-1 -[ABOUT]-> Billing Service", cited)
-        self.assertIn("Arjun Mehta -[ASSIGNED]-> PAY-1", cited)
-        # Jira hides this account's email, so it stays an account: never linked to the seeded Person by its name.
-        arjun = next(step for step in slack.path if step.from_name == "Arjun Mehta" and step.rel == "ASSIGNED")
-        self.assertEqual((arjun.from_label, arjun.from_id), ("ExternalUser", "jira:default:user:712020:7f3e-arjun"))
+        self.assertIn("Arjun Mehta (Jira) -[ASSIGNED]-> PAY-1", cited)
+        # Jira hides this account's email, so it stays an account: never linked to the seeded Person by its name,
+        # and named with its tool so the answer does not fold it into the Person who owns the service.
+        arjun = next(step for step in slack.path if step.rel == "ASSIGNED" and step.to_name == "PAY-1")
+        self.assertEqual((arjun.from_name, arjun.from_label, arjun.from_id), ("Arjun Mehta (Jira)", "ExternalUser", "jira:default:user:712020:7f3e-arjun"))
+        self.assertIn("Ask first: Arjun Mehta (owns it, wrote the Billing runbook)", slack.answer)
+        self.assertIn("Arjun Mehta (Jira) (is assigned PAY-1 and PAY-2)", slack.answer)
         public = ask_service.who_knows("who knows the billing service", PUBLIC)
         self.assertFalse([step for step in public.path if step.from_name.startswith("PAY-") or step.to_name.startswith("PAY-")])
 
@@ -124,7 +127,10 @@ class JiraSyncTest(unittest.TestCase):
         self.assertTrue(result.found)
         cited = [step.cite() for step in result.path]
         self.assertIn("PAY-3 -[ABOUT]-> Billing Service", cited)
-        self.assertIn("Robin Contractor -[ASSIGNED]-> PAY-3", cited)
+        self.assertIn("Robin Contractor (Jira) -[ASSIGNED]-> PAY-3", cited)
+        # Maya's account links to her Person by its visible email, so she is cited as herself.
+        maya = next(step for step in result.path if step.rel == "OPENED" and step.to_name == "PAY-3")
+        self.assertEqual((maya.from_name, maya.from_label, maya.from_id), ("Maya Ortiz", "Person", "maya"))
         self.assertFalse(ask_service.ask("who should know about PAY-3", PUBLIC).found)
 
 
