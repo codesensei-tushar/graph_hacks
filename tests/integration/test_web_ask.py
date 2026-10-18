@@ -7,12 +7,13 @@ from unittest import mock
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from fastapi.testclient import TestClient  # noqa: E402
+from redis.exceptions import ResponseError  # noqa: E402
 
 from src.api.v1 import ask as ask_route  # noqa: E402
 from src.api.v1 import proof as proof_route  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_api  # noqa: E402
+from src.domain.knowledge import agent, ask_api, explorer  # noqa: E402
 from src.main import app  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
 
@@ -197,6 +198,25 @@ class WebAskTest(unittest.TestCase):
         for _ in range(10):
             for path in (*HOME_READS, "/api/ask?q=who+owns+billing"):
                 self.assertEqual(self.http.get(path, headers=here).status_code, 200, path)
+
+    def test_a_query_that_times_out_is_a_503_that_says_so_not_a_500(self):
+        timeout = ResponseError("Query timed out")
+        with mock.patch.object(agent, "run_choice", side_effect=timeout):
+            with self.assertLogs("src.domain.knowledge.tool_guard", "WARNING"):
+                response = self.http.get("/api/ask", params={"q": "how is maya connected to the invoice worker"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"error": "That took too long; try a narrower question.", "timed_out": True})
+        # Not cached: the next ask runs again and answers.
+        self.assertEqual(self.http.get("/api/ask", params={"q": "how is maya connected to the invoice worker"}).status_code, 200)
+        for path, target in (("/api/explore?node=billing", "public_explore"), ("/api/explore/neighbors?node=billing", "public_neighbors")):
+            with mock.patch.object(explorer, target, side_effect=timeout), self.assertLogs("src.domain.knowledge.tool_guard", "WARNING"):
+                walked = self.http.get(path)
+            self.assertEqual(walked.status_code, 503, path)
+            self.assertEqual(walked.json()["error"], "That took too long; try a narrower question.")
+        # Any other database error is still a 500 for the logs, not dressed as a timeout.
+        with mock.patch.object(agent, "run_choice", side_effect=ResponseError("errMsg: Invalid input")):
+            with self.assertRaises(ResponseError):
+                self.http.get("/api/ask", params={"q": "who owns billing, now"})
 
     def test_a_repeated_question_walks_the_graph_once(self):
         with mock.patch.object(ask_api.agent, "run_choice", wraps=ask_api.agent.run_choice) as run:
