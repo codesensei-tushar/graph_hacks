@@ -15,7 +15,7 @@ const [base, shots] = process.argv.slice(2);
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce", colorScheme: opts.theme || "light", bypassCSP: true });
     const page = await ctx.newPage();
     page.on("pageerror", (e) => errors.push(`${scenario}: ${e}`));
-    page.on("console", (m) => { if (m.type() === "error" && !/503|401|400|403/.test(m.text())) errors.push(`${scenario}: ${m.text()}`); });
+    page.on("console", (m) => { if (m.type() === "error" && !/503|401|400|403|409/.test(m.text())) errors.push(`${scenario}: ${m.text()}`); });
     await page.goto(`${base}/console/_fixture/${scenario}?next=${encodeURIComponent(next)}`);
     return { ctx, page };
   };
@@ -190,6 +190,43 @@ const [base, shots] = process.argv.slice(2);
     assert.match(await page.textContent("#banner"), /Imported Sales/);
     assert.equal(await page.inputValue("#team-file"), "");
     step("teams: upload, check, import; the new team is on the list");
+    await ctx.close();
+  }
+
+  // 11. People: the card's nudge, one-click suggestion, the picker, the 409, and the empty state.
+  {
+    const { ctx, page } = await fresh("default", "/console");
+    await page.waitForSelector(".conn-card .conn-nudge");
+    assert.match(await page.textContent(".conn-card .conn-nudge"), /6 accounts are not linked/);
+    await page.goto(`${base}/console/connectors/jira:01JB7Q2K9W`);
+    await page.waitForSelector("#unlinked-note:visible");
+    await page.click("#unlinked-note a");
+    await page.waitForURL(/\/console\/people$/);
+    await page.waitForSelector(".person-row");
+    assert.match(await page.textContent("#people-count"), /8 accounts to link/);
+    const first = page.locator(".person-row").first();
+    await first.locator(".suggestions button").first().click();
+    await first.locator(".person-done").waitFor();
+    assert.match(await first.textContent(".person-done"), /Linked to Arjun Mehta/);
+    assert.match(await page.textContent("#people-count"), /7 accounts to link/);
+    const none = page.locator(".person-row[data-search=\"contractor (qa)\"]");
+    await none.locator("select").selectOption({ label: "Noor Haddad" });
+    await none.locator(".person-pick .btn").click();
+    await none.locator(".person-done").waitFor();
+    const byEmail = page.locator(".person-row[data-search=\"tomas reyes\"]");
+    await byEmail.locator(".suggestions button").first().click();
+    await byEmail.locator(".person-done").waitFor();
+    assert.match(await byEmail.textContent(".person-done"), /Already linked/);
+    await page.fill("#people-filter", "dev");
+    assert.equal(await page.locator(".person-row:not([hidden])").count(), 1);
+    step("people: nudge, suggestion, picker, already linked, filter");
+    await page.goto(`${base}/console/_fixture/linked?next=/console/people`);
+    await page.waitForSelector(".people-list .empty");
+    assert.match(await page.textContent(".people-list .empty"), /Everyone is linked/);
+    await page.goto(`${base}/console/_fixture/member?next=/console/teams`);
+    await page.waitForSelector("#teams .team-card");
+    assert.equal(await page.isHidden(".top nav a[data-nav=people]"), true);
+    step("people: everyone linked; members do not see People");
     await ctx.close();
   }
 

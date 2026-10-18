@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from src.domain.knowledge import ask_api
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "console"
-SCENARIOS = ("default", "attention", "empty", "member", "new", "error", "signedout")
+SCENARIOS = ("default", "attention", "empty", "member", "new", "error", "signedout", "linked")
 COOKIE = "console_fixture"
 AGO = re.compile(r"^-(\d+)s$")
 
@@ -68,7 +68,19 @@ def _fresh(scenario: str) -> dict:
     if scenario in ("empty", "new"):
         connections = []
     teams = [] if scenario in ("empty", "new") else _load("teams.json")["teams"]
-    return {"scenario": scenario, "me": me, "connections": _stamp(connections, now), "teams": teams, "removing": {}, "seq": 0}
+    people = _load("people.json")
+    # "linked": the default company with every account already linked to a person.
+    unlinked = [] if scenario in ("empty", "new", "linked") else people["unlinked"]
+    return {
+        "scenario": scenario,
+        "me": me,
+        "connections": _stamp(connections, now),
+        "teams": teams,
+        "unlinked": unlinked,
+        "people": people["people"],
+        "removing": {},
+        "seq": 0,
+    }
 
 
 def _scenario(request: Request) -> dict:
@@ -474,6 +486,39 @@ async def import_team(request: Request):
         "edges_created": edges,
         "properties_set": 3 * created,
     }
+
+
+@router.get("/console/api/people/unlinked")
+def people_unlinked(request: Request):
+    state = _scenario(request)
+    if denied := _denied(request, state, admin=True):
+        return denied
+    return {"unlinked": state["unlinked"], "people": state["people"]}
+
+
+# An account the fixtures treat as already linked by email, for the 409.
+LINKED_BY_EMAIL = "jira:01JB7Q2K9W:user:70bb1e44"
+
+
+@router.post("/console/api/people/link")
+async def people_link(request: Request):
+    state = _scenario(request)
+    if denied := _denied(request, state, admin=True, mutation=True):
+        return denied
+    if not (request.headers.get("content-type") or "").startswith("application/json"):
+        return JSONResponse({"detail": "send JSON"}, status_code=415)
+    body = await request.json()
+    account_id, person_id = body.get("external_user_id"), body.get("person_id")
+    if not isinstance(account_id, str) or not isinstance(person_id, str):
+        return JSONResponse({"error": "external_user_id and person_id are ids"}, status_code=400)
+    account = next((a for a in state["unlinked"] if a["id"] == account_id), None)
+    person = next((p for p in state["people"] if p["id"] == person_id), None)
+    if account_id == LINKED_BY_EMAIL:
+        return JSONResponse({"error": "linked_by_email"}, status_code=409)
+    if not account or not person:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    state["unlinked"].remove(account)
+    return {"ok": True, "external_user_id": account_id, "person": person, "changed": True}
 
 
 @router.get("/console/api/audit")

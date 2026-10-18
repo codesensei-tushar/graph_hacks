@@ -263,6 +263,39 @@ textarea.team-file { min-height: 220px; padding: 12px 14px; line-height: 1.55; r
 .team-runs .kind-chip { margin-left: 4px; vertical-align: 0.1em; }
 .no-owner { font-size: var(--fs-sm); color: var(--service); }
 
+/* --- People ------------------------------------------------------------------------------------ */
+
+.people-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 12px; }
+.people-count { margin: 0; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); }
+.people-filter { width: min(320px, 100%); border-radius: 999px; }
+.people-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.sk-person { height: 92px; }
+.person-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px 24px; align-items: center; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: inset 0 1px 0 var(--highlight); transition: border-color var(--slow) var(--ease); }
+.person-row.is-linked { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
+.person-name { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.person-name .tile { width: 32px; height: 32px; border-radius: 8px; font-size: var(--fs-sm); }
+.person-name b { font-weight: 600; overflow-wrap: anywhere; }
+.person-meta { display: flex; align-items: center; gap: 10px; margin: 6px 0 0 44px; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); }
+.source-badge { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line-2); font: 500 var(--fs-xs)/1.5 var(--mono); color: var(--ink); }
+.source-badge.jira { border-color: color-mix(in oklab, var(--person) 55%, var(--line)); }
+.source-badge.hubspot { border-color: color-mix(in oklab, var(--service) 55%, var(--line)); }
+.person-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0; padding: 0; list-style: none; }
+.suggestions li { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.reason { font-size: var(--fs-xs); color: var(--ink-3); padding-left: 14px; }
+.reason.none { margin: 0; padding: 0; font-size: var(--fs-sm); }
+.link-btn.other { font-size: var(--fs-sm); }
+.person-pick { display: flex; flex: 1 1 280px; gap: 8px; align-items: center; }
+.person-pick select { flex: 1; min-height: 36px; border-radius: 999px; padding: 0 12px; font-size: var(--fs-sm); }
+.person-done { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--ink-2); font-size: var(--fs-md); }
+.person-done b { color: var(--ink); font-weight: 600; }
+.person-done .link-btn { margin-left: 6px; font-size: var(--fs-sm); }
+.tile.jira, .tile.hubspot, .tile.slack { flex: none; }
+
+/* Connections: a tool card or page with accounts to link. */
+.conn-nudge { margin: 0; font-size: var(--fs-sm); color: var(--service); }
+.conn-nudge a { color: inherit; font-weight: 500; }
+
 /* The Connections page's nudge toward the first team. */
 .nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin: 20px 0 0; padding: 16px 18px; border: 1px dashed var(--line-2); border-radius: var(--radius); background: color-mix(in oklab, var(--surface) 60%, transparent); }
 .nudge p { margin: 0; color: var(--ink); font-size: var(--fs-md); }
@@ -286,11 +319,15 @@ textarea.team-file { min-height: 220px; padding: 12px 14px; line-height: 1.55; r
 
 @media (max-width: 760px) {
   /* The console keeps its two links on a phone; the brand keeps its mark. */
-  .console .top nav { display: flex; justify-content: flex-start; gap: 2px; }
+  /* Four links and the actions do not fit one row at 390 px: the nav takes a second row of its own. */
+  .console { --header: 100px; }
+  .console .top { height: auto; }
+  .console .top .wrap { flex-wrap: wrap; row-gap: 0; padding-top: 8px; padding-bottom: 4px; }
+  .console .top nav { display: flex; order: 3; flex: 1 0 100%; justify-content: space-between; gap: 2px; border-top: 1px solid var(--line); padding-top: 2px; }
+  .console .top nav a { flex: none; }
   .console .top nav a { padding: 10px 6px; letter-spacing: 0.02em; }
   .top-signin { white-space: nowrap; }
   .console .top .wrap { gap: 10px; }
-  .console .brand-name { display: none; }
   .console .top-signin { padding: 0 10px; }
   .console-main .page-head { padding-top: 32px; }
   .conn-grid, .connector-list { grid-template-columns: minmax(0, 1fr); }
@@ -303,6 +340,9 @@ textarea.team-file { min-height: 220px; padding: 12px 14px; line-height: 1.55; r
   .signin-panel { padding: 22px 18px; }
   .signin-panel .btn { width: 100%; }
   .team-body { grid-template-columns: minmax(0, 1fr); }
+  .person-row { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
+  .person-done { grid-column: 1; }
+  .people-filter { width: 100%; }
   .team-card { padding: 18px 16px; }
   /* The containers table keeps three columns on a phone; when it was fetched is on the wide view. */
   table.tools .when { display: none; }

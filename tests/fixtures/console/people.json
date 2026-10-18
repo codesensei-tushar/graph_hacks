@@ -1,0 +1,30 @@
+{
+ "unlinked": [
+  {"id": "jira:01JB7Q2K9W:user:5f8a1c2b", "name": "Arjun M.", "source": "jira", "items": 48,
+   "suggestions": [{"person_id": "person-arjun-mehta", "name": "Arjun Mehta", "reason": "same_email_domain"}]},
+  {"id": "jira:01JB7Q2K9W:user:6a01dd93", "name": "Lena Fischer", "source": "jira", "items": 31,
+   "suggestions": [{"person_id": "person-lena-fischer", "name": "Lena Fischer", "reason": "same_name"}]},
+  {"id": "jira:01JB7Q2K9W:user:70bb1e44", "name": "Tomas Reyes", "source": "jira", "items": 22,
+   "suggestions": [{"person_id": "person-tomas-reyes", "name": "Tomas Reyes", "reason": "same_name"}]},
+  {"id": "hubspot:01JB7Q8M3R:user:88120345", "name": "Priya Shah", "source": "hubspot", "items": 19,
+   "suggestions": [{"person_id": "person-priya-shah", "name": "Priya Shah", "reason": "same_name"}, {"person_id": "person-priyanka-rao", "name": "Priyanka Rao", "reason": "same_email_domain"}]},
+  {"id": "jira:01JB7Q2K9W:user:7c3e9f01", "name": "sam.o", "source": "jira", "items": 14,
+   "suggestions": [{"person_id": "person-sam-okafor", "name": "Sam Okafor", "reason": "same_email_domain"}, {"person_id": "person-maya-chen", "name": "Maya Chen", "reason": "same_email_domain"}]},
+  {"id": "jira:01JB7Q2K9W:user:9e44a7b2", "name": "Contractor (QA)", "source": "jira", "items": 9, "suggestions": []},
+  {"id": "hubspot:01JB7Q8M3R:user:88120412", "name": "Dev Patel", "source": "hubspot", "items": 6,
+   "suggestions": [{"person_id": "person-dev-patel", "name": "Dev Patel", "reason": "same_name"}]},
+  {"id": "jira:01JB7Q2K9W:user:a1b2c3d4", "name": "Automation for Jira", "source": "jira", "items": 3, "suggestions": []}
+ ],
+ "people": [
+  {"id": "person-arjun-mehta", "name": "Arjun Mehta"},
+  {"id": "person-dev-patel", "name": "Dev Patel"},
+  {"id": "person-lena-fischer", "name": "Lena Fischer"},
+  {"id": "person-maya-chen", "name": "Maya Chen"},
+  {"id": "person-noor-haddad", "name": "Noor Haddad"},
+  {"id": "person-priya-shah", "name": "Priya Shah"},
+  {"id": "person-priyanka-rao", "name": "Priyanka Rao"},
+  {"id": "person-sam-okafor", "name": "Sam Okafor"},
+  {"id": "person-tomas-reyes", "name": "Tomas Reyes"},
+  {"id": "person-yuki-tanaka", "name": "Yuki Tanaka"}
+ ]
+}

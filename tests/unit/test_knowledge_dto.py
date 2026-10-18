@@ -40,6 +40,28 @@ class ToolResultTest(unittest.TestCase):
         self.assertEqual(result.to_dict()["path"], [{"from": "A", "rel": "DEPENDS_ON", "to": "B"}, {"from": "B", "rel": "DEPENDS_ON", "to": "C"}])
         self.assertEqual(result.to_dict()["depth"], 2)
 
+    def test_add_still_skips_duplicates_after_the_path_is_changed_by_hand(self):
+        result = ToolResult(tool="t", answer="")
+        a, b, c = PathStep("A", "R", "B"), PathStep("B", "R", "C"), PathStep("C", "R", "D")
+        result.add(a)
+        result.path.append(b)  # behind add's back
+        result.add(b)
+        result.path = [c]  # replaced
+        result.add(a)
+        result.add(c)
+        self.assertEqual(result.path, [c, a])
+        result.path.pop()
+        result.add(b)
+        self.assertEqual(result.path, [c, b])
+        self.assertEqual(result, ToolResult(tool="t", answer="", path=[c, b]))  # the mirror is not a field
+
+    def test_adding_many_edges_is_linear(self):
+        result = ToolResult(tool="t", answer="")
+        for n in range(20000):
+            result.add(PathStep(f"P{n}", "R", "S"))
+            result.add(PathStep(f"P{n}", "R", "S"))
+        self.assertEqual(len(result.path), 20000)
+
     def test_not_found_carries_candidates(self):
         result = ToolResult(tool="who_knows", answer="The graph doesn't know that.", found=False, candidates=["Billing Service", "API Gateway"])
         self.assertFalse(result.found)

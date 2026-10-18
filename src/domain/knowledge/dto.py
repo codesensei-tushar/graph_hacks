@@ -62,9 +62,16 @@ class ToolResult:
     grid: dict | None = None
 
     def add(self, step: PathStep) -> None:
-        """Append an edge unless the path already has it."""
-        if step not in self.path:
+        """Append an edge unless the path already has it. A set mirrors the path, so adding N edges
+        is O(N), not O(N^2). It is rebuilt when the path was replaced, or appended to or shortened
+        some other way; no tool reorders a path in place."""
+        seen = self.__dict__.get("_seen")
+        if seen is None or seen[0] is not self.path or seen[1] != len(self.path):
+            seen = (self.path, len(self.path), set(self.path))
+        if step not in seen[2]:
             self.path.append(step)
+            seen[2].add(step)
+        self.__dict__["_seen"] = (self.path, len(self.path), seen[2])
 
     def extend(self, steps) -> None:
         for step in steps:
