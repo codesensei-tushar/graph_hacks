@@ -1,5 +1,6 @@
 """The live smoke check's pass/fail decision, on canned responses: no network, no server."""
 
+import http.client
 import json
 import re
 import unittest
@@ -40,7 +41,7 @@ def _fake(overrides: dict[str, tuple[int, dict | None]] | None = None):
 class _Response:
     """What urlopen hands back: canned JSON, or a read that raises ``error`` as a slow server's does."""
 
-    def __init__(self, payload: dict | None, error: OSError | None = None):
+    def __init__(self, payload: dict | None, error: Exception | None = None):
         self.status, self.payload, self.error = 200, payload, error
 
     def __enter__(self):
@@ -55,7 +56,7 @@ class _Response:
         return json.dumps(self.payload).encode()
 
 
-def _urlopen(failures: dict[str, OSError]):
+def _urlopen(failures: dict[str, Exception]):
     """``urlopen`` over ``_fake()``'s server, where a path in ``failures`` raises its error mid-read."""
     fetch, _ = _fake()
 
@@ -111,6 +112,12 @@ class CheckLiveTest(unittest.TestCase):
         )
         with mock.patch.object(check_live.urllib.request, "urlopen", _urlopen({"/api/team/payments": ConnectionResetError()})):
             self.assertEqual(check_live.http_fetch("http://check.test")("/api/team/payments"), (0, {"error": "ConnectionResetError"}))
+
+    def test_a_body_cut_short_is_a_failure_not_a_traceback(self):
+        with mock.patch.object(check_live.urllib.request, "urlopen", _urlopen({"/api/graph/stats": http.client.IncompleteRead(b"{", 40)})):
+            header, checks = check_live.run(check_live.http_fetch("http://check.test"))
+        self.assertEqual(header, "/api/graph/stats answered HTTP 0")
+        self.assertEqual([check.ok for check in checks], [False])
 
     def test_no_chips_listed_is_a_failure(self):
         fetch, _ = _fake({"/api/ask/tools": (200, {"examples": []})})
