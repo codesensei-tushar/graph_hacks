@@ -30,7 +30,7 @@ Engineering was first; any team joins the same graph from one TOML file. A `Serv
 | `why did we move the memory layer off postgres` | The decision, who proposed and approved it, the RFC and ticket it rests on, and the chat it came from |
 | `who knows the payments gateway` | Something the graph does not know: "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." It never guesses. |
 
-Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, and the decisions that stand. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
+Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, its open tickets, and the edges behind every line. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
 
 **Over MCP.** The same read-only tools, with the same cited results, from any MCP client. The token is in the private submission notes.
 
@@ -47,7 +47,7 @@ Any other client: streamable HTTP at `https://brain.noobsurd.space/mcp` with tha
 python scripts/replay_workspace.py --graph company_demo
 ```
 
-In about two seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 16 replies from "who owns billing" to the Sales questions. It ends with `fake Slack calls=155 bot messages=16`.
+In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 14 replies from "who owns billing" to the Sales questions, and ends with `fake Slack calls=155 bot messages=16`: the 14 replies and the two Approve cards.
 
 - What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
 - Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
