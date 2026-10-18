@@ -27,6 +27,8 @@ import uuid
 from dataclasses import asdict
 from datetime import UTC, datetime
 
+from src.core import tenancy
+from src.core.tenancy import bind
 from src.core import scheduler
 from src.db.falkordb_client import kv
 from src.domain.memory.tags import MAX_BRAIN_OBSERVE_DOCS, person_brain_tag_key
@@ -326,15 +328,23 @@ def _queue_channel_observe_repair(key: str) -> None:
             if _reconcile_channel_observe_row(key):
                 return
 
-    threading.Thread(target=repair, name="observe-repair", daemon=True).start()
+    threading.Thread(target=bind(repair), name="observe-repair", daemon=True).start()
 
 
 def reconcile_channel_observe_schedules() -> None:
     """Startup safety net: every owned row has a live job (or is retired)."""
+    from src.domain import orgs
+
     for raw_key in kv().hkeys(_ROWS):
         key = _decode(raw_key)
-        if not _reconcile_channel_observe_row(key):
-            _queue_channel_observe_repair(key)
+        # The rows of every org share one hash: each is reconciled in its own team's org.
+        try:
+            org = orgs.org_ref_for_team(key.split(":", 1)[0])
+        except orgs.RouteUnavailable:
+            continue  # left for the next startup; never reconciled in a guessed org
+        with tenancy.org_context(org):
+            if not _reconcile_channel_observe_row(key):
+                _queue_channel_observe_repair(key)
 
 
 def _public(payload: dict) -> dict:
@@ -396,7 +406,7 @@ def arm_channel_observe(payload: dict) -> None:
             if _attempt_channel_observe_arm(epoch_payload, key, armed_at):
                 return
 
-    threading.Thread(target=retry_arm, name="observe-arm-repair", daemon=True).start()
+    threading.Thread(target=bind(retry_arm), name="observe-arm-repair", daemon=True).start()
 
 
 # --- spool + distill ---------------------------------------------------------------------

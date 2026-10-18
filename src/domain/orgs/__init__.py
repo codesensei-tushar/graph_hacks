@@ -4,6 +4,10 @@
     (:WorkspaceRoute {team_id, created_at})-[:OF]->(:Org)       a Slack workspace's org
     (:ExternalAccount {key, created_at})-[:OF]->(:Org)          'jira:<cloudId>', 'hubspot:<hubId>'; one org each
 
+A new org's graph starts with its Company node, ``(:Company {id: <slug>, name: <org name>})``,
+which every team it onboards is PART_OF (``ensure_company``; orgs made before that get it at
+startup). The legacy org's Company is the seeded one (``SEED_COMPANY``).
+
 Each org's own data lives in its graph (``org_<ulid>``); the legacy org (Quillfern) keeps
 ``settings.falkordb_graph``. A Slack team with no route belongs to the legacy org, which is
 how every workspace installed before orgs keeps working. Invite codes and the audit log are
@@ -88,9 +92,22 @@ def get_org(org_id: str) -> Org | None:
     return _org(rows[0]) if rows else None
 
 
+_ref_cache: dict[str, tuple[float, OrgRef]] = {}
+
+
 def get_org_ref(org_id: str) -> OrgRef | None:
+    """The org's OrgRef, cached for a minute (the scheduler resolves one per job). An org's
+    graph never changes, so a cached ref is only ever stale for a deleted org."""
+    now = time.monotonic()
+    cached = _ref_cache.get(org_id)
+    if cached and now - cached[0] < ROUTE_CACHE_SECONDS:
+        return cached[1]
     org = get_org(org_id)
-    return org.ref() if org else None
+    if org is None:
+        _ref_cache.pop(org_id, None)
+        return None
+    _ref_cache[org_id] = (now, org.ref())
+    return org.ref()
 
 
 def list_orgs() -> list[Org]:
@@ -112,17 +129,46 @@ def _slug_for(name: str) -> str:
 def build_org_indexes(org: OrgRef) -> None:
     """The indexes main.py builds at startup, in ``org``'s graph."""
     from src.connectors import graph as connector_graph
+    from src.connectors import store as connector_store
     from src.domain.knowledge.search import ensure_search_indexes
     from src.domain.memory.memory_service import ensure_indexes
 
     with tenancy.org_context(org):
         ensure_indexes()
         connector_graph.ensure_indexes()
+        connector_store.ensure_indexes()
         ensure_search_indexes()
 
 
+def company_id(org: OrgRef) -> str:
+    """The id of a non-legacy org's Company node: its slug, which never changes."""
+    if org.slug:
+        return org.slug
+    stored = get_org(org.id)
+    if stored is None:
+        raise LookupError(f"no such org: {org.id!r}")
+    return stored.slug
+
+
+def ensure_company(org: OrgRef) -> str | None:
+    """The org's Company node in its graph, created if missing (idempotent). Returns its id.
+    The legacy org's Company comes from the seed, so this leaves it alone and returns None."""
+    if tenancy.is_legacy(org):
+        return None
+    from src.db.falkordb_client import connect
+
+    ident = company_id(org)
+    with tenancy.org_context(org):
+        _, graph = connect()
+        graph.query(
+            "MERGE (c:Company {id: $id}) ON CREATE SET c.name = $name, c.created_at = $now SET c.name = coalesce(c.name, $name)",
+            {"id": ident, "name": org.name or ident, "now": _now_ms()},
+        )
+    return ident
+
+
 def create_org(name: str, created_by: str | None) -> Org:
-    """A new org with its own graph (``org_<ulid>``) and that graph's indexes. ``created_by`` is
+    """A new org with its own graph (``org_<ulid>``), that graph's indexes and its Company node. ``created_by`` is
     ``"<team_id>:<slack_user_id>"``; the caller has checked the invite code."""
     name = " ".join((name or "").split())[:80]
     if not name:
@@ -130,6 +176,7 @@ def create_org(name: str, created_by: str | None) -> Org:
     ulid = tenancy.new_ulid()
     org = Org(id=ulid, slug=_slug_for(name), name=name, graph=f"org_{ulid}", legacy=False, created_by=created_by, created_at=_now_ms())
     build_org_indexes(org.ref())
+    ensure_company(org.ref())
     control_graph().query(
         """
         CREATE (o:Org {id: $id, slug: $slug, name: $name, graph: $graph, legacy: false,
@@ -212,15 +259,30 @@ def org_for_team(team_id: str) -> Org | None:
     return get_org(org_id) if org_id else None
 
 
+class RouteUnavailable(RuntimeError):
+    """The control graph could not be read, so which org a team belongs to is unknown."""
+
+
 def org_ref_for_team(team_id: str | None) -> OrgRef:
-    """Where a Slack event for ``team_id`` runs: its routed org, else the legacy org."""
+    """Where a Slack event for ``team_id`` runs: its routed org, else (no route) the legacy org.
+    Raises ``RouteUnavailable`` when the lookup fails: never guess, or another org's event would
+    run in the legacy graph. Slack routes answer 503 then, so Slack retries."""
     try:
         org_id = routed_org_id(team_id) if team_id else None
         ref = get_org_ref(org_id) if org_id else None
-    except Exception:
-        log.exception("[orgs] route lookup failed team=%s; using the legacy org", team_id)
-        ref = None
+    except Exception as error:
+        log.exception("[orgs] route lookup failed team=%s", team_id)
+        raise RouteUnavailable(str(team_id)) from error
+    if org_id and ref is None:
+        # Routed to an org that no longer exists: not the legacy org's either.
+        raise RouteUnavailable(str(team_id))
     return ref or tenancy.legacy_org()
+
+
+def legacy_migrated() -> bool:
+    """Whether ``POST /ops/orgs/migrate`` has run: the legacy org's node exists, so every team it serves is routed."""
+    rows = control_graph().query("MATCH (o:Org {id: $id}) RETURN count(o)", {"id": LEGACY_ORG_ID}).result_set
+    return bool(rows and rows[0][0])
 
 
 def teams_of(org_id: str) -> list[str]:
@@ -231,6 +293,7 @@ def teams_of(org_id: str) -> list[str]:
 def clear_route_cache() -> None:
     with _route_lock:
         _route_cache.clear()
+    _ref_cache.clear()
 
 
 # --- external accounts ---------------------------------------------------------------------

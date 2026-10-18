@@ -102,17 +102,29 @@
   // --- The API -----------------------------------------------------------------------------------
 
   class ApiError extends Error {
-    constructor(message, status) {
+    constructor(message, status, code = "") {
       super(message);
       this.status = status;
+      this.code = code;
     }
   }
 
-  // Fixed sentences per status: a page never shows what a server or a vendor said, except a
-  // 400's own message, which is the console API's sentence about the request just made.
+  // The API answers a refusal with a fixed code, as {"error": code} or {"detail": code}. A page
+  // shows a fixed sentence per code or status, never what a server or a vendor said; a page that
+  // knows a code better (the invite code, say) reads error.code itself.
+  const codeOf = (data) => (data && typeof (data.error || data.detail) === "string" ? data.error || data.detail : "");
+  const SENTENCES = {
+    bad_csrf_token: "This page is out of date. Reload it and try again.",
+    admin_only: "Only owners and admins can do that.",
+    owner_only: "Only the company's owner can do that.",
+    slack_install_pending: "Finish adding Company Brain to Slack first.",
+    no_org: "Set up your company first.",
+  };
   function sentence(status, data) {
-    if (status === 400 && data && typeof data.error === "string" && data.error.length < 200) return data.error;
-    if (status === 403) return data && data.error === "csrf" ? "This page is out of date. Reload it and try again." : "Only owners and admins can do that.";
+    const code = codeOf(data);
+    if (SENTENCES[code]) return SENTENCES[code];
+    if (status === 400) return "That was not accepted. Check it and try again.";
+    if (status === 403) return SENTENCES.admin_only;
     if (status === 404) return "That is no longer here. It may have been disconnected.";
     if (status === 409) return "Someone changed this at the same time. Reload and try again.";
     if (status === 429) return "Too many requests from this browser. Try again in a minute.";
@@ -120,6 +132,9 @@
   }
 
   let session = null;
+
+  // A refusal that means "this session has no usable company yet" goes to the setup steps.
+  const SETUP_CODES = new Set(["no_org", "slack_install_pending"]);
 
   async function api(method, path, body) {
     const headers = { Accept: "application/json" };
@@ -140,9 +155,16 @@
     }
     let data = null;
     try { data = await response.json(); } catch (error) { data = null; }
-    if (!response.ok) throw new ApiError(sentence(response.status, data), response.status);
+    if (!response.ok) {
+      const code = codeOf(data);
+      if (response.status === 403 && SETUP_CODES.has(code) && location.pathname !== "/console/start") location.assign("/console/start");
+      throw new ApiError(sentence(response.status, data), response.status, code);
+    }
     return data;
   }
+
+  // A response that carries the session again (POST /orgs rotates it, with a new CSRF token).
+  const remember = (me) => { session = Promise.resolve(me); return me; };
 
   // GET /console/api/me, once per page.
   function whoami() {
@@ -164,17 +186,14 @@
   // The header: the company's name, Sign out, and which page this is. A page that needs a company
   // (every page but /console/start) goes to the setup steps while the workspace has none.
   async function boot({ needsOrg = true } = {}) {
-    const here = document.body.dataset.nav;
-    for (const link of document.querySelectorAll(".top nav a[data-nav]")) {
-      if (link.dataset.nav === here) link.setAttribute("aria-current", "page");
-    }
     const me = await whoami();
-    if (needsOrg && !me.org) {
+    // No company yet, or one whose Slack install has not confirmed its creator (role "pending").
+    if (needsOrg && (!me.org || me.role === "pending")) {
       location.replace("/console/start");
       throw new ApiError("No company yet.", 0);
     }
     // With no company yet there is nothing to show on the other pages.
-    if (!me.org) for (const link of document.querySelectorAll(".top nav a")) link.hidden = true;
+    if (!me.org || me.role === "pending") for (const link of document.querySelectorAll(".top nav a")) link.hidden = true;
     const org = $("#top-org");
     if (org && me.org) {
       org.textContent = me.org.name;
@@ -278,5 +297,5 @@
     };
   }
 
-  window.Console = { el, $, SOURCES, sourceOf, siteName, fmt, plural, ago, when, statusOf, pill, tile, linkFor, api, whoami, isAdmin, boot, banner, takeParam, notice, connect, poll, ApiError };
+  window.Console = { el, $, SOURCES, sourceOf, siteName, fmt, plural, ago, when, statusOf, pill, tile, linkFor, api, whoami, remember, isAdmin, boot, banner, takeParam, notice, connect, poll, ApiError };
 })();

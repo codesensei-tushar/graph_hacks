@@ -15,16 +15,22 @@ One code path for the backfill and every poll: the CRM search API, filtered and 
 
 Writing a company replaces its edges, so a page always carries a company with all of them:
 OWNS from its owner and WORKED_ON from each owner of a deal that counts (``mapping.py``).
+
+An install connected from the console (``auth='oauth'``) sends a bearer token from
+``oauth.bearer_for`` instead of a private app's token, and its credentials check fails unless
+the portal the CRM answers for is the ``hub_id`` the install claimed (``hubspot/oauth.py``).
 """
 
 import email.utils
 import json
 import time
 
-from src.connectors.base import Connector, ConnectorError, Container, Install, InstallInfo, Page
+from src.connectors.base import Connector, ConnectorError, Container, Install, InstallInfo, OAuthSpec, Page
 from src.connectors.hubspot import mapping
+from src.connectors.hubspot import oauth as hubspot_oauth
 from src.connectors.hubspot.client import API_VERSION, BATCH, HubSpotClient
 from src.connectors.http import HttpError
+from src.connectors.oauth import OAUTH_SECRET_FIELDS, bearer_for
 
 # Accounts kept per portal, newest first.
 MAX_COMPANIES = 500
@@ -41,18 +47,25 @@ class HubSpotConnector(Connector):
     required = ("token",)
     poll_seconds = 300
     accepts_webhooks = False
+    oauth: OAuthSpec = hubspot_oauth.SPEC
+    # The private app's token (token installs) and the OAuth tokens: kept encrypted, never in config_json.
+    secret_fields = ("token", *OAUTH_SECRET_FIELDS)
 
     def __init__(self, client_for=None, clock=time.time):
-        self._client_for = client_for or (lambda install: HubSpotClient(install.get("token"), install.get("api_version", API_VERSION)))
+        self._client_for = client_for or _client_for
         self._clock = clock
         # install.key -> what the portal is, its owners and stage labels, and when those expire.
-        self._portals: dict[str, tuple[str, str]] = {}
+        self._portals: dict[tuple[str, str], tuple[str, str]] = {}
         self._directories: dict[str, tuple[float, dict[str, dict], dict[str, str]]] = {}
 
     # --- the contract -----------------------------------------------------------------------
 
     def check_credentials(self, install: Install) -> InstallInfo:
         portal, ui_domain = self._portal(install, refresh=True)
+        if hubspot_oauth.is_oauth(install) and portal != hubspot_oauth.hub_id(install):
+            # The token answers for another portal than the one this install claimed: read nothing.
+            self._portals.pop(install.key, None)
+            raise ConnectorError("the HubSpot token answers for a different portal than this connection; reconnect it")
         return InstallInfo(account=f"HubSpot portal {portal}", site=f"https://{ui_domain}")
 
     def containers(self, install: Install) -> list[Container]:
@@ -177,13 +190,13 @@ class HubSpotConnector(Connector):
     # --- what is reused between pages --------------------------------------------------------
 
     def _portal(self, install: Install, refresh: bool = False) -> tuple[str, str]:
-        if refresh or install.key not in self._portals:
+        if refresh or (install.org, install.key) not in self._portals:
             details = self._client_for(install).account_details()
             portal = str(details.get("portalId") or "")
             if not portal:
                 raise ConnectorError("HubSpot's account details named no portal")
-            self._portals[install.key] = (portal, details.get("uiDomain") or "app.hubspot.com")
-        return self._portals[install.key]
+            self._portals[(install.org, install.key)] = (portal, details.get("uiDomain") or "app.hubspot.com")
+        return self._portals[(install.org, install.key)]
 
     def _directory(self, install: Install, client: HubSpotClient) -> tuple[dict[str, dict], dict[str, str]]:
         cached = self._directories.get(install.key)
@@ -204,6 +217,11 @@ class HubSpotConnector(Connector):
             return int(email.utils.parsedate_to_datetime(headers["date"]).timestamp() * 1000)
         except (KeyError, TypeError, ValueError):
             return int(self._clock() * 1000)
+
+
+def _client_for(install: Install) -> HubSpotClient:
+    token = bearer_for(install, hubspot_oauth.SPEC) if hubspot_oauth.is_oauth(install) else install.get("token")
+    return HubSpotClient(token, install.get("api_version", API_VERSION))
 
 
 def _window(since: int, after: str | None, records: list[dict]) -> tuple[int, str | None]:

@@ -151,20 +151,36 @@ An owner or admin clicks **Connect** in the console.
    - **Store.** It stores the `ConnectorInstall` (`auth: 'oauth'`, `status: 'connecting'`), with the
      tokens MultiFernet-encrypted in `secret_enc` and bound to the org and the install. Connecting an
      account the org already has replaces that install's tokens instead of making a second install.
-3. The redirect goes to a fixed page: the project picker (Jira), the site picker (Jira, several
-   sites), the connection's page (HubSpot), or `/console?error=<code>`.
+3. The redirect goes to a fixed page:
+   - `/console?connected=<source>` on success; the console then offers the next step (Jira: pick projects).
+     A tool with nothing to pick (HubSpot reads the whole portal) starts syncing from the callback
+     itself: the install is loaded and its first step armed at once. It shows `connecting` until that
+     step works, then `active`.
+   - `/console/connect/jira/site?id=<connection id>` when the Jira consent covers several sites.
+   - `/console?error=<code>` on a failure.
    - Nothing from the vendor (an error description, a site name) is put in a URL or a page.
    - The redirect is `no-store`, and nginx logs paths without query strings.
 
 | `error=` | Meaning |
 | --- | --- |
-| `oauth_state` | Unknown, expired (10 min) or already used state, or a state for another tool. Start again. |
-| `oauth_session` | The session changed (signed out, signed in again, created an org) or is no longer an admin |
 | `oauth_denied` | The person declined on the vendor's consent page |
-| `oauth_failed` | The code exchange or the account lookup failed. The backend logs the failure type, never its text. |
-| `no_jira_site` | The consent covers no Jira site on atlassian.net |
-| `claimed` | Another org already reads this Jira site or HubSpot portal |
-| `not_configured` | The app's client id or secret is missing |
+| `oauth_state` | The state is unknown, expired (10 min), already used or for another tool, or the session changed (signed out, signed in again, created an org, no longer an admin). Start again. |
+| `account_claimed` | Another org already reads this Jira site or HubSpot portal |
+| `oauth_failed` | Anything else: the code exchange or the account lookup failed, the consent covers no Jira site on atlassian.net, or the app's client id or secret is missing. The backend logs the failure type, never its text. |
+
+## Teams
+
+A new org's graph starts with its Company node (`{id: <org slug>, name: <org name>}`); every team
+it imports or onboards from Slack joins it. `src/api/v1/console_teams.py`:
+
+- `POST /console/api/teams/import` (owners and admins; JSON, CSRF): `{"file": "<team file TOML>", "check": false}`.
+  The file is the one `/ops/import` takes (docs/ONBOARDING-TEAMS.md), with the same 256 KiB limit and
+  the same checks against the org's graph. `check: true` writes nothing.
+  - 200 check: `{mode: "check", company, team, contents, counts: {people, runs: {<kind>: n}, decisions}}`
+  - 200 merge: the same plus `mode: "merge"`, `nodes`, `nodes_created`, `edges_created`, `properties_set`
+  - 400 `{error: "refused", problems: [...]}` (nothing written); 413 `{error: "too_large", limit_bytes}`
+- `GET /console/api/teams` (members): `{teams: [{id, name, summary, members: [{id, name, role}],
+  runs: [{id, name, kind, owners: [{id, name}]}]}]}`, what the member could read in a Slack DM.
 
 ## Tokens at run time
 
@@ -203,6 +219,28 @@ Logs show `[oauth] <install> token refreshed; rotated=True` and
 3. Drop the old key (`TOKEN_ENCRYPTION_KEYS=<new>`) and redeploy.
 
 Refreshes write with the first key too, so active installs move to it on their own within an hour.
+
+## Troubleshooting
+
+**Sign-in says "Company Brain cannot read this workspace's Slack connection: its encryption key
+changed"** (`/signin?error=workspace_key`). The workspace's stored bot token cannot be decrypted
+with any key in `TOKEN_ENCRYPTION_KEYS`: the old key was dropped (step 3 above) before the rewrap
+reached it. Until it is fixed nobody in that workspace can sign in and the bot cannot answer there.
+The backend logs, once per attempt:
+
+```
+[console] the stored Slack bot token of team=T... cannot be decrypted (InvalidToken): TOKEN_ENCRYPTION_KEYS no longer holds the key it was encrypted with. ...
+```
+
+Fix it either way:
+
+- Put the old key back as a second key (`TOKEN_ENCRYPTION_KEYS=<new>,<old>`), redeploy, run the
+  rewrap (step 2 above), and only then drop it again.
+- Or, if the old key is gone, have a workspace member reinstall the Slack app from the console
+  (setup step 2): the install stores a fresh token under the current key.
+
+A transient failure (Slack or the graph unreachable) is `workspace_unavailable` instead, and goes
+away on a retry.
 
 ## nginx
 

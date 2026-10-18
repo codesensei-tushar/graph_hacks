@@ -16,6 +16,7 @@ import random
 import uuid
 from dataclasses import dataclass
 
+from src.core import tenancy
 from src.core import scheduler
 from src.db.falkordb_client import kv
 from src.domain.slack.turn._state import LOCK, hdel, hget_json, hgetall_json, hset_json, now_ms
@@ -77,12 +78,14 @@ def _arm_reaction_queue(delay_seconds: float | None = None) -> None:
             return
         job_id = uuid.uuid4().hex
         kv().set(_SCHEDULE, job_id)
-        scheduler.schedule(
-            _random_queue_delay_seconds() if delay_seconds is None else delay_seconds,
-            QUEUE_JOB,
-            {"queue": "passive_reaction", "schedule_id": job_id},
-            job_id=job_id,
-        )
+        # One queue for every org's teams: its job is the legacy org's, and each row runs in its team's org.
+        with tenancy.org_context(tenancy.legacy_org()):
+            scheduler.schedule(
+                _random_queue_delay_seconds() if delay_seconds is None else delay_seconds,
+                QUEUE_JOB,
+                {"queue": "passive_reaction", "schedule_id": job_id},
+                job_id=job_id,
+            )
 
 
 def _pending_rows() -> list[dict]:
@@ -210,6 +213,18 @@ def run_passive_reaction_queue(payload: dict) -> None:
     if not pending:
         return
     row = pending[0]
+    from src.domain import orgs
+
+    try:
+        org = orgs.org_ref_for_team(row.get("team_id"))
+    except orgs.RouteUnavailable:
+        _arm_reaction_queue(60)  # the row stays pending; try again when the control graph answers
+        return
+    with tenancy.org_context(org):
+        _run_row(row, now)
+
+
+def _run_row(row: dict, now: int) -> None:
     if row["expires_at"] <= now:
         row["status"] = "expired"
         row["last_error"] = "stale"

@@ -47,9 +47,9 @@ def timed_out(error: tool_guard.ToolTimedOut) -> JSONResponse:
     return JSONResponse({"error": str(error), "timed_out": True}, status_code=503)
 
 
-def _throttled(request: Request) -> JSONResponse | None:
+def _throttled(request: Request, cost: int = 1) -> JSONResponse | None:
     client = request.headers.get("x-real-ip") or (request.client.host if request.client else None)
-    decision = ask_api.admit(client)
+    decision = ask_api.admit(client, cost)
     if decision.allowed:
         return None
     return JSONResponse(
@@ -61,12 +61,13 @@ def _throttled(request: Request) -> JSONResponse | None:
 
 @router.get("/ask")
 def ask(request: Request, q: str = "", tool: str | None = None, model: bool = False):
-    if throttled := _throttled(request):
+    # A heavy tool (a path, a whole-graph ranking) spends more of the address's budget.
+    if throttled := _throttled(request, ask_api.question_cost(q, tool)):
         return throttled
     if model and (denied := _denial(request)):
         return denied
     try:
-        with tool_guard.guard("ask", q):
+        with tool_guard.public("ask", q):
             answer = ask_api.answer_question(q, tool=tool, use_model=model)
     except (ask_api.ToolRefused, ask_api.QuestionTooLong) as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)

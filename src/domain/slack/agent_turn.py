@@ -12,10 +12,10 @@ the arguments the model filled in.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import catalogue
+from src.domain.knowledge import catalogue, people, resolve
 from src.domain.knowledge.agent import ToolChoice, choose_tool, run_choice
 from src.domain.knowledge.dto import MemoryLine, ToolResult, ToolSpec, day_from
-from src.domain.memory.search_brain import search_brain
+from src.domain.knowledge.memories import attached
 from src.domain.memory.writeback import SHARED_TEAM_BRAIN_CONTAINER_TAG, scope_label, slack_memory_container_tag
 from src.domain.slack import format
 from src.domain.slack.compute import TurnApproval, TurnOutcome, TurnRequest, channel_names
@@ -37,19 +37,37 @@ def answer_turn(request: TurnRequest) -> TurnOutcome:
         return suspend_for_approval(request, spec, choice)
     choice = for_the_asker(choice, question, request)
     result, choice = run_choice(choice, question, request.read_tags, request.thread, bot_ids)
-    # A refusal shows no memories, so it never reads like a guess.
-    memories = result.memories or (recall_memories(question, request) if result.found else [])
+    # A refusal shows no memories, so it never reads like a guess; an answer shows only memories that
+    # mention what it is about or something one hop from it, never a loose text match.
+    memories = result.memories or (memories_about(result, request) if result.found else [])
     # One the answer already quotes (what_changed tells each in full) is not listed twice.
     memories = [memory for memory in memories if not memory.text or memory.text not in result.answer]
     return TurnOutcome(reply=render_reply(result, choice, memories, request.read_tags, channel_names(request.read_tags)))
 
 
+# Tools that take a person, and the argument that names them: asked in the first person ("what team am
+# I on", "what if I leave", "my open tickets"), Slack knows who the asker is and names them.
+_PERSON_ARGS = {"person_profile": ("name",), "if_person_leaves": ("name",), "find": ("person", "owner", "author")}
+
+
 def for_the_asker(choice: ToolChoice, question: str, request: TurnRequest) -> ToolChoice:
-    """``what_changed`` asked in the first person reads around the asker's own things, when they are a person in the graph."""
-    if choice.tool != "what_changed" or choice.args.get("person") or not _FIRST_PERSON.search(question):
+    """A first-person question reads around the asker's own person, when they are a person in the graph:
+    ``what_changed`` about their things, and the person tools (profile, leaving, their lists) about them."""
+    if not _FIRST_PERSON.search(question):
         return choice
-    person = asker_person(request.asker_slack_user_id)
-    return ToolChoice(choice.tool, {**choice.args, "person": person}, choice.via) if person else choice
+    if choice.tool == "what_changed":
+        if choice.args.get("person"):
+            return choice
+        person = asker_person(request.asker_slack_user_id)
+        return ToolChoice(choice.tool, {**choice.args, "person": person}, choice.via) if person else choice
+    keys = [key for key in _PERSON_ARGS.get(choice.tool, ()) if key in choice.args and (key == "name" or _FIRST_PERSON.search(str(choice.args[key])))]
+    if not keys or (choice.tool != "find" and not _FIRST_PERSON.search(str(choice.args.get("name") or ""))):
+        return choice
+    if choice.tool != "find" and resolve.resolve_name(str(choice.args["name"]), ("Person",), request.read_tags).found:
+        # "what if Arjun leaves, should I worry": someone else is named; the question is about them.
+        return choice
+    person = asker_person_ref(request.asker_slack_user_id)
+    return ToolChoice(choice.tool, {**choice.args, **{key: person for key in keys}}, choice.via) if person else choice
 
 
 def asker_person(slack_user_id: str | None) -> str | None:
@@ -59,6 +77,16 @@ def asker_person(slack_user_id: str | None) -> str | None:
     _, graph = connect()
     rows = graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.name LIMIT 1", {"id": slack_user_id}).result_set
     return rows[0][0] if rows else None
+
+
+def asker_person_ref(slack_user_id: str | None) -> str | None:
+    """The asker's Person as a reference the person tools resolve by id (``people.PERSON_REF``), never
+    by name: two people may share a name, and "me" must be the one asking."""
+    if not slack_user_id:
+        return None
+    _, graph = connect()
+    rows = graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.id LIMIT 1", {"id": slack_user_id}).result_set
+    return people.PERSON_REF + rows[0][0] if rows else None
 
 
 def suspend_for_approval(request: TurnRequest, spec: ToolSpec, choice: ToolChoice) -> TurnOutcome:
@@ -88,9 +116,9 @@ def approval_summary(spec: ToolSpec, args: dict, scopes: list[str], visible_to: 
     return f"{what}. {shown}. Visible to {visible_to}."
 
 
-def recall_memories(question: str, request: TurnRequest) -> list[MemoryLine]:
-    found = search_brain(question, request.memory_scope, trace_id=request.trace_id)
-    return [memory_line(row) for row in (found.get("results") or [])[:MEMORY_LINES]]
+def memories_about(result: ToolResult, request: TurnRequest) -> list[MemoryLine]:
+    """The memories with a MENTIONS edge to the answer's subject or its neighbours (``knowledge.memories.attached``)."""
+    return attached(result, request.read_tags, MEMORY_LINES)
 
 
 def memory_line(row: dict) -> MemoryLine:

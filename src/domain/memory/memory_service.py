@@ -22,6 +22,7 @@ import re
 import threading
 from dataclasses import dataclass
 
+from src.core.tenancy import bind
 from src.db.falkordb_client import connect
 from src.domain.memory import tree
 from src.domain.memory.cleanup import delete_stale_brain_memory_document
@@ -209,7 +210,7 @@ def write_memory(
         )
         if mapped:
             if split_in_background:
-                threading.Thread(target=maybe_split_node, args=(request.container_tag, node_path, reset_epoch), daemon=True).start()
+                threading.Thread(target=bind(maybe_split_node), args=(request.container_tag, node_path, reset_epoch), daemon=True).start()
             else:
                 maybe_split_node(request.container_tag, node_path, reset_epoch)
     return {"written": True, "id": result.id}

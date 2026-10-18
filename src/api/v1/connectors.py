@@ -6,8 +6,10 @@ redelivery of the same bytes as a duplicate, and does the work in a background t
 the sender gets its answer at once. A delivery is marked seen only after it ran.
 
 ``GET /ops/connectors`` (status: accounts, containers, cursors, errors; never a config
-value) and ``POST /ops/connectors/{source}/sync`` (``?full=true`` starts every container
-over) need ``BRAIN_ADMIN_TOKEN``.
+value; plus ``orphaned``: installs whose data is still in the graph though nothing configures
+them any more), ``POST /ops/connectors/{source}/sync`` (``?full=true`` starts every container
+over) and ``DELETE /ops/connectors/orphans/{install}`` (deletes an orphan's data, 500 nodes at a
+time) need ``BRAIN_ADMIN_TOKEN``. ``?org=<id>`` reads another org than the legacy one.
 """
 
 import logging
@@ -19,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from src.api.v1.slack_install import _admin_denial
 from src.connectors import registry, sync
 from src.connectors.base import WebhookRequest
+from src.core import tenancy
 from src.core.config import settings
 
 log = logging.getLogger(__name__)
@@ -64,11 +67,34 @@ async def connector_webhook(source: str, request: Request, background: Backgroun
     return {"ok": True}
 
 
+def _ops_org(org: str | None) -> tenancy.OrgRef | None:
+    try:
+        return tenancy.resolve(org or tenancy.LEGACY_ORG_ID)
+    except (LookupError, TypeError):
+        return None
+
+
 @router.get("/ops/connectors")
-def connectors_status(request: Request):
+def connectors_status(request: Request, org: str | None = None):
     if denied := _admin_denial(request):
         return denied
-    return {"connectors": sync.status()}
+    if (ref := _ops_org(org)) is None:
+        return JSONResponse({"error": "no such org"}, status_code=404)
+    with tenancy.org_context(ref):
+        rows = sync.status() if tenancy.is_legacy(ref) else [sync.install_status(c, i) for c, i in registry.installs_of(ref.id)]
+        return {"connectors": rows, "orphaned": sync.orphans()}
+
+
+@router.delete("/ops/connectors/orphans/{install_key}")
+def purge_orphan(install_key: str, request: Request, org: str | None = None):
+    if denied := _admin_denial(request):
+        return denied
+    if (ref := _ops_org(org)) is None:
+        return JSONResponse({"error": "no such org"}, status_code=404)
+    with tenancy.org_context(ref):
+        if not sync.purge_orphan(install_key, actor="operator"):
+            return JSONResponse({"error": "not an orphaned install: it is configured, or left nothing"}, status_code=409)
+    return JSONResponse({"ok": True, "install": install_key, "status": "purging"}, status_code=202)
 
 
 @router.post("/ops/connectors/{source}/sync")

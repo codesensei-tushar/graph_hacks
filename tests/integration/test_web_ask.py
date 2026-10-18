@@ -13,7 +13,7 @@ from src.api.v1 import ask as ask_route  # noqa: E402
 from src.api.v1 import proof as proof_route  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import agent, ask_api, explorer  # noqa: E402
+from src.domain.knowledge import agent, ask_api, explorer, tool_guard  # noqa: E402
 from src.main import app  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
 
@@ -185,6 +185,17 @@ class WebAskTest(unittest.TestCase):
             # Another address has its own budget.
             self.assertEqual(self.http.get("/api/ask?q=who+owns+billing", headers={"X-Real-IP": "198.51.100.9"}).status_code, 200)
 
+    def test_heavy_questions_and_deep_walks_spend_more_of_the_budget(self):
+        here = {"X-Real-IP": "203.0.113.60"}
+        cost = ask_api.HEAVY_COST
+        with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=2 * cost + 1, window=3600)):
+            self.assertEqual(self.http.get("/api/ask", params={"q": "how is maya connected to the invoice worker"}, headers=here).status_code, 200)
+            self.assertEqual(self.http.get("/api/explore", params={"node": "billing", "depth": 2}, headers=here).status_code, 200)
+            # One token left: a light call passes, a heavy one is refused.
+            self.assertEqual(self.http.get("/api/ask", params={"q": "what are our riskiest services"}, headers=here).status_code, 429)
+            self.assertEqual(self.http.get("/api/ask", params={"q": "who owns billing"}, headers=here).status_code, 200)
+            self.assertEqual(self.http.get("/api/explore", params={"node": "billing"}, headers=here).status_code, 429)
+
     def test_the_cacheable_reads_say_so_and_questions_do_not(self):
         for path in CACHED_READS:
             response = self.http.get(path)
@@ -198,6 +209,26 @@ class WebAskTest(unittest.TestCase):
         for _ in range(10):
             for path in (*HOME_READS, "/api/ask?q=who+owns+billing"):
                 self.assertEqual(self.http.get(path, headers=here).status_code, 200, path)
+
+    def test_public_queries_run_under_the_short_timeout_and_a_real_one_stops_at_it(self):
+        seen = []
+        real_run_choice = agent.run_choice
+
+        def run_choice(*args, **kwargs):
+            seen.append(falkordb_client.query_timeout_ms.get())
+            return real_run_choice(*args, **kwargs)
+
+        with mock.patch.object(agent, "run_choice", side_effect=run_choice):
+            self.assertEqual(self.http.get("/api/ask", params={"q": "who owns billing"}).status_code, 200)
+        self.assertEqual(seen, [tool_guard.PUBLIC_QUERY_TIMEOUT_MS])
+        self.assertIsNone(falkordb_client.query_timeout_ms.get())
+        # FalkorDB itself stops a query at the context's timeout, through connect()'s graph.
+        _, graph = falkordb_client.connect()
+        slow = "UNWIND range(1, 5000000) AS x WITH x WHERE x % 7 = 0 RETURN count(x)"
+        with self.assertLogs("src.domain.knowledge.tool_guard", "WARNING"), self.assertRaises(tool_guard.ToolTimedOut):
+            with tool_guard.guard("ask", "slow", timeout_ms=5):
+                graph.ro_query(slow)
+        self.assertEqual(graph.ro_query(slow).result_set, [[714285]])
 
     def test_a_query_that_times_out_is_a_503_that_says_so_not_a_500(self):
         timeout = ResponseError("Query timed out")

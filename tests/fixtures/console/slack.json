@@ -1,0 +1,38 @@
+{
+ "team_id": "T05QUILLFRN",
+ "team_name": "Quillfern",
+ "bot_installed": true,
+ "home_channel": {
+  "id": "C05BRAIN01",
+  "name": "company-brain"
+ },
+ "channels": [
+  {
+   "id": "C05BRAIN01",
+   "name": "company-brain",
+   "private": false
+  },
+  {
+   "id": "C05ENG0001",
+   "name": "engineering",
+   "private": false
+  },
+  {
+   "id": "C05PAY0001",
+   "name": "payments",
+   "private": false
+  },
+  {
+   "id": "C05INC0001",
+   "name": "incidents",
+   "private": false
+  },
+  {
+   "id": "G05LEAD001",
+   "name": "leads",
+   "private": true
+  }
+ ],
+ "last_event_at": "-420s",
+ "install_url": "/slack/oauth/install"
+}

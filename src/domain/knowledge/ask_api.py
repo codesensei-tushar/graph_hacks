@@ -11,11 +11,14 @@ and edges of that path keyed by id, so the page can draw the traversal it is rea
 
 The surface is public, so it is protected here rather than in the route: a question longer
 than ``MAX_QUESTION_CHARS`` is refused with ``QuestionTooLong``; keyword answers and the
-proof report are kept for ``CACHE_TTL_SECONDS`` per graph, so a chip clicked twice walks the
-graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``
+proof report are kept for ``CACHE_TTL_SECONDS`` per graph and graph generation (``cache_key``), so a
+chip clicked twice walks the graph once and a write is seen at once; only public (``org_shared``)
+answers are kept; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``
 on average, with bursts of up to ``RATE_BURST``. Only the routes that can walk the graph for
 a new key are counted (a question, an explorer walk, an MCP call); the page's cacheable
-reads are served from the cache uncounted.
+reads are served from the cache uncounted. A call that runs a heavy tool (``HEAVY_TOOLS``, or
+explore two hops out) spends ``HEAVY_COST`` tokens instead of one: ``tool_cost`` and
+``question_cost`` price a call before it runs.
 
 The page offers an example chip only when it answers with a path or a dated memory on the graph in use, so a chip whose
 data the live graph lacks stays hidden until a seed refresh brings it back.
@@ -32,7 +35,7 @@ from dataclasses import dataclass, field
 
 from src.db import falkordb_client
 from src.db.falkordb_client import connect
-from src.domain.knowledge import agent, ask_service, catalogue, kinds
+from src.domain.knowledge import agent, ask_service, catalogue, kinds, smalltalk
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
 from src.domain.knowledge.proof import ProofReport, run_proof
 
@@ -129,6 +132,12 @@ RATE_LIMIT = 60
 RATE_WINDOW_SECONDS = 60.0
 # A client may spend this many calls at once; the budget then refills at RATE_LIMIT per window.
 RATE_BURST = 30
+# Tools whose queries walk far (paths between far nodes, whole-graph rankings, a team's
+# whole brief) cost this many tokens a call, so one address gets RATE_LIMIT / HEAVY_COST of them a minute.
+HEAVY_TOOLS = frozenset({"path_between", "risk_map", "onboarding_brief"})
+HEAVY_COST = 5
+# Explore at this depth or more is heavy too.
+HEAVY_EXPLORE_DEPTH = 2
 # What a browser and nginx may keep a cacheable public read for: the domain cache's lifetime.
 CACHE_CONTROL = f"public, max-age={int(CACHE_TTL_SECONDS)}"
 
@@ -193,15 +202,17 @@ class RateLimiter:
         self._buckets: dict[str, tuple[float, float]] = {}
         self._lock = threading.Lock()
 
-    def check(self, client: str) -> RateDecision:
+    def check(self, client: str, cost: int = 1) -> RateDecision:
+        """Spend ``cost`` tokens (at least 1, at most the burst) if the client has them."""
+        cost = max(1, min(cost, self.burst))
         now = self.clock()
         with self._lock:
             seen, tokens = self._buckets.get(client, (now, float(self.burst)))
             tokens = min(float(self.burst), tokens + (now - seen) * self.rate)
-            if tokens < 1:
+            if tokens < cost:
                 self._buckets[client] = (now, tokens)
-                return RateDecision(False, max(1, math.ceil((1 - tokens) / self.rate)))
-            self._buckets[client] = (now, tokens - 1)
+                return RateDecision(False, max(1, math.ceil((cost - tokens) / self.rate)))
+            self._buckets[client] = (now, tokens - cost)
             if len(self._buckets) > self.max_clients:
                 # A client idle long enough to have refilled is the same as one never seen.
                 full = self.burst / self.rate
@@ -217,14 +228,52 @@ ANSWERS = TtlCache(CACHE_TTL_SECONDS, CACHE_MAX_ENTRIES)
 LIMITER = RateLimiter(RATE_LIMIT, RATE_WINDOW_SECONDS, burst=RATE_BURST)
 
 
-def admit(client: str | None) -> RateDecision:
-    """Whether this client may make another public call now. Clients without an address share one budget."""
-    return LIMITER.check(client or "unknown")
+def admit(client: str | None, cost: int = 1) -> RateDecision:
+    """Whether this client may make another public call of this cost now. Clients without an address share one budget."""
+    return LIMITER.check(client or "unknown", cost)
+
+
+def tool_cost(tool: str | None, arguments: dict | None = None) -> int:
+    """Tokens one call of this tool spends: ``HEAVY_COST`` for a heavy tool or a deep explore, else 1."""
+    if tool in HEAVY_TOOLS:
+        return HEAVY_COST
+    if tool == "explore":
+        try:
+            depth = int((arguments or {}).get("depth") or 1)
+        except (TypeError, ValueError):
+            depth = 1
+        if depth >= HEAVY_EXPLORE_DEPTH:
+            return HEAVY_COST
+    return 1
+
+
+def question_cost(question: str, tool: str | None = None) -> int:
+    """Tokens a question spends, priced by the tool the keyword router (or the caller) would run, without running it."""
+    question = " ".join(question.split())
+    if not question or len(question) > MAX_QUESTION_CHARS:
+        return 1
+    if tool is None:
+        command = _WRITE_COMMAND.match(question)
+        if command and command.group(2).strip():
+            return tool_cost(_WRITE_READS[command.group(1).lower()][0])
+    routed, args = ask_service.route(question)
+    if tool is None:
+        return tool_cost(routed, args)
+    # A tool named outright takes the router's arguments only when the router picks it too (``_args_for``).
+    return tool_cost(tool, args if routed == tool else None)
+
+
+def cache_key(*parts) -> tuple:
+    """An ``ANSWERS`` key for the graph in use at its current generation: any write to the graph
+    (a sync page, a disconnect, a seed, an approved ticket) changes the key, so nothing it changed
+    is served from the cache."""
+    name = falkordb_client.graph_name()
+    return (name, falkordb_client.generation(name), *parts)
 
 
 def public_proof() -> ProofReport:
     """The proof report for the graph in use, computed at most once per cache period."""
-    return ANSWERS.get_or_compute(("proof", falkordb_client.graph_name()), run_proof)
+    return ANSWERS.get_or_compute(cache_key("proof"), run_proof)
 
 
 @dataclass(frozen=True)
@@ -364,11 +413,16 @@ def answer_question(question: str, tool: str | None = None, use_model: bool = Fa
         raise QuestionTooLong(f"questions are limited to {MAX_QUESTION_CHARS} characters; this one has {len(question)}")
     if not question:
         return AskAnswer(question, "none", "keywords", "Ask a question about the company graph.", found=False, scopes=read_scopes)
+    if tool is None and (said := smalltalk.reply(question)) is not None:
+        # "hi", "what can you do", "thanks": help or an acknowledgement, not a refusal.
+        return AskAnswer(question, "help", "keywords", said, found=True, scopes=read_scopes)
     if use_model:
         # Admin only, and a model's choice can differ between calls: never cached.
         return _answer(question, tool, True, read_scopes)
-    key = (falkordb_client.graph_name(), question, tool, tuple(read_scopes))
-    return ANSWERS.get_or_compute(key, lambda: _answer(question, tool, False, read_scopes))
+    if tuple(read_scopes) != DEFAULT_SCOPES:
+        # A member's answer (Slack, the console) reads private scopes: never cached, always current.
+        return _answer(question, tool, False, read_scopes)
+    return ANSWERS.get_or_compute(cache_key(question, tool), lambda: _answer(question, tool, False, read_scopes))
 
 
 def _answer(question: str, tool: str | None, use_model: bool, read_scopes: list[str]) -> AskAnswer:

@@ -114,7 +114,16 @@ _DECISION_HEALTH = re.compile(
 _LEAVES = re.compile(
     r"\b(?:leaves|leaving|quits?|quitting|resigns?|on leave|hit by a bus|bus factor(?! for\b)|covers? for|takes? over (?:from|for))\b"
     r"|\bwhat\b.*\bthe only (?:one|person) who knows\b"
-    r"|\b(?:nobody|no one) else (?:knows|does)\b",
+    r"|\b(?:nobody|no one) else (?:knows|does)\b"
+    # The asker's own: "what if I leave", "which of my accounts are at risk", "what rests on me".
+    r"|\bif i (?:leave|left|quit)\b|\bmy (?:\w+ )?(?:accounts|services|tickets|things) (?:are )?at risk\b|\bwhat rests on me\b",
+    re.IGNORECASE,
+)
+# Who the asker is: "who am I", "what team am I on", "what do I own". Slack swaps in the asker's person.
+_ME = re.compile(
+    # The whole question is about the asker: "what do I know about the invoice worker" is not.
+    r"^\s*(?:who am i|what teams? am i (?:on|in|part of)|which teams? am i (?:on|in)|what do i (?:own|hold|know|work on)"
+    r"|what am i working on|(?:show )?my profile)\s*[?.!]*\s*$",
     re.IGNORECASE,
 )
 # Joining a team, or asking what a team is. "what should I know about billing" names no team and
@@ -170,6 +179,18 @@ EXPLORE = re.compile(
     re.IGNORECASE,
 )
 _LISTED = r"(?:tickets|issues|accounts|services|systems|processes|documents|docs|pull requests|prs)"
+# CRM lists, matched as the whole question so a word inside another question never takes it over:
+# "which customers depend on billing", "pipeline failures", "accounts payable process", "who handles
+# deals at enterprise scale" stay where they were. A pipeline is a sales or deal pipeline, never a
+# bare "pipeline" (a data pipeline). "my accounts" is not matched: the router does not know who asks.
+_CRM_NOUN = r"(?:customers|opportunities|accounts|deals|(?:sales|deal) pipeline)"
+_CRM_LIST = (
+    r"(?:^\s*(?:(?:show|list|give)(?: me)?\s+|(?:who|what|which) are\s+)?(?:all |the |our )?(?:open |closed |current )?"
+    rf"{_CRM_NOUN}(?: (?:are|is) (?:open|closed))?\s*[?.!]*\s*$"
+    rf"|^\s*(?:which|what) {_CRM_NOUN} are (?:open|closed)\s*[?.!]*\s*$"
+    r"|^\s*(?:(?:show|list)(?: me)?\s+|(?:which|what)\s+)?(?:all |the |our )?deals? (?:(?:that )?are (?:in |at )?|in |at )"
+    r"(?:the )?(?:stage )?(?!.*\b(?:depend|depends|if|why|who|how|risk|scale|tier|because)\b)[a-z][a-z ]*?(?: stage)?\s*[?.!]*\s*$)"
+)
 # A list by filter: "which tickets are open", "list the services in payments", "what decisions have we
 # made". Before decisions, which shares "decisions"; "what decisions have we made about billing" names
 # one thing and stays on decision_trace, as does any "list ... about X".
@@ -180,9 +201,18 @@ _FIND = re.compile(
     r"|^\s*(?:what|which) (?:are|is) (?:the |our )?open (?:tickets|issues|pull requests|prs)\b"
     r"|^\s*which (?:tickets|issues|pull requests|prs) are open\b"
     r"|^\s*(?:what|which) (?:tickets|issues) are (?:still )?blocked\b|\bblocked (?:tickets|issues)\b"
+    # "open tickets about billing" lists like "what are the open tickets about billing".
+    r"|^\s*(?:(?:list|show)(?: me)?\s+)?(?:all |the |our )?(?:open|closed) (?:tickets|issues|pull requests|prs)\b"
     # Whose list: "what tickets are assigned to Om Sherikar", "which accounts does Yash Patil own".
     rf"|^\s*(?:what|which|list|show(?: me)?) (?:all |the )?(?:open |closed )?{_LISTED} (?:are |is )?(?:assigned to|worked on by|owned by|opened by)\b"
-    rf"|^\s*(?:what|which) {_LISTED} (?:does|do) .+ (?:own|have|hold|handle|work on)\b",
+    rf"|^\s*(?:what|which) {_LISTED} (?:does|do) .+ (?:own|have|hold|handle|work on)\b"
+    # The CRM, only as a whole list question (_CRM_LIST below): "show me our customers", "open opportunities".
+    rf"|{_CRM_LIST}"
+    # The asker's own lists: "my open tickets", "tickets assigned to me", "which of my accounts". Slack swaps in the asker.
+    # Whole list questions only: "what breaks if my services go down" or "who knows my services" are not lists.
+    rf"|^\s*(?:(?:show|list|give)(?: me)?\s+|(?:what|which) are\s+)?(?:all )?my (?:open |closed )?{_LISTED}(?: (?:are|is) (?:open|closed))?\s*[?.!]*\s*$"
+    rf"|^\s*(?:which|what) of my {_LISTED} (?:are|is) (?:open|closed)\s*[?.!]*\s*$"
+    rf"|^\s*(?:(?:show|list)(?: me)?\s+|(?:what|which)\s+)?(?:open |closed )?{_LISTED} (?:are )?(?:assigned to|owned by) me\s*[?.!]*\s*$",
     re.IGNORECASE,
 )
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:
@@ -204,6 +234,19 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     text = question.strip()
     if not text:
         return "none", {}
+    first, rest = split_compound(text)
+    if rest:
+        # "who owns billing and what breaks if auth goes down": the first question; the reply offers the second.
+        return route(first, tickets)
+    ask_who = _ASK_WHO.search(text)
+    if ask_who and ask_who.start() > 0 and not coordination.pr_reference(text):
+        # "I am new on payments ... who should I talk to about the invoice worker": the person to go to, about
+        # what follows, not a brief. When what follows names nothing ("billing is failing, who should I ping",
+        # "I'm stuck on TKT-101, who should I ask"), who_knows resolves the whole question instead.
+        tail = text[ask_who.start() :]
+        if not text[ask_who.end() :].strip(" ?.!"):
+            return "who_knows", {"name": text}
+        return "who_knows", {"name": tail, "context": text}
     if _GROUPS.search(text):
         return "working_groups", {}
     if _RISK.search(text):
@@ -217,6 +260,8 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
 
         only = only_in(text)
         return "what_changed", {"name": text, **({"only": only} if only else {})}
+    if _ME.search(text):
+        return "person_profile", {"name": text}
     if _LEAVES.search(text):
         # Before blast radius: "what breaks if Arjun leaves" is about a person.
         return "if_person_leaves", {"name": text}
@@ -276,12 +321,40 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     return "who_knows", {"name": text}
 
 
+# A second question joined to the first: "..., and what breaks if auth goes down", "...; who knows X".
+# One that refers back ("and who else has worked on it") is the same question, and is not split.
+_COMPOUND = re.compile(
+    r"^(?P<first>\S+(?:\s+\S+)+?)\s*(?:,?\s+and\s+(?:also\s+)?|;\s*|\?\s+(?:and\s+)?|,\s+(?:also\s+)?)"
+    r"(?P<rest>(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should)\b.+)$",
+    re.IGNORECASE,
+)
+_QUESTION_START = re.compile(r"^\s*(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should|list|show|tell|explain|explore)\b", re.IGNORECASE)
+_REFERS_BACK = re.compile(r"\b(?:it|its|they|them|their|that|this|those|these|else|there|he|she|him|her)\b", re.IGNORECASE)
+
+
+def split_compound(question: str) -> tuple[str, str | None]:
+    """The first question and the one joined after it, or the question and None."""
+    match = _COMPOUND.match((question or "").strip())
+    if match is None or _REFERS_BACK.search(match.group("rest")) or not _QUESTION_START.match(match.group("first")):
+        # "billing is failing, what changed" is one question with its context first.
+        return question, None
+    return match.group("first").strip().rstrip(",;"), match.group("rest").strip()
+
+
+def offer_rest(question: str, result: ToolResult) -> ToolResult:
+    """A compound question answered in its first part offers the second as the next question."""
+    _first, rest = split_compound(question)
+    if rest and result.found:
+        result.answer = f"{result.answer} You also asked “{rest.rstrip('?')}”: ask it on its own for that answer."
+    return result
+
+
 def ask(question: str, scopes: list[str]) -> ToolResult:
     """Route by keywords and run the tool. The whole no-model path in one call."""
     tool, args = route(question)
     if tool == "none":
         return ToolResult(tool="none", answer="Ask a question about the company graph.")
-    return _ROUTED[tool](args, scopes)
+    return offer_rest(question, _ROUTED[tool](args, scopes))
 
 
 def ticket_target(title: str, about: str, graph=None) -> Entity | None:
@@ -395,9 +468,13 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     return result
 
 
-def who_knows(question: str, scopes: list[str]) -> ToolResult:
+def who_knows(question: str, scopes: list[str], context: str | None = None) -> ToolResult:
+    """``context``, when given, is the whole question ``question`` was cut from ("I am new on payments,
+    who should I talk to about X"): resolved instead when the cut names nothing."""
     _, graph = connect()
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
+    if not resolution.found and context and (whole := resolve.resolve_name(context, ANSWER_LABELS, scopes, graph=graph)).found:
+        question, resolution = context, whole
     if not resolution.found:
         # "who knows about refunds" names a topic, not a thing: the graph may still answer.
         return fallback.before_refusing(question, scopes, _miss("who_knows", resolution))
@@ -668,7 +745,7 @@ _ROUTED = {
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth"), args.get("direction")),
     "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
-    "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
+    "who_knows": lambda args, scopes: who_knows(args["name"], scopes, args.get("context")),
     "path_between": lambda args, scopes: algorithms.path_between(args["source"], args.get("target") or "", scopes),
     "load_bearing": lambda args, scopes: algorithms.load_bearing(args.get("limit"), scopes),
     "related_memories": lambda args, scopes: memories.related_memories(args["name"], scopes, args.get("k")),

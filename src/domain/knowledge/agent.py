@@ -366,7 +366,18 @@ def follow_up_choice(question: str, choice: ToolChoice, subject: ThreadSubject) 
 def run_choice(
     choice: ToolChoice, question: str, scopes: list[str], thread: list[dict] | None = None, bot_ids: frozenset[str] = frozenset()
 ) -> tuple[ToolResult, ToolChoice]:
-    """Run the chosen tool. A question that names nothing is retried about the thread's subject."""
+    """Run the chosen tool. A question that names nothing is retried about the thread's subject.
+
+    A compound question the keyword router answered in its first part offers the second as the next question."""
+    result, ran = _run_choice(choice, question, scopes, thread, bot_ids)
+    if ran.via == "keywords":
+        ask_service.offer_rest(question, result)
+    return result, ran
+
+
+def _run_choice(
+    choice: ToolChoice, question: str, scopes: list[str], thread: list[dict] | None = None, bot_ids: frozenset[str] = frozenset()
+) -> tuple[ToolResult, ToolChoice]:
     result = catalogue.get_tool(choice.tool).run(choice.args, scopes)
     if result.found or result.candidates or not thread:
         return result, choice

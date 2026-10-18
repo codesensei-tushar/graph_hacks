@@ -12,17 +12,17 @@ from fastapi.responses import JSONResponse
 
 from src.api.v1.ask import _throttled, cached, timed_out
 from src.domain.knowledge import explorer, tool_guard
-from src.domain.knowledge.ask_api import QuestionTooLong
+from src.domain.knowledge.ask_api import QuestionTooLong, tool_cost
 
 router = APIRouter(prefix="/api/explore", tags=["explore"])
 
 
 @router.get("")
 def explore(request: Request, node: str = "", depth: int = 1):
-    if throttled := _throttled(request):
+    if throttled := _throttled(request, tool_cost("explore", {"depth": depth})):
         return throttled
     try:
-        with tool_guard.guard("explore", node):
+        with tool_guard.public("explore", node):
             return explorer.public_explore(node, depth).to_dict()
     except QuestionTooLong as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)
@@ -32,10 +32,10 @@ def explore(request: Request, node: str = "", depth: int = 1):
 
 @router.get("/neighbors")
 def neighbors(request: Request, node: str = "", relation: str = "", direction: str = "both", depth: int = 1):
-    if throttled := _throttled(request):
+    if throttled := _throttled(request, tool_cost("explore", {"depth": depth})):
         return throttled
     try:
-        with tool_guard.guard("explore", f"{node} {relation} {direction}"):
+        with tool_guard.public("explore", f"{node} {relation} {direction}"):
             return explorer.public_neighbors(node, relation, direction, depth).to_dict()
     except QuestionTooLong as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)

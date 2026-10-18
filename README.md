@@ -58,7 +58,7 @@ Any other client: streamable HTTP at `https://brain.noobsurd.space/mcp`. A Pytho
 python scripts/replay_workspace.py --graph company_demo
 ```
 
-In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 17 replies, from "who owns billing" through "what changed this week" and its "only decisions" follow-up and the Sales questions to the heads-up a new pull request posts, and ends with `fake Slack calls=162 bot messages=19`: the 17 replies and the two Approve cards.
+In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 17 replies, from "who owns billing" through "what changed this week" and its "only decisions" follow-up and the Sales questions to the heads-up a new pull request posts, and ends with `fake Slack calls=<n> bot messages=19`: the 17 replies and the two Approve cards. The call count includes every lookup the bot makes, so it moves as the code does; the 19 messages do not.
 
 ## What it answers
 
@@ -705,7 +705,7 @@ MCP callers read the company-wide `org_shared` scope only. There is no Slack ide
 
 `/mcp` is public, like the ask page. Each request is gated four ways:
 
-- No bearer token: allowed, and counted against the address's budget of about 60 calls a minute (bursts of 30), the same budget as the ask page's questions and explorer walks. Over it, 429 with `Retry-After`.
+- No bearer token: allowed, and counted against the address's budget of about 60 calls a minute (bursts of 30), the same budget as the ask page's questions and explorer walks. A call to a heavy tool (`path_between`, `risk_map`, `onboarding_brief`, or `explore` at depth 2) counts as 5. Over it, 429 with `Retry-After`. Each graph query of a public call stops at 2 seconds, and the whole call at 4.
 - A bearer token while `MCP_TOKEN` is unset: treated as no token.
 - `MCP_TOKEN` as the bearer token: allowed, never counted.
 - Any other bearer token while `MCP_TOKEN` is set: 403.

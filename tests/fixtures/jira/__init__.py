@@ -47,6 +47,9 @@ class FakeJiraClient:
         keys = set(keys)
         return [project for project in load("projects.json")["values"] if project["key"] in keys]
 
+    def all_projects(self, limit: int = 500) -> list[dict]:
+        return load("projects.json")["values"][:limit]
+
     def search_page(self, jql: str, next_page_token: str | None = None, max_results: int = 100, fields=None) -> dict:
         if self.rejected:
             raise CredentialsRejected("POST /rest/api/3/search/jql answered 401")

@@ -24,6 +24,7 @@ and connect buttons, leases, telemetry, fibers (Slack retries plus the event sto
 cover redelivery), post-turn reflect (an agent feature).
 """
 
+import dataclasses
 import logging
 import uuid
 
@@ -36,6 +37,7 @@ from src.domain.memory.writeback import (
     slack_memory_scope_for_turn,
     slack_memory_writer_user_id,
 )
+from src.domain.slack import channel_audience
 from src.domain.slack import channel_membership
 from src.domain.slack.compute import TurnRequest, compute_turn, execute_approved_action
 from src.domain.slack.turn import event_store, turn_control, turn_inbox
@@ -159,8 +161,13 @@ def _memory_scope(workspace: SlackWorkspace, ev: SlackEventInner, is_dm: bool, c
         conversation_info=info,
     )
     if scope.kind == "private_channel" and ev.user:
-        # Speaking in a private channel proves membership; membership events can be dropped.
-        channel_membership.record_membership(channel, ev.user)
+        # Speaking in a private channel proves membership; membership events can be dropped. The channel is
+        # marked private only on evidence (the event or conversations.info), not on the fail-closed default.
+        known_private = ev.channel_type in ("group", "mpim") or (info is not None and info.is_private is True)
+        channel_membership.record_membership(channel, ev.user, is_private=True if known_private else None)
+    internal = channel_audience.is_internal_audience(workspace.client, workspace.team_id, channel, info, is_dm=is_dm, asker=ev.user)
+    if not internal:
+        scope = dataclasses.replace(scope, internal_audience=False)
     return scope, info
 
 
@@ -696,7 +703,13 @@ def _suspend_for_approval(workspace, ev, control, stream, outcome, channel: str,
         tool_input=request.tool_input,
         summary=request.summary,
         container_tag=request.container_tag,
-        extra={"turn_control": {"thread_key": control.thread_key, "turn_id": control.turn_id, "revision": control.revision}},
+        extra={
+            "turn_control": {"thread_key": control.thread_key, "turn_id": control.turn_id, "revision": control.revision},
+            # Fixed at request time, like the container: whether the room may read org_internal.
+            "internal_audience": channel_audience.is_internal_audience(
+                workspace.client, workspace.team_id, channel, is_dm=is_direct_message(ev) or is_direct_conversation_event(ev), asker=ev.user
+            ),
+        },
     )
     if not turn_control.is_thread_turn_current(control):
         return
@@ -1130,7 +1143,9 @@ def run_slack_approval_decision(team_id: str, approval_id: str, approved: bool, 
 
     resolve("Approved", "Approved.")
     try:
-        result = execute_approved_action(approval.tool_name, approval.tool_input, approval.container_tag)
+        result = execute_approved_action(
+            approval.tool_name, approval.tool_input, approval.container_tag, internal_audience=approval.extra.get("internal_audience") is True
+        )
     except Exception:
         log.exception("[company-brain] approved action failed approval=%s", approval_id)
         approvals.mark_approval_terminal(approval_id, "error", from_status="approved")

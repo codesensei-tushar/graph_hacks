@@ -350,6 +350,11 @@ def uninstall_slack_app(web: WebClient) -> str:
     return _revoke_slack_token(web)
 
 
+def revoke_slack_token(web: WebClient) -> str:
+    """auth.revoke the token ``web`` carries: ``revoked`` | ``terminal`` | ``transient``."""
+    return _revoke_slack_token(web)
+
+
 def _revoke_slack_token(web: WebClient) -> str:
     data = slack_call(web, "auth.revoke")
     if data.get("ok") is True:
