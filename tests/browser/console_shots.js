@@ -15,7 +15,7 @@ const SIZES = { desktop: { width: 1440, height: 900 }, phone: { width: 390, heig
     const [name, path, action] = spec.split("|");
     for (const theme of ["light", "dark"]) {
       for (const [size, viewport] of Object.entries(SIZES)) {
-        const ctx = await browser.newContext({ viewport, colorScheme: theme, reducedMotion: "reduce", deviceScaleFactor: 1 });
+        const ctx = await browser.newContext({ viewport, colorScheme: theme, reducedMotion: "reduce", deviceScaleFactor: 1, bypassCSP: true });
         const page = await ctx.newPage();
         page.on("console", (m) => { if (m.type() === "error") problems.push(`${name} ${theme} ${size}: ${m.text()}`); });
         page.on("pageerror", (e) => problems.push(`${name} ${theme} ${size}: ${e}`));
@@ -25,10 +25,19 @@ const SIZES = { desktop: { width: 1440, height: 900 }, phone: { width: 390, heig
           await page.click("#disconnect-open");
           await page.fill("#confirm-input", "quillfern.atlass");
           await page.waitForTimeout(200);
+        } else if (action === "preview") {
+          await page.setInputFiles("#team-upload", require("path").join(__dirname, "..", "..", "examples", "teams", "quillfern-sales.toml"));
+          await page.waitForSelector("#preview.ok");
+        } else if (action === "problems") {
+          await page.fill("#team-file", "[team]\nname = \"Support\"\n\n[[members]]\nname = \"Alex Kim\"\n\n[[runs]]\nname = \"Ticket triage\"\nkind = \"workflow\"\nowner = \"Alex\"\n");
+          await page.click("#check");
+          await page.waitForSelector("#preview.error");
         } else if (action === "filter") {
           await page.fill("#pick-filter", "pay");
           await page.waitForTimeout(200);
         }
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.waitForTimeout(100);
         const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
         if (wide > 0) problems.push(`${name} ${theme} ${size}: horizontal scroll ${wide}px`);
         const file = `${outdir}/${name}-${theme}-${size}.png`;

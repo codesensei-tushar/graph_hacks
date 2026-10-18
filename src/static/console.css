@@ -226,6 +226,48 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
 .setup-step[data-state="todo"] { opacity: 0.7; }
 .setup .form { max-width: 440px; }
 
+/* --- Teams ------------------------------------------------------------------------------------ */
+
+.import { display: grid; gap: 12px; margin: 0 0 8px; }
+.import h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.import > p { margin: 0; color: var(--ink-2); font-size: var(--fs-md); max-width: 56em; }
+.import .import-format { margin: 0; }
+.import-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.file-pick { font-size: var(--fs-sm); }
+.import-label:has(input:focus-visible) .file-pick { outline: 2px solid var(--path); outline-offset: 2px; border-radius: 4px; }
+textarea.team-file { min-height: 220px; padding: 12px 14px; line-height: 1.55; resize: vertical; tab-size: 4; }
+.preview { display: grid; gap: 10px; padding: 16px; border-radius: var(--radius-sm); border: 1px solid var(--line); border-left: 3px solid var(--path); background: var(--surface-2); }
+.preview.ok { border-left-color: var(--ok); }
+.preview.error { border-left-color: var(--danger); }
+.preview p { margin: 0; }
+.preview-lead { color: var(--ink); font-size: var(--fs-md); }
+.preview-contents { color: var(--ink-2); font-size: var(--fs-sm); }
+.preview-counts { margin: 0; }
+.preview .actions { margin: 4px 0 0; }
+.problems { margin: 0; padding-left: 20px; color: var(--ink); font-size: var(--fs-md); }
+.problems li { margin: 4px 0; }
+
+.team-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.team-card { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: inset 0 1px 0 var(--highlight); scroll-margin-top: calc(var(--header) + 24px); transition: border-color var(--slow) var(--ease), box-shadow var(--slow) var(--ease); }
+.team-card.just-added { border-color: var(--path); box-shadow: 0 0 0 3px var(--glow); }
+.team-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+.team-head h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
+.team-counts { font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.team-summary { margin: 6px 0 0; color: var(--ink-2); font-size: var(--fs-md); max-width: 56em; }
+.team-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px 28px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.team-body h4 { margin: 0 0 8px; font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.team-people, .team-runs { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-md); }
+.team-people li, .team-runs li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+.team-people .name, .team-runs .name { color: var(--ink); }
+.team-people .dim, .team-runs .dim { font-size: var(--fs-sm); }
+.team-runs .kind-chip { margin-left: 4px; vertical-align: 0.1em; }
+.no-owner { font-size: var(--fs-sm); color: var(--service); }
+
+/* The Connections page's nudge toward the first team. */
+.nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin: 20px 0 0; padding: 16px 18px; border: 1px dashed var(--line-2); border-radius: var(--radius); background: color-mix(in oklab, var(--surface) 60%, transparent); }
+.nudge p { margin: 0; color: var(--ink); font-size: var(--fs-md); }
+.nudge p span { display: block; color: var(--ink-2); font-size: var(--fs-sm); }
+
 /* --- Ask -------------------------------------------------------------------------------------- */
 
 .console-ask .askbar { margin: 0 0 20px; box-shadow: 0 1px 0 var(--highlight) inset, 0 24px 48px -32px var(--horizon); }
@@ -245,7 +287,8 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
 @media (max-width: 760px) {
   /* The console keeps its two links on a phone; the brand keeps its mark. */
   .console .top nav { display: flex; justify-content: flex-start; gap: 2px; }
-  .console .top nav a { padding: 10px 8px; }
+  .console .top nav a { padding: 10px 6px; letter-spacing: 0.02em; }
+  .top-signin { white-space: nowrap; }
   .console .top .wrap { gap: 10px; }
   .console .brand-name { display: none; }
   .console .top-signin { padding: 0 10px; }
@@ -259,6 +302,8 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
   .meta-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .signin-panel { padding: 22px 18px; }
   .signin-panel .btn { width: 100%; }
+  .team-body { grid-template-columns: minmax(0, 1fr); }
+  .team-card { padding: 18px 16px; }
   /* The containers table keeps three columns on a phone; when it was fetched is on the wide view. */
   table.tools .when { display: none; }
   /* Each container is a small card: its name on top, then status, visibility and items. */

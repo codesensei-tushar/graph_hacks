@@ -118,7 +118,7 @@ class StrictPageTest(unittest.TestCase):
     def test_one_shared_header_on_every_page(self):
         # Every page carries the brand, which page it is, and the two marks console_web.render
         # fills from its one NAV; the files hold no nav of their own.
-        here = {"site": {"home", "team", "explore", "privacy", "signin"}, "console": {"connections", "start", "ask"}}
+        here = {"site": {"home", "team", "explore", "privacy", "signin"}, "console": {"connections", "start", "teams", "ask"}}
         for page in [*sorted(STATIC.glob("*.html")), *CONSOLE_PAGES]:
             text = page.read_text()
             match = re.search(r'<header class="top" data-shell="(site|console)" data-here="([a-z]+)">(.*?)</header>', text, re.S)
@@ -143,7 +143,7 @@ class StrictPageTest(unittest.TestCase):
             self.assertIn('href="/signin"', console_web.render((STATIC / page).read_text(), console_on=True), page)
         console = console_web.render((STATIC / "console" / "ask.html").read_text(), console_on=True)
         self.assertIn(
-            '<nav aria-label="Console"><a href="/console" data-nav="connections">Connections</a><a href="/console/ask" data-nav="ask" aria-current="page">Ask</a></nav>',
+            '<nav aria-label="Console"><a href="/console" data-nav="connections">Connections</a><a href="/console/teams" data-nav="teams">Teams</a><a href="/console/ask" data-nav="ask" aria-current="page">Ask</a></nav>',
             console,
         )
         self.assertIn('id="sign-out"', console)
