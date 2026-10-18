@@ -18,8 +18,10 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from src.api.v1 import console_teams  # noqa: E402
+from src.connectors import registry, sync  # noqa: E402
+from src.connectors.base import Connector, Container, Edge, ExternalUser, Install, InstallInfo, Item, Page  # noqa: E402
 from src.core.config import settings  # noqa: E402
-from src.core import tenancy  # noqa: E402
+from src.core import scheduler, tenancy  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
 from src.db.falkordb_client import connect  # noqa: E402
 from src.domain import orgs  # noqa: E402
@@ -246,6 +248,85 @@ class ConsoleTeamsTest(unittest.TestCase):
         self.session = {**self.session, "role": "member"}
         self.assertEqual(self._post({"file": PAYMENTS_FILE}).status_code, 403)
         self.assertEqual(self.client.get("/console/api/teams").status_code, 200, "members may list")
+
+
+class DayOneJira(Connector):
+    """Jira-shaped: tickets whose about hints are their components, an assignee whose email a
+    team member has. Like Jira's poll, a fetch past the first returns only what changed: nothing."""
+
+    source = "dayonejira"
+    poll_seconds = 600
+
+    def check_credentials(self, install):
+        return InstallInfo(account="bot@dayone.example", site="dayone.example")
+
+    def containers(self, install):
+        return [Container(id=install.container_id("10"), name="PAY", external_id="10")]
+
+    def fetch(self, install, container, cursor):
+        if cursor is not None:
+            return Page(next_cursor=cursor)
+        maya = ExternalUser(id=install.user_id("maya"), source=self.source, external_id="maya", name="Maya Lin", email="maya@dayone.example")
+        tickets = [
+            Item(label="Ticket", id=install.item_id(str(n)), external_id=str(n), container=container.id, name=f"PAY-{n}", title=title, about=about)
+            for n, title, about in ((1, "Retries time out", ("Billing Service",)), (2, "Totals drift", ("Ledger",)), (3, "Crash on login", ("Mobile App",)))
+        ]
+        return Page(items=tickets, users=[maya], edges=[Edge("ASSIGNED", maya.id, tickets[0].id)], next_cursor="polled")
+
+
+class ResyncAfterImportTest(unittest.TestCase):
+    """Jira synced before the teams existed: the import queues a full resync, which makes the tickets
+    about the new Services and links the assignee to the new person."""
+
+    @classmethod
+    def setUpClass(cls):
+        orgs.ensure_control_indexes()
+        registry.register(DayOneJira())
+        cls.org = orgs.create_org("Day One Resync", created_by="TR:UR")
+        cls.install = registry.put(Install(source="dayonejira", id="site1", org=cls.org.id, auth="oauth"))
+
+    @classmethod
+    def tearDownClass(cls):
+        scheduler.cancel_org(cls.org.id)
+        registry.drop(cls.org.id, "dayonejira", "site1")
+        registry._connectors.pop("dayonejira", None)
+        try:
+            falkordb_client.client().select_graph(cls.org.graph).delete()
+        except Exception:
+            pass
+        tenancy.control_graph().query("MATCH (o:Org {id: $id}) DETACH DELETE o", {"id": cls.org.id})
+
+    def _steps(self, rounds: int = 3) -> None:
+        with tenancy.org_context(self.org.ref()):
+            for _ in range(rounds):
+                sync.sync_step("dayonejira", "site1")
+
+    def _about(self) -> dict:
+        return dict(_rows(self.org.ref(), "MATCH (t:Ticket)-[:ABOUT]->(s:Service) RETURN t.name, s.id"))
+
+    def test_a_team_import_resyncs_the_orgs_connectors(self):
+        with tenancy.org_context(self.org.ref()):
+            sync.sync_now("dayonejira", install_id="site1")
+        self._steps()
+        self.assertEqual(_rows(self.org.ref(), "MATCH (t:Ticket) RETURN count(t)"), [[3]])
+        self.assertEqual(self._about(), {}, "no Services yet")
+
+        team = PAYMENTS_FILE.replace('name = "Sam Okafor"', 'name = "Maya Lin"\nemail = "maya@dayone.example"').replace('owner = "Sam Okafor"', 'owner = "Maya Lin"')
+        with tenancy.org_context(self.org.ref()):
+            team_import.import_team(team, team_import.company_id())
+            self.assertTrue(scheduler.exists(sync.job_id("dayonejira", self.install)), "the import queued the resync")
+        self._steps()
+        self.assertEqual(self._about(), {"PAY-1": "billing-service", "PAY-2": "ledger"})
+        self.assertEqual(_rows(self.org.ref(), "MATCH (:ExternalUser {external_id: 'maya'})-[:IS]->(p:Person) RETURN p.id"), [["maya-lin"]])
+
+    def test_an_org_with_no_connectors_queues_nothing(self):
+        org = orgs.create_org("Day One Bare", created_by="TR:UR")
+        try:
+            with tenancy.org_context(org.ref()):
+                self.assertEqual(team_import.resync_connectors(), [])
+        finally:
+            falkordb_client.client().select_graph(org.graph).delete()
+            tenancy.control_graph().query("MATCH (o:Org {id: $id}) DETACH DELETE o", {"id": org.id})
 
 
 if __name__ == "__main__":
