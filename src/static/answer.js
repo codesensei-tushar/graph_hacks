@@ -115,7 +115,9 @@
   const ABOUT_A_DECISION = new Set(["decision_trace", "decision_pressure"]);
   const spoken = (question) => question.toLowerCase().replace(/[\s?.!]+$/, "").replace(/\s+/g, " ").trim();
 
-  function rolesOf(data) {
+  // ``byText``: the subject is the service the answer names first, for one part of a question in two
+  // parts, whose drawing holds both parts' nodes.
+  function rolesOf(data, byText = false) {
     const nodes = data.nodes || [];
     const edges = data.edges || [];
     const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -125,7 +127,7 @@
     if (ABOUT_A_DECISION.has(data.tool)) {
       const about = edges.find((edge) => edge.rel === "ABOUT" && labelOf(edge.source) === "Decision" && labelOf(edge.target) === "Service");
       if (about) service = byId.get(about.target);
-    } else if (SUBJECT_IN_TEXT.has(data.tool)) {
+    } else if (byText || SUBJECT_IN_TEXT.has(data.tool)) {
       const text = (data.answer || "").toLowerCase();
       const named = services.map((node) => [text.indexOf(node.name.toLowerCase()), node]).filter(([at]) => at >= 0);
       named.sort((a, b) => a[0] - b[0] || b[1].name.length - a[1].name.length);
@@ -146,26 +148,39 @@
     };
   }
 
+  // What a part of a question in two parts already answered, in the words a follow-up would use for
+  // the part's subject, so "Ask next" does not offer it again.
+  const ANSWERED_AS = { who_knows: "who knows {service}", blast_radius: "what breaks if {service} goes down" };
+
+  // A question in two parts takes each part's steps in turn, each read with that part's own tool and
+  // text; nothing a part asked or answered is offered.
   function nextQuestions(data, asked) {
-    const roles = rolesOf(data);
+    const parts = data.parts && data.parts.length ? data.parts : null;
+    const views = parts ? parts.map((part) => ({ part, roles: rolesOf({ ...data, tool: part.tool, answer: part.answer }, true) })) : [{ part: data, roles: rolesOf(data) }];
+    const fill = (step, slot, node) => BrainGraph.questionsFor(node).find((q) => spoken(q) === spoken(step.replace(`{${slot}}`, () => node.name)));
+    const seen = new Set([asked, ...(parts || []).map((part) => part.question)].map(spoken));
+    for (const { part, roles } of parts ? views : []) {
+      const step = ANSWERED_AS[part.tool];
+      if (step && roles.service) seen.add(spoken(step.replace("{service}", () => roles.service.name)));
+    }
     const offered = [];
     const offer = (q) => {
-      if (offered.length < MAX_NEXT && spoken(q) !== spoken(asked) && !offered.some((other) => spoken(other) === spoken(q))) offered.push(q);
+      if (offered.length < MAX_NEXT && !seen.has(spoken(q)) && !offered.some((other) => spoken(other) === spoken(q))) offered.push(q);
     };
-    for (const step of NEXT[data.tool] || []) {
-      const slot = (step.match(/\{(\w+)\}/) || [])[1];
-      if (!slot) { offer(step); continue; }
-      const node = roles[slot];
-      const wanted = node && spoken(step.replace(`{${slot}}`, () => node.name));
-      const question = node && BrainGraph.questionsFor(node).find((q) => spoken(q) === wanted);
-      if (question) offer(question);
+    for (const { part, roles } of views) {
+      for (const step of NEXT[part.tool] || []) {
+        const slot = (step.match(/\{(\w+)\}/) || [])[1];
+        if (!slot) { offer(step); continue; }
+        const question = roles[slot] && fill(step, slot, roles[slot]);
+        if (question) offer(question);
+      }
     }
     // The rest come from the drawing, skipping what the answer is already about: a node the
-    // question names, and the subject of a tool whose steps above already ask about it.
-    const about = spoken(asked);
-    const covered = NEXT[data.tool] ? roles.service : undefined;
+    // question (or a part) names, and the subject of a tool whose steps above already ask about it.
+    const about = [asked, ...(parts || []).map((part) => part.question)].map(spoken).join(" | ");
+    const covered = new Set(views.filter(({ part }) => NEXT[part.tool]).map(({ roles }) => roles.service).filter(Boolean));
     for (const node of data.nodes || []) {
-      if (node === covered || about.includes(node.name.toLowerCase())) continue;
+      if (covered.has(node) || about.includes(node.name.toLowerCase())) continue;
       const [first] = BrainGraph.questionsFor(node);
       if (first) offer(first);
     }
@@ -211,8 +226,11 @@
     const onAsk = opts.onAsk;
     out.replaceChildren();
     if (data.notice) out.append(el("p", { class: "notice" }, data.notice));
-    // A question in two parts answers each in its own paragraph, in order.
-    for (const part of data.parts && data.parts.length ? data.parts : [data]) {
+    // A question in two parts answers each in its own paragraph, in order, each under the part as
+    // the server read it ("who to contact about Auth Service"); a quiet rule sets the second apart.
+    const parts = data.parts && data.parts.length ? data.parts : null;
+    for (const [index, part] of (parts || [data]).entries()) {
+      if (parts) out.append(el("p", { class: index ? "part-q then" : "part-q" }, part.question));
       out.append(el("p", { class: part.found ? "text" : "text refused" }, part.answer));
     }
     // risk_map and person_profile return the same grid shape; one table draws both.
