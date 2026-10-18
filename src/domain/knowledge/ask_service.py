@@ -502,12 +502,13 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
     else:
         result = ToolResult(tool="who_knows", answer="")
         rows = graph.ro_query(
-            """
-            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {id: $id})
+            f"""
+            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {{id: $id}})
+            WHERE {SCOPED.format(var="person")}
             RETURN person.id, person.name, type(rel), node.name
             ORDER BY person.name, type(rel)
             """,
-            {"id": target.id},
+            {"id": target.id, "scopes": scopes},
         ).result_set
         for person_id, person, rel, node in rows:
             result.add(PathStep(person, rel, node, from_id=person_id, to_id=target.id, from_label="Person", to_label=target.label))
@@ -826,11 +827,12 @@ def knowers_many(graph, services: list[Entity], scopes: list[str]) -> dict[str, 
         return known
     params = {"ids": list(known), "scopes": scopes, "accounts": list(ACCOUNT_LABELS)}
     rows = graph.ro_query(
-        """
+        f"""
         UNWIND $ids AS id
-        MATCH (node:Service {id: id})
+        MATCH (node:Service {{id: id}})
         WITH id, node
         MATCH (node)<-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]-(person:Person)
+        WHERE {SCOPED.format(var="person")}
         RETURN id, person.id, person.name, type(rel), node.name
         ORDER BY id, person.name, type(rel)
         """,
@@ -938,11 +940,12 @@ def knowers_many(graph, services: list[Entity], scopes: list[str]) -> dict[str, 
         known[service_id].result.add(PathStep(who, rel, pull_request, from_id=who_id, to_id=pr_id, from_label=who_label, to_label="PullRequest"))
         known[service_id].result.add(PathStep(pull_request, "TOUCHES", service, from_id=pr_id, to_id=service_id, from_label="PullRequest", to_label="Service"))
     for service_id, person_id, person, document_id, document, service in graph.ro_query(
-        """
+        f"""
         UNWIND $ids AS id
-        MATCH (service:Service {id: id})
+        MATCH (service:Service {{id: id}})
         WITH id, service
         MATCH (service)<-[:DESCRIBES]-(document:Document)<-[:AUTHORED]-(person:Person)
+        WHERE {SCOPED.format(var="document")} AND {SCOPED.format(var="person")}
         RETURN id, person.id, person.name, document.id, document.name, service.name
         ORDER BY id, document.name
         """,

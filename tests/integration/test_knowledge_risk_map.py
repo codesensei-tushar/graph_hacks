@@ -179,6 +179,27 @@ class RiskMapTest(_Graph):
         finally:
             graph.query("MATCH (s:Service {id: 'notebook-export'}) DETACH DELETE s")
 
+    def test_a_private_document_or_person_never_makes_someone_know_a_thing(self):
+        _, graph = falkordb_client.connect()
+        graph.query(
+            """
+            MATCH (sara:Person {id: 'sara'}), (postgres:Service {id: 'postgres'}), (billing:Service {id: 'billing-service'})
+            CREATE (sara)-[:AUTHORED]->(:Document {id: 'pg-private', name: 'Postgres failover notes', scope: $private})-[:DESCRIBES]->(postgres),
+                   (:Person {id: 'ghost', name: 'Ghost Writer', scope: $private})-[:OWNS]->(billing)
+            """,
+            {"private": PRIVATE},
+        )
+        try:
+            public = ask_service.who_knows("who knows postgres", ORG)
+            self.assertNotIn("Postgres failover notes", str([step.cite() for step in public.path]) + public.answer)
+            self.assertNotIn("Ghost Writer", ask_service.who_knows("who knows billing", ORG).answer)
+            self.assertEqual(_rows(_map())["Postgres"]["flags"]["no_document"], True)
+            private = ask_service.who_knows("who knows postgres", ORG + [PRIVATE])
+            self.assertIn("Sara Lindqvist -[AUTHORED]-> Postgres failover notes", [step.cite() for step in private.path])
+            self.assertIn("Ghost Writer", ask_service.who_knows("who knows billing", ORG + [PRIVATE]).answer)
+        finally:
+            graph.query("MATCH (n) WHERE n.id IN ['pg-private', 'ghost'] DETACH DELETE n")
+
 
 class RiskMapWithSalesTest(_Graph):
     graph_name = SALES_GRAPH
