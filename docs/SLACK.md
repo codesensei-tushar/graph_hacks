@@ -204,6 +204,7 @@ What a conversation can read depends on where you ask:
 | A DM with the bot | Your own scope + `org_shared` + every private channel you belong to |
 
 - If a channel's privacy can't be confirmed, it's treated as private (fails closed).
+- Connected tools' data (`org_internal`: Jira, HubSpot) is read only when everyone in the room is a full member of the workspace: no guest, no one from another company, no Slack Connect. Each verdict is cached two minutes and dropped at once when it can change: `member_joined_channel` and `member_left_channel` (that channel), `channel_shared` and `channel_unshared` (that channel), `team_join` and `user_change` (every channel of the team: someone joined, became a guest or was deactivated). **A channel of 5,000 members or more is always treated as external** when the workspace has any guest or external account: its member list is not read whole, so it is never assumed to be internal. Ask in a DM instead.
 - Private channel membership is stored in FalkorDB. `member_joined_channel` and `member_left_channel` events keep it current, and a `conversations.members` backfill runs when the bot joins a channel and at startup. If you leave a channel, its memory stops showing up in your DMs.
 - Roles rank `owner > admin > member`. Owners are `SLACK_OWNER_ID` and each workspace's installer of record. Admins come from `SLACK_ADMIN_IDS` or `promote`.
 - Graph writes (tickets) wait for an explicit Approve from the person who asked. A card for a turn that was stopped or replaced is cancelled instead.
