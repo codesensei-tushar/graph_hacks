@@ -32,7 +32,6 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 - Headline, two tones: **Ask how your company works.** then, muted, *Every answer shows the path it walked.*
 - Subline: "People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used."
 - The ask box sits in the hero, with the example chips from `/api/ask/tools` under it: the product is the demo. Asking renders the answer and the walk directly below the hero (2.2). A ghost link **How it works** scrolls to 2.5. Add **Watch the demo** only once the video link exists.
-- Under the box, one quiet line: "It never writes Cypher, never guesses, and never shows you what you cannot read."
 - Live counts from `/api/graph/stats`, in mono with tabular numerals and reserved width: for example **{people}** people · **{services}** things teams run · **{decisions}** decisions · **{edges}** edges. Only counts the API returns; if the call fails, the row is not shown.
 - Right side on desktop, below on mobile: a live slice of the graph from `/api/graph/sample`, laid out deterministically (the same input gives the same picture), with node names on hover and focus. Pulses travel along real edges in their true direction (see 3.4). It is real data from the public scope, never a decorative fake graph.
 
@@ -98,18 +97,24 @@ Dark is the design target; light is fully supported. The node families keep thei
 
 | Token | Dark | Light |
 | --- | --- | --- |
-| `--bg` | `#0B0D12` | `#F6F4EF` |
-| `--surface` | `#11141B` | `#FCFCFB` |
-| `--surface-2` | `#171B24` | `#F0EEE8` |
-| `--line` | `#252A36` | `#D9D7CF` |
-| `--ink` | `#ECEEF3` | `#14181F` |
-| `--ink-2` | `#A7AEBE` | `#52514E` |
-| `--ink-3` | `#7D8597` | `#6E6C66` |
+| `--bg` | `#08091A` | `#F6F7FB` |
+| `--surface` | `#0F1122` | `#FFFFFF` |
+| `--surface-2` | `#15182B` | `#EFF1F8` |
+| `--line` | `rgba(200, 205, 255, 0.09)` | `rgba(18, 22, 48, 0.10)` |
+| `--line-2` | `rgba(200, 205, 255, 0.16)` | `rgba(18, 22, 48, 0.18)` |
+| `--ink` | `#EEF0FB` | `#11142A` |
+| `--ink-2` | `#AAB0CF` | `#484D68` |
+| `--ink-3` | `#8288AB` | `#62678A` |
 | `--path` (accent) | `#2DD4E6` | `#0E8FA6` |
+| `--horizon` | `#4B50E6` | `#5257E8` |
+| `--horizon-glow` | `rgba(75, 80, 230, 0.44)` | `rgba(82, 87, 232, 0.26)` |
+| `--horizon-haze` | `rgba(38, 43, 143, 0.45)` | `rgba(223, 225, 251, 0.85)` |
 | `--person` | `#7C8CFF` | `#3B5BDB` |
 | `--service` | `#F0703A` | `#D9541F` |
 | `--knowledge` | `#2EC48C` | `#16946A` |
 | `--other` | `#8B93A7` | `#807E77` |
+
+Neutrals are cool and borders are alpha hairlines. The indigo horizon (`--horizon*`) glows behind the ask box only; it is never an accent. Text that sits over the glow uses `--ink-2` or stronger, because `--ink-3` drops under 4.5:1 at its peak.
 
 The values are a starting point; the UI session may tune them.
 
@@ -117,7 +122,8 @@ Check every text pair against WCAG AA (4.5:1 for body, 3:1 for large text) and a
 
 ### 3.2 Type
 
-- Geist Sans for headings and body: headings at weight 600, tight tracking (-0.02em).
+- Geist Sans for headings and body. Weights are 400, 500 and 600 only, plus 420 for the hero headline, whose one heavy word (*path*, 600) carries a dotted underline because Geist has no italic. Section headings are 500.
+- One type scale: `--fs-xs` 12 px, `--fs-sm` 13, `--fs-md` 15, `--fs-base` 16, `--fs-lg` 18 (the answer text), `--fs-xl` 24. Every font size in `style.css` is one of these, an `em` value or a heading clamp; `test_landing_page` checks it.
 - Geist Mono for the graph's vocabulary: `A -[REL]-> B`, tool names, counts and eyebrow labels.
 - Vendor both as `woff2` in `src/static/fonts/` (SIL Open Font License; add the licence file), about 115 KB together, preloaded. Use `font-display: swap` with a size-adjusted fallback so the swap does not shift the layout. When the deck is republished in phase 5, it moves to the same two faces.
 - Scale: hero 56 to 64 px on desktop and 36 to 40 px at 390 px; section headings 32 to 40 px; body 16 to 18 px with a line height of 1.6.
