@@ -283,17 +283,11 @@ _ACCOUNT_QUERIES = {
 
 
 def _accounts(graph, scopes: list[str]) -> dict[str, Entity]:
-    """Each readable, unlinked connector user's identity: user id -> the identity as shown ("Yash Patil (Jira, HubSpot)")."""
+    """Each readable, unlinked connector user's identity: user id -> the identity as shown ("Yash Patil
+    (Jira, HubSpot)"). One read of the users, however many there are."""
     from src.domain.knowledge import people  # people reads the connectors' admin mappings; imported when ranking
 
-    shown: dict[str, Entity] = {}
-    for user_id, name in graph.ro_query(f"MATCH (a:ExternalUser) WHERE {_UNLINKED} RETURN a.id, a.name", {"scopes": scopes}).result_set:
-        if user_id not in shown:
-            entity = people.shown(graph, Entity(user_id, name, people.ACCOUNT), scopes)
-            if entity.label == people.ACCOUNT:
-                for member in people.identity_ids(graph, entity, scopes):
-                    shown[member] = entity
-    return shown
+    return people.identities(graph, scopes)
 
 
 def _tally(graph, measure: str, scopes: list[str], accounts: dict[str, Entity] | None = None) -> dict[str, _Tally]:
@@ -444,10 +438,13 @@ def _touches(graph, target: Entity, scopes: list[str]) -> list[Touch]:
     """Every dated thing anyone did on the target, through their own edges."""
     params = {"id": target.id, "scopes": scopes}
     label = target.label
+    anchor = resolve.label_of(target)  # each read seeks the target by its label's id index, then walks out
     touches: list[Touch] = []
     for person_id, person, rel, pr_id, pr, updated in graph.ro_query(
         f"""
-        MATCH (p:Person)<-[:IS]-(:GitHubUser)-[r:AUTHORED|REVIEWED]->(pr:PullRequest)-[:TOUCHES]->(x {{id: $id}})
+        MATCH (x:{anchor} {{id: $id}})
+        WITH x
+        MATCH (p:Person)<-[:IS]-(:GitHubUser)-[r:AUTHORED|REVIEWED]->(pr:PullRequest)-[:TOUCHES]->(x)
         WHERE {SCOPED.format(var="pr")}
         RETURN p.id, p.name, type(r), pr.id, pr.name, coalesce(pr.updated_at, '')
         """,
@@ -462,7 +459,9 @@ def _touches(graph, target: Entity, scopes: list[str]) -> list[Touch]:
             touches.append(Touch(person_id, person, at, f"{_VERBS[rel]} {pr}", steps))
     for person_id, person, memory_id, text, scope, channel_id, created, ts in graph.ro_query(
         f"""
-        MATCH (p:Person)<-[:IS]-(:SlackUser)-[:SAID]->(m:Memory)-[:MENTIONS]->(x {{id: $id}})
+        MATCH (x:{anchor} {{id: $id}})
+        WITH x
+        MATCH (p:Person)<-[:IS]-(:SlackUser)-[:SAID]->(m:Memory)-[:MENTIONS]->(x)
         WHERE m.scope IN $scopes AND {_LIVE}
         RETURN p.id, p.name, m.id, m.text, m.scope, m.channel_id, m.created_at, m.ts
         """,
@@ -480,7 +479,9 @@ def _touches(graph, target: Entity, scopes: list[str]) -> list[Touch]:
             touches.append(Touch(person_id, person, at, f"said “{name}”", steps, memory))
     for person_id, person, rel, decision_id, decision, decided in graph.ro_query(
         f"""
-        MATCH (p:Person)-[r:PROPOSED|APPROVED]->(d:Decision)-[:ABOUT]->(x {{id: $id}})
+        MATCH (x:{anchor} {{id: $id}})
+        WITH x
+        MATCH (p:Person)-[r:PROPOSED|APPROVED]->(d:Decision)-[:ABOUT]->(x)
         WHERE {SCOPED.format(var="d")}
         RETURN p.id, p.name, type(r), d.id, d.name, d.decided_at
         """,
@@ -495,7 +496,9 @@ def _touches(graph, target: Entity, scopes: list[str]) -> list[Touch]:
             touches.append(Touch(person_id, person, at, f"{_VERBS[rel]} *{decision}*", steps))
     for person_id, person, ticket_id, ticket, updated in graph.ro_query(
         f"""
-        MATCH (p:Person)-[:WORKED_ON]->(t:Ticket)-[:ABOUT]->(x {{id: $id}})
+        MATCH (x:{anchor} {{id: $id}})
+        WITH x
+        MATCH (p:Person)-[:WORKED_ON]->(t:Ticket)-[:ABOUT]->(x)
         WHERE {SCOPED.format(var="t")}
         RETURN p.id, p.name, t.id, t.name, coalesce(t.updated_at, t.created_at, '')
         """,

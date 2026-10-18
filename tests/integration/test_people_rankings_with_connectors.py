@@ -105,6 +105,26 @@ class PeopleRankingsWithConnectorsTest(unittest.TestCase):
         # Two assignees by name, the rest counted.
         self.assertIn("2 more ticket assignees", ask_first)
 
+    def test_ranking_reads_the_users_once_however_many_there_are(self):
+        from src.core import query_metrics
+
+        def queries() -> int:
+            query_metrics.reset()
+            _ask("who is overloaded")
+            return query_metrics.snapshot()["total"]["count"]
+
+        query_metrics.install()
+        self.addCleanup(query_metrics.uninstall)
+        self.addCleanup(query_metrics.reset)
+        before = queries()
+        self.assertGreater(before, 0)
+        crowd = [ExternalUser(id=JIRA.user_id(f"x{n}"), source="jira", external_id=f"x{n}", name=f"Extra {n}", email=f"extra{n}@corp.example") for n in range(60)]
+        graph.write_page(JIRA, Page(items=[], users=crowd, edges=[]))
+        try:
+            self.assertEqual(queries(), before, "the query count must not grow with the number of connector users")
+        finally:
+            falkordb_client.connect()[1].query("MATCH (u:ExternalUser) WHERE u.name STARTS WITH 'Extra ' DETACH DELETE u")
+
 
 if __name__ == "__main__":
     unittest.main()

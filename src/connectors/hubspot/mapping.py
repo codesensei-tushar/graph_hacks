@@ -107,12 +107,21 @@ def people(pairs: list[str]) -> dict[str, str]:
     return found
 
 
+def is_person(owner: dict) -> bool:
+    """A HubSpot owner that is a person. A queue (``type`` "QUEUE") owns records but is nobody to ask."""
+    return str(owner.get("type") or "PERSON").upper() == "PERSON"
+
+
 def owner_user(install: Install, owner: dict, email: str | None = None) -> ExternalUser:
     """``email``, when given, is the admin's (``people``) and replaces the HubSpot login for linking."""
     owner_id = str(owner["id"])
-    email = (email or owner.get("email") or "").strip().lower()
+    admin = (email or "").strip().lower()
+    email = admin or (owner.get("email") or "").strip().lower()
     name = " ".join(part for part in ((owner.get("firstName") or "").strip(), (owner.get("lastName") or "").strip()) if part)
-    return ExternalUser(id=install.user_id(owner_id), source=install.source, external_id=owner_id, name=name or display_name(email, owner_id), email=email)
+    return ExternalUser(
+        id=install.user_id(owner_id), source=install.source, external_id=owner_id, name=name or display_name(email, owner_id), email=email,
+        email_from="admin" if admin else "api", account_type=str(owner.get("type") or "").strip().lower(),
+    )
 
 
 def display_name(email: str, owner_id: str) -> str:

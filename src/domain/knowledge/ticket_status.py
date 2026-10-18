@@ -135,7 +135,7 @@ def _titled(graph, question: str, scopes: list[str]) -> list[tuple[str, str, str
             CALL db.idx.fulltext.queryNodes('Ticket', $q) YIELD node AS t, score
             WHERE {SCOPED.format(var="t")} AND t.name IS NOT NULL
             RETURN t.id, t.name, coalesce(t.title, ''), score
-            ORDER BY score DESC
+            ORDER BY score DESC, t.name
             LIMIT $k
             """,
             {"q": query, "scopes": list(scopes), "k": TITLE_HITS + 1},
@@ -209,7 +209,9 @@ def read(graph, target: Entity, scopes: list[str], result: ToolResult) -> Ticket
 
     for rel, who_id, who, who_label, source in graph.ro_query(
         f"""
-        MATCH (who)-[r:ASSIGNED|OPENED|WORKED_ON]->(:Ticket {{id: $id}})
+        MATCH (ticket:Ticket {{id: $id}})
+        WITH ticket
+        MATCH (who)-[r:ASSIGNED|OPENED|WORKED_ON]->(ticket)
         WHERE labels(who)[0] IN ['Person', 'GitHubUser', 'ExternalUser'] AND {SCOPED.format(var="who")}
         OPTIONAL MATCH (who)-[:IS]->(person:Person)
         WHERE {SCOPED.format(var="person")}

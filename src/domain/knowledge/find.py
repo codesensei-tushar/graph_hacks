@@ -132,16 +132,28 @@ CONTEXT = {
 }
 _ROWS = _q(
     """
-    MATCH (x)
-    WHERE labels(x)[0] = $label AND x.name IS NOT NULL AND {scoped_x}
+    MATCH (x:{label})
+    WHERE labels(x)[0] = '{label}' AND x.name IS NOT NULL AND {scoped_x}
     RETURN x.id, x.name, coalesce(x.title, ''), x.kind, x.state, x.merged, x.decided_at, coalesce(x.role, ''), coalesce(x.status, ''), coalesce(x.industry, '')
     """
 )
+
+
+def _rows_query(label: str) -> str:
+    """``_ROWS`` for one of ``LABELS``: a scan of that label, never of every node."""
+    if label not in LABELS:
+        raise ValueError(f"find lists {', '.join(LABELS)}, not {label!r}")
+    return _ROWS.replace("{label}", label)
+
+
 # The deals on each of $ids: who works each one, and its stage.
 _DEALS = _q(
     """
-    MATCH (who)-[r:WORKED_ON]->(x:Service)
-    WHERE x.id IN $ids AND r.evidence = 'deal' AND labels(who)[0] IN ['Person', 'ExternalUser'] AND coalesce(who.scope, 'org_shared') IN $scopes
+    UNWIND $ids AS id
+    MATCH (x:Service {id: id})
+    WITH x
+    MATCH (who)-[r:WORKED_ON]->(x)
+    WHERE r.evidence = 'deal' AND labels(who)[0] IN ['Person', 'ExternalUser'] AND coalesce(who.scope, 'org_shared') IN $scopes
     RETURN x.id, coalesce(r.stage, ''), who.id, who.name, labels(who)[0], who.source, x.name
     """
 )
@@ -242,7 +254,7 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
         named[key] = resolution.entity
         candidates.extend(name for name in resolution.candidate_names() if name not in candidates)
 
-    rows = {row[0]: Row(row[0], row[1], row[2], row[3], _state(row[4], row[5]), row[6], row[7], row[8], row[9]) for row in graph.ro_query(_ROWS, {"label": chosen, "scopes": scopes}).result_set}
+    rows = {row[0]: Row(row[0], row[1], row[2], row[3], _state(row[4], row[5]), row[6], row[7], row[8], row[9]) for row in graph.ro_query(_rows_query(chosen), {"scopes": scopes}).result_set}
     edges: dict[str, list[list]] = {}
     for key, entity in named.items():
         passing: dict[str, list[list]] = {}

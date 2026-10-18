@@ -181,6 +181,10 @@ class ExternalUser:
     external_id: str
     name: str
     email: str = ""
+    # Where ``email`` came from: "api" (the vendor shows it) or "admin" (an admin mapped it: CONNECTOR_*_PEOPLE).
+    email_from: str = "api"
+    # The vendor's kind of account when it says ("atlassian", "customer"; HubSpot's "person"); "" when it does not.
+    account_type: str = ""
 
 
 @dataclass(frozen=True)

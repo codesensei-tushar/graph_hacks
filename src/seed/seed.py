@@ -57,6 +57,20 @@ def _merge_node(graph, label: str, row: dict) -> None:
     graph.query(f"MERGE (n:{_identifier(label)} {{id: $id}}){set_clause}", {"id": row["id"], **props})
 
 
+# Labels a decision's based_on or decided_in may point at, in the order an id is looked for.
+_SOURCE_LABELS = ("Document", "Ticket", "Decision", "Chat", "Service", "Channel")
+
+
+def _label_of(graph, node_id: str, known: dict[str, str]) -> str | None:
+    """The label of ``node_id``: from what this seed wrote, else one id-index seek per label (never a
+    scan of every node). None when nothing has that id."""
+    if node_id in known:
+        return known[node_id]
+    query = " UNION ALL ".join(f"MATCH (n:{label} {{id: $id}}) RETURN '{label}' AS label" for label in _SOURCE_LABELS)
+    rows = graph.query(query, {"id": node_id}).result_set
+    return rows[0][0] if rows else None
+
+
 def _link(graph, from_label: str, from_id: str, rel: str, to_label: str, to_id: str) -> None:
     graph.query(
         f"MATCH (a:{_identifier(from_label)} {{id: $a}}), (b:{_identifier(to_label)} {{id: $b}}) MERGE (a)-[:{_identifier(rel)}]->(b)",
@@ -155,6 +169,14 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         _link(graph, "Ticket", ticket["id"], "ABOUT", "Service", ticket["service"])
         _link(graph, "Person", ticket["owner"], "WORKED_ON", "Ticket", ticket["id"])
 
+    # What this seed writes, by id, so a decision's sources are matched by their label.
+    known = {
+        **{row["id"]: "Service" for row in company.SERVICES},
+        **{row["id"]: "Document" for row in company.DOCUMENTS},
+        **{row["id"]: "Ticket" for row in company.TICKETS},
+        **{row["id"]: "Decision" for row in company.DECISIONS},
+        **{row["id"]: "Chat" for row in company.CHATS},
+    }
     # Nodes first: a decision may supersede one listed after it.
     for decision in company.DECISIONS:
         _merge_node(graph, "Decision", {key: decision.get(key) for key in ("id", "name", "summary", "aliases", "decided_at", "scope")})
@@ -168,17 +190,12 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         for service in [about] if isinstance(about, str) else about:
             _link(graph, "Decision", decision["id"], "ABOUT", "Service", service)
         for source in decision.get("based_on") or []:
-            graph.query(
-                "MATCH (d:Decision {id: $d}), (source {id: $s}) MERGE (d)-[:BASED_ON]->(source)",
-                {"d": decision["id"], "s": source},
-            )
+            if (label := _label_of(graph, source, known)) is not None:
+                _link(graph, "Decision", decision["id"], "BASED_ON", label, source)
         if decision.get("supersedes"):
             _link(graph, "Decision", decision["id"], "SUPERSEDES", "Decision", decision["supersedes"])
-        if decision.get("decided_in"):
-            graph.query(
-                "MATCH (d:Decision {id: $d}), (place {id: $p}) MERGE (d)-[:DECIDED_IN]->(place)",
-                {"d": decision["id"], "p": decision["decided_in"]},
-            )
+        if decision.get("decided_in") and (label := _label_of(graph, decision["decided_in"], known)) is not None:
+            _link(graph, "Decision", decision["id"], "DECIDED_IN", label, decision["decided_in"])
 
     for chat in company.CHATS:
         _merge_node(graph, "Chat", {key: chat[key] for key in ("id", "name", "summary")})
@@ -213,7 +230,7 @@ def _merge_memories(graph, real_graph, company: ModuleType) -> None:
 
     Merged by id, so a second run creates nothing. Only the wording is written back; a
     memory forgotten since keeps its flag, and a Slack user keeps the name Slack gave it."""
-    from src.domain.memory.memory_service import mentioned_ids
+    from src.domain.memory.memory_service import mentioned
     from src.domain.memory.writeback import SHARED_TEAM_BRAIN_CONTAINER_TAG as SHARED
 
     names = {person["id"]: person["name"] for person in company.PEOPLE}
@@ -245,8 +262,8 @@ def _merge_memories(graph, real_graph, company: ModuleType) -> None:
                 "speaker": names[memory["author"]],
             },
         )
-        for node_id in mentioned_ids(real_graph, text, [SHARED]):
-            graph.query("MATCH (m:Memory {id: $m}), (n {id: $n}) MERGE (m)-[:MENTIONS]->(n)", {"m": memory["id"], "n": node_id})
+        for label, node_id in mentioned(real_graph, text, [SHARED]):
+            _link(graph, "Memory", memory["id"], "MENTIONS", label, node_id)
 
 
 def _memory_name(text: str, size: int = 60) -> str:
