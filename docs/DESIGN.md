@@ -32,7 +32,7 @@ The whole first screen (between 640 and 940 px tall), on a curved horizon: navy 
 
 - A centred 760 px block, left-aligned inside: the eyebrow `Graph Hacks · Track 03 · Company Brain on FalkorDB`; the headline in a light weight, **Ask how your company works.** then, muted, *Every answer shows the path it walked.*, with *path* and *walked* heavy, slanted and dotted-underlined; the composer; the example chips from `/api/ask/tools`.
 - The composer is the centre of the page: a wide frosted card with the question on top, a "Public channels only" status pill (true: the page reads `org_shared`) and a round send button named "Ask". The product is the demo: asking renders the answer and the walk in 2.2.
-- At the foot of the screen: the subline as a small caption at the bottom-left ("People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.") and, at the bottom-right, **Take the 60-second tour** beside **How it works ↗** (2.1b). Add **Watch the demo** only once the video link exists.
+- At the foot of the screen, bottom-right: **Take the 60-second tour** (2.1b), a ghost button; under 760 px it sits under the chips. Add **Watch the demo** only once the video link exists.
 - The nav is sparse, uppercase and spread across the top, with **Graph** after **Ask**.
 
 ### 2.1b The 60-second tour
