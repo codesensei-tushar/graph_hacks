@@ -264,7 +264,12 @@ def _onboard(request: TurnRequest, write_tag: str | None, names: dict[str, str])
     container = write_tag or SHARED_TEAM_BRAIN_CONTAINER_TAG
     try:
         args = onboard_command.command_args(match.group(1) if match else "")
-        args["profiles"] = {user: name for user in onboard_command.unlinked_mentions(args, request.read_tags) if (name := _profile_name(request.workspace, user))}
+        unlinked = set(onboard_command.unlinked_mentions(args, request.read_tags))
+        # A new person may be named by their handle when Slack has nothing better; someone already
+        # here keeps their name unless Slack has a real or display name for them.
+        args["profiles"] = {
+            user: name for user in onboard_command.mentioned_users(args) if (name := _profile_name(request.workspace, user, handle=user in unlinked))
+        }
         args["asker_slack_user_id"] = request.asker_slack_user_id
         args["channel_id"] = request.channel
         if decided_at := _epoch_millis(request.event.ts):
@@ -279,20 +284,28 @@ def _onboard(request: TurnRequest, write_tag: str | None, names: dict[str, str])
         approval=TurnApproval(
             tool_name=onboard_command.TOOL_NAME,
             tool_input=args,
-            summary=f"{onboard_command.card(team)}. Visible to {scope_label(container, names)}.",
+            summary=f"{onboard_command.card(team)}. Visible to {scope_label(container, names)}.{_onboard_approver()}",
             container_tag=container,
         ),
     )
 
 
-def _profile_name(workspace, slack_user_id: str) -> str | None:
-    """The name Slack shows for a full member; None for a bot, a guest, or a failed lookup."""
+def _onboard_approver() -> str:
+    """In a console org an owner or admin approves onboarding (``turn_service``); say so on the card."""
+    from src.core import tenancy
+
+    return "" if tenancy.is_legacy() else " An owner or admin approves this."
+
+
+def _profile_name(workspace, slack_user_id: str, handle: bool = True) -> str | None:
+    """The name Slack shows for a full member: the real name, then the display name, then (with
+    ``handle``) the login handle. None for a bot, a guest, or a failed lookup."""
     from src.domain.slack.workspace import is_workspace_member
 
     info = workspace.client.user_info(slack_user_id)
     if info is None or not is_workspace_member(info):
         return None
-    return info.real_name or info.display_name or info.name or None
+    return info.real_name or info.display_name or (info.name if handle else None) or None
 
 
 def _change_role(asker: str, text: str, raw_text: str, bot_user_id: str | None) -> str:

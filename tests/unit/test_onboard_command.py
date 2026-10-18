@@ -53,6 +53,12 @@ class TeamDataTest(unittest.TestCase):
             ],
         )
 
+    def test_a_linked_person_known_by_a_handle_takes_the_slack_name_and_a_real_name_stays(self):
+        args = command_args("Sales | members: <@UAMY> <@UPRIYA>") | {"profiles": {"UAMY": "Amy Member", "UPRIYA": "Priya S."}}
+        lookup = FakeLookup(slack={"UAMY": "amy", "UPRIYA": "priya"})
+        lookup.linked_person = lambda user: {"UAMY": ("amy", "amy"), "UPRIYA": ("priya", "Priya Shah")}.get(user)
+        self.assertEqual([member["name"] for member in team_data(args, lookup)["members"]], ["Amy Member", "Priya Shah"])
+
     def test_owners_default_to_the_first_member_and_a_named_owner_joins_the_team(self):
         runs = team_data(self.args, self.lookup)["runs"]
         self.assertEqual([(row["name"], row["kind"], row["owner"]) for row in runs], [("Renewals", "process", "priya"), ("HubSpot", "system", "slack-unoor"), ("Pricing playbook", "playbook", "priya")])

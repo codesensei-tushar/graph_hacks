@@ -26,6 +26,7 @@ from src.core.tenancy import LEGACY_ORG_ID, LEGACY_ORG_NAME, LEGACY_ORG_SLUG, Or
 log = logging.getLogger(__name__)
 
 ROUTE_CACHE_SECONDS = 60.0
+_SLUG_ATTEMPTS = 5
 _SLUG = re.compile(r"[^a-z0-9]+")
 _FIELDS = ("id", "slug", "name", "graph", "legacy", "created_by", "created_at")
 
@@ -75,6 +76,12 @@ def ensure_control_indexes() -> None:
         except Exception as error:
             if "already" not in str(error).lower():
                 raise
+    # Two sign-ups with one name must not both get its slug: _slug_for reads, then create_org writes.
+    try:
+        graph.create_node_unique_constraint("Org", "slug")
+    except Exception as error:
+        if "already" not in str(error).lower():
+            log.warning("[orgs] the unique constraint on Org.slug could not be created: %s", error)
 
 
 def get_org(org_id: str) -> Org | None:
@@ -118,6 +125,7 @@ def list_orgs() -> list[Org]:
 def _slug_for(name: str) -> str:
     base = _SLUG.sub("-", (name or "").lower()).strip("-")[:40] or "org"
     taken = {row[0] for row in control_graph().query("MATCH (o:Org) WHERE o.slug STARTS WITH $base RETURN o.slug", {"base": base}).result_set}
+    taken.add(LEGACY_ORG_SLUG)  # the legacy org's, even before its node exists
     if base not in taken:
         return base
     index = 2
@@ -174,16 +182,31 @@ def create_org(name: str, created_by: str | None) -> Org:
     if not name:
         raise ValueError("an org needs a name")
     ulid = tenancy.new_ulid()
-    org = Org(id=ulid, slug=_slug_for(name), name=name, graph=f"org_{ulid}", legacy=False, created_by=created_by, created_at=_now_ms())
-    build_org_indexes(org.ref())
-    ensure_company(org.ref())
-    control_graph().query(
-        """
-        CREATE (o:Org {id: $id, slug: $slug, name: $name, graph: $graph, legacy: false,
-                       created_by: $created_by, created_at: $created_at})
-        """,
-        {key: value for key, value in org.to_dict().items() if key != "legacy"},
-    )
+    # The node first, so the unique constraint on Org.slug settles a race before anything is built:
+    # the loser takes the next free slug. The Company node's id is the slug, so it comes after.
+    for _attempt in range(_SLUG_ATTEMPTS):
+        org = Org(id=ulid, slug=_slug_for(name), name=name, graph=f"org_{ulid}", legacy=False, created_by=created_by, created_at=_now_ms())
+        try:
+            control_graph().query(
+                """
+                CREATE (o:Org {id: $id, slug: $slug, name: $name, graph: $graph, legacy: false,
+                               created_by: $created_by, created_at: $created_at})
+                """,
+                {key: value for key, value in org.to_dict().items() if key != "legacy"},
+            )
+            break
+        except Exception as error:
+            if "unique constraint" not in str(error).lower():
+                raise
+            log.info("[orgs] slug %s was taken meanwhile; trying the next one", org.slug)
+    else:
+        raise RuntimeError(f"no free slug for {name!r} after {_SLUG_ATTEMPTS} tries")
+    try:
+        build_org_indexes(org.ref())
+        ensure_company(org.ref())
+    except Exception:
+        control_graph().query("MATCH (o:Org {id: $id}) DETACH DELETE o", {"id": org.id})
+        raise
     log.info("[orgs] created org=%s graph=%s", org.id, org.graph)
     return org
 

@@ -90,12 +90,21 @@ def command_args(body: str) -> dict:
     return args
 
 
+def mentioned_users(args: dict) -> list[str]:
+    """Every Slack user the arguments mention, once, in order."""
+    return list(dict.fromkeys(MENTION.findall(" ".join([*args.get("members", []), *args.get("runs", [])]))))
+
+
 def unlinked_mentions(args: dict, scopes: list[str] | None = None) -> list[str]:
     """The Slack users in the arguments with no person yet: the caller looks up their names."""
     _, graph = connect()
     lookup = GraphLookup(graph, scopes)
-    users = dict.fromkeys(MENTION.findall(" ".join([*args.get("members", []), *args.get("runs", [])])))
-    return [user for user in users if lookup.linked_person(user) is None]
+    return [user for user in mentioned_users(args) if lookup.linked_person(user) is None]
+
+
+def _handle_like(name: str | None) -> bool:
+    """A Slack login handle rather than a person's name: one lowercase word, like ``amy`` or ``amy.member``."""
+    return not name or (" " not in name.strip() and name == name.lower())
 
 
 def team_data(args: dict, lookup: GraphLookup) -> dict:
@@ -108,7 +117,11 @@ def team_data(args: dict, lookup: GraphLookup) -> dict:
         if user not in members:
             linked = lookup.linked_person(user)
             if linked is not None:
-                members[user] = {"id": linked[0], "name": linked[1], "slack_id": user}
+                # A stored name that is only a handle ("amy") gives way to the name Slack shows; any other
+                # stored name stays. The caller gives a linked person's real or display name, never the handle.
+                stored = linked[1]
+                name = profiles.get(user) if profiles.get(user) and _handle_like(stored) else stored
+                members[user] = {"id": linked[0], "name": name, "slack_id": user}
             elif profiles.get(user):
                 # A new person, never someone already here matched by name.
                 members[user] = {"id": f"slack-{user.lower()}", "name": profiles[user], "slack_id": user}
