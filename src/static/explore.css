@@ -1,0 +1,11 @@
+/* Company Brain: exploring from an answer (app.js, graph.js), on the tokens in style.css.
+   Only new classes live here; the chips themselves are the page's .chip. */
+
+/* "Ask next" after an answer and "Try instead" after a refusal: one labelled row of chips,
+   after the edge lines and before the footer line, so nothing above it moves. */
+.next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 18px 0 0; }
+.next-label { margin: 0; font: 500 0.72rem/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-3); }
+.next-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+
+/* A node in the answer drawing that asks a question when clicked. */
+.canvas .node.askable { cursor: pointer; }

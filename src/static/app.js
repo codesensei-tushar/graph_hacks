@@ -319,6 +319,93 @@
     head.insertBefore(copy, $(".replay", head));
   }
 
+  // --- What to ask next --------------------------------------------------------------------------
+
+  // Up to three follow-ups after an answer, built from its own nodes and path: the tool's next
+  // steps first, filled from the roles rolesOf reads, then the first question of each other node in
+  // order. A filled step is offered only when it is one of BrainGraph.questionsFor's questions for
+  // that node, or names no node, so every chip is a question the integration test has asked on a
+  // fresh seed (tests/integration/test_explore_questions.py). {service} is what the answer is about,
+  // {owner} the person who OWNS it, {proposer} who PROPOSED the decision, {person} the first person.
+  const NEXT = {
+    who_owns: ["what breaks if {service} goes down", "what if {owner} leaves", "what does {service} depend on"],
+    who_knows: ["what breaks if {service} goes down", "what if {owner} leaves", "what does {service} depend on"],
+    blast_radius: ["who knows {service}", "which services are load-bearing"],
+    decision_trace: ["who knows {service}", "what if {proposer} leaves"],
+    if_person_leaves: ["who knows {service}", "what breaks if {service} goes down"],
+    path_between: ["what if {person} leaves", "who knows {service}"],
+    load_bearing: ["what breaks if {service} goes down", "who knows {service}"],
+    onboarding_brief: ["what if {person} leaves", "what breaks if {service} goes down"],
+  };
+  const MAX_NEXT = 3;
+  // The answer text names its subject first where the drawing does not start with it: "If Auth
+  // Service goes down, ..." draws its dependents first, and load_bearing draws the edges into the top.
+  const SUBJECT_IN_TEXT = new Set(["blast_radius", "load_bearing"]);
+  const spoken = (question) => question.toLowerCase().replace(/[\s?.!]+$/, "").replace(/\s+/g, " ").trim();
+
+  function rolesOf(data) {
+    const nodes = data.nodes || [];
+    const edges = data.edges || [];
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const labelOf = (id) => (byId.get(id) || {}).label;
+    const services = nodes.filter((node) => node.label === "Service");
+    let service = services[0];
+    if (data.tool === "decision_trace") {
+      const about = edges.find((edge) => edge.rel === "ABOUT" && labelOf(edge.source) === "Decision" && labelOf(edge.target) === "Service");
+      if (about) service = byId.get(about.target);
+    } else if (SUBJECT_IN_TEXT.has(data.tool)) {
+      const text = (data.answer || "").toLowerCase();
+      const named = services.map((node) => [text.indexOf(node.name.toLowerCase()), node]).filter(([at]) => at >= 0);
+      named.sort((a, b) => a[0] - b[0] || b[1].name.length - a[1].name.length);
+      if (named.length) service = named[0][1];
+    }
+    const personWith = (rel, target) => {
+      const edge = edges.find((e) => e.rel === rel && (!target || e.target === target.id) && labelOf(e.source) === "Person");
+      return edge ? byId.get(edge.source) : undefined;
+    };
+    return {
+      service,
+      owner: service ? personWith("OWNS", service) : undefined,
+      proposer: personWith("PROPOSED"),
+      person: nodes.find((node) => node.label === "Person"),
+    };
+  }
+
+  function nextQuestions(data, asked) {
+    const roles = rolesOf(data);
+    const offered = [];
+    const offer = (q) => {
+      if (offered.length < MAX_NEXT && spoken(q) !== spoken(asked) && !offered.some((other) => spoken(other) === spoken(q))) offered.push(q);
+    };
+    for (const step of NEXT[data.tool] || []) {
+      const slot = (step.match(/\{(\w+)\}/) || [])[1];
+      const node = slot && roles[slot];
+      if (!slot) offer(step);
+      else if (node && BrainGraph.questionsFor(node).includes(step.replace(`{${slot}}`, () => node.name))) offer(step.replace(`{${slot}}`, () => node.name));
+    }
+    // The rest come from the drawing, skipping what the answer is already about: a node the
+    // question names, and the subject of a tool whose steps above already ask about it.
+    const about = spoken(asked);
+    const covered = NEXT[data.tool] ? roles.service : undefined;
+    for (const node of data.nodes || []) {
+      if (node === covered || about.includes(node.name.toLowerCase())) continue;
+      const [first] = BrainGraph.questionsFor(node);
+      if (first) offer(first);
+    }
+    return offered;
+  }
+
+  // "Ask next" after an answer, "Try instead" after a refusal: a labelled row of question chips.
+  // Each chip asks from the page, so the address, the cache, Copy link and the depth buttons follow.
+  function chipRow(label, questions) {
+    const row = el("div", { class: "next" });
+    row.append(el("p", { class: "next-label", "aria-hidden": "true" }, label));
+    const list = el("ul", { class: "next-list", "aria-label": label });
+    for (const q of questions) list.append(chip(q));
+    row.append(list);
+    return row;
+  }
+
   function render(data, question) {
     statusLine.textContent = "";
     out.replaceChildren();
@@ -327,7 +414,7 @@
     // risk_map and person_profile return the same grid shape; one table draws both.
     if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });
 
-    BrainGraph.renderPath(out, data.nodes || [], data.edges || [], { tool: data.tool, depth: data.depth });
+    BrainGraph.renderPath(out, data.nodes || [], data.edges || [], { tool: data.tool, depth: data.depth, onAsk: askFromPage });
     if (data.tool === "blast_radius" && data.found) addDepthButtons(question, data.depth);
     addCopyLink(question);
 
@@ -345,6 +432,11 @@
       }
       out.append(list);
     }
+
+    // After the edge lines and before the footer, so the answer text, the drawing and its head
+    // stay where the recording frames them. A refusal offers its nearest names as questions.
+    const next = data.found ? nextQuestions(data, question) : (data.candidates || []).slice(0, MAX_NEXT).map((name) => BrainGraph.questionsFor({ name })[0]);
+    if (next.length) out.append(chipRow(data.found ? "Ask next" : "Try instead", next));
 
     const picker = data.picked_by === "model" ? "the model" : data.picked_by === "caller" ? "you" : "keywords";
     const read = (data.scopes || []).map((scope) => SCOPE_LABEL[scope] || scope).join(", ");
