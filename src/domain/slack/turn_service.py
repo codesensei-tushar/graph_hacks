@@ -703,7 +703,13 @@ def _suspend_for_approval(workspace, ev, control, stream, outcome, channel: str,
         tool_input=request.tool_input,
         summary=request.summary,
         container_tag=request.container_tag,
-        extra={"turn_control": {"thread_key": control.thread_key, "turn_id": control.turn_id, "revision": control.revision}},
+        extra={
+            "turn_control": {"thread_key": control.thread_key, "turn_id": control.turn_id, "revision": control.revision},
+            # Fixed at request time, like the container: whether the room may read org_internal.
+            "internal_audience": channel_audience.is_internal_audience(
+                workspace.client, workspace.team_id, channel, is_dm=is_direct_message(ev), asker=ev.user
+            ),
+        },
     )
     if not turn_control.is_thread_turn_current(control):
         return
@@ -1137,7 +1143,9 @@ def run_slack_approval_decision(team_id: str, approval_id: str, approved: bool, 
 
     resolve("Approved", "Approved.")
     try:
-        result = execute_approved_action(approval.tool_name, approval.tool_input, approval.container_tag)
+        result = execute_approved_action(
+            approval.tool_name, approval.tool_input, approval.container_tag, internal_audience=approval.extra.get("internal_audience") is True
+        )
     except Exception:
         log.exception("[company-brain] approved action failed approval=%s", approval_id)
         approvals.mark_approval_terminal(approval_id, "error", from_status="approved")
