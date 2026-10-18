@@ -15,6 +15,9 @@ from scripts import check_live  # noqa: E402
 CHIPS = ["who owns billing", "what breaks if auth goes down", "who knows the payments gateway"]
 # The last chip and the last README question both name it.
 REFUSED = "payments gateway"
+# The page's catalogue: what /mcp must list, and what it must never list.
+READ_TOOLS = ["who_owns", "who_knows", "blast_radius"]
+WRITES = ["ingest_ticket", "record_decision"]
 
 
 def _fake(overrides: dict[str, tuple[int, dict | None]] | None = None):
@@ -29,13 +32,33 @@ def _fake(overrides: dict[str, tuple[int, dict | None]] | None = None):
         if path == "/api/graph/stats":
             return 200, {"company": "quillfern", "nodes": 30, "edges": 70, "labels": {"Service": 9, "Person": 6}}
         if path == "/api/ask/tools":
-            return 200, {"company": "quillfern", "examples": CHIPS}
+            return 200, {"company": "quillfern", "examples": CHIPS, "tools": [{"name": name} for name in READ_TOOLS], "writes": WRITES}
         if path.startswith("/api/ask?"):
             question = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)["q"][0]
             return 200, {"tool": "who_knows", "found": REFUSED not in question, "answer": f"answer to {question}"}
         return 200, None
 
     return fetch, asked
+
+
+def _fake_mcp(overrides: dict[str, tuple[int, dict | None]] | None = None):
+    """``/mcp`` with no token: the handshake, the read catalogue, and a cited answer, unless overridden by method."""
+    overrides = overrides or {}
+    posted: list[tuple[str, str]] = []
+    results = {
+        "initialize": {"protocolVersion": check_live.MCP_PROTOCOL, "serverInfo": {"name": "company-brain"}},
+        "tools/list": {"tools": [{"name": name} for name in READ_TOOLS]},
+        "tools/call": {"isError": False, "structuredContent": {"found": True, "answer": "Billing Service is owned by Arjun Mehta.", "path": [{}, {}]}},
+    }
+
+    def post(path: str, request: dict):
+        method = request["method"]
+        posted.append((path, method))
+        if method in overrides:
+            return overrides[method]
+        return 200, {"jsonrpc": "2.0", "id": request["id"], "result": results[method]}
+
+    return post, posted
 
 
 class _Response:
@@ -124,6 +147,81 @@ class CheckLiveTest(unittest.TestCase):
         _, checks = check_live.run(fetch)
         self.assertEqual(checks[0].label, "/api/ask/tools")
         self.assertFalse(checks[0].ok)
+
+    def test_mcp_with_no_token_lists_the_read_catalogue_and_answers_with_a_path(self):
+        fetch, _ = _fake()
+        post, posted = _fake_mcp()
+        _, checks = check_live.run(fetch, post)
+        self.assertTrue(all(check.ok for check in checks), [check.line() for check in checks if not check.ok])
+        self.assertEqual(len(checks), len(CHIPS) + len(check_live.README_QUESTIONS) + len(check_live.README_PAGES) + 3)
+        self.assertEqual(posted, [("/mcp", "initialize"), ("/mcp", "tools/list"), ("/mcp", "tools/call")])
+        self.assertEqual(
+            [check.line() for check in checks[-3:]],
+            [
+                f"PASS  mcp: initialize  ->  company-brain {check_live.MCP_PROTOCOL}",
+                "PASS  mcp: tools/list  ->  3 read tools, none writes",
+                "PASS  mcp: tools/call who_knows billing  ->  2 path steps: Billing Service is owned by Arjun Mehta.",
+            ],
+        )
+
+    def test_a_writing_tool_or_a_missing_one_over_mcp_fails_and_names_it(self):
+        listed = {"tools": [{"name": name} for name in [*READ_TOOLS[:-1], "ingest_ticket"]]}
+        post, _ = _fake_mcp({"tools/list": (200, {"jsonrpc": "2.0", "id": 2, "result": listed})})
+        checks = check_live.mcp_checks(post, READ_TOOLS, WRITES)
+        self.assertEqual(
+            [check.line() for check in checks if not check.ok],
+            ["FAIL  mcp: tools/list  ->  3 read tools; writes exposed: ingest_ticket; missing: blast_radius; not on the page: ingest_ticket"],
+        )
+
+    def test_an_mcp_call_without_a_cited_answer_fails(self):
+        refused = {"isError": False, "structuredContent": {"found": False, "answer": "Nothing in the graph matches “billing”.", "path": []}}
+        post, _ = _fake_mcp({"tools/call": (200, {"jsonrpc": "2.0", "id": 3, "result": refused})})
+        failed = [check for check in check_live.mcp_checks(post, READ_TOOLS, WRITES) if not check.ok]
+        self.assertEqual([check.label for check in failed], ["mcp: tools/call who_knows billing"])
+        self.assertTrue(failed[0].detail.startswith("expected an answer with a path; isError=False found=False steps=0"), failed[0].detail)
+
+    def test_a_json_rpc_error_fails_with_its_message(self):
+        post, _ = _fake_mcp({"tools/call": (200, {"jsonrpc": "2.0", "id": 3, "error": {"code": -32602, "message": "Unknown tool"}})})
+        failed = [check.line() for check in check_live.mcp_checks(post, READ_TOOLS, WRITES) if not check.ok]
+        self.assertEqual(failed, ["FAIL  mcp: tools/call who_knows billing  ->  JSON-RPC error -32602: Unknown tool"])
+
+    def test_a_failed_handshake_stops_the_mcp_checks_there(self):
+        post, posted = _fake_mcp({"initialize": (429, {"error": "too many calls from this address; try again in 12 seconds"})})
+        checks = check_live.mcp_checks(post, READ_TOOLS, WRITES)
+        self.assertEqual([check.line() for check in checks], ["FAIL  mcp: initialize  ->  HTTP 429 too many calls from this address; try again in 12 seconds"])
+        self.assertEqual(posted, [("/mcp", "initialize")])
+
+    def test_http_post_sends_json_rpc_like_an_mcp_client_and_reads_an_sse_reply(self):
+        sent = []
+        reply = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": check_live.MCP_PROTOCOL}}
+
+        class _Sse(_Response):
+            headers = {"content-type": "text/event-stream"}
+
+            def read(self) -> bytes:
+                return f"event: message\ndata: {json.dumps(reply)}\n\n".encode()
+
+        def urlopen(request, timeout):
+            sent.append(request)
+            return _Sse(None)
+
+        with mock.patch.object(check_live.urllib.request, "urlopen", urlopen):
+            status, parsed = check_live.http_post("http://check.test")("/mcp", {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        self.assertEqual((status, parsed), (200, reply))
+        request = sent[0]
+        self.assertEqual((request.get_method(), request.full_url), ("POST", "http://check.test/mcp"))
+        self.assertEqual(request.get_header("Accept"), "application/json, text/event-stream")
+        self.assertEqual(request.get_header("Content-type"), "application/json")
+        self.assertIsNone(request.get_header("Authorization"))
+        self.assertEqual(json.loads(request.data)["method"], "initialize")
+
+    def test_no_mcp_sends_get_requests_only(self):
+        with mock.patch.object(check_live, "run", return_value=("header", [])) as run, mock.patch("sys.argv", ["check_live.py", "--no-mcp"]):
+            self.assertEqual(check_live.main(), 0)
+        self.assertIsNone(run.call_args.args[1])
+        with mock.patch.object(check_live, "run", return_value=("header", [])) as run, mock.patch("sys.argv", ["check_live.py"]):
+            check_live.main()
+        self.assertTrue(callable(run.call_args.args[1]))
 
     def test_the_readme_questions_are_the_ones_in_try_it_in_two_minutes(self):
         readme = (Path(__file__).resolve().parents[2] / "README.md").read_text()
