@@ -6,7 +6,9 @@ code is traded for the user's identity and the user token is dropped at once.
 
     (:SlackUser)-[:IS]->(:Person)<-[:IS]-(:GitHubUser)
 
-The link token is one-time and expires after 15 minutes.
+The link token is one-time and expires after 15 minutes. It remembers the org the DM came from,
+and the callback (``/github/oauth/callback``, a legacy-only path) writes that org's graph, so a
+`link github` in any org's workspace links the person in that org.
 """
 
 import hashlib
@@ -15,6 +17,7 @@ import logging
 import secrets
 from dataclasses import dataclass
 
+from src.core import tenancy
 from src.core.config import settings
 from src.db.falkordb_client import connect, kv
 from src.integrations.github.client import authorize_url, exchange_code_for_identity
@@ -41,7 +44,9 @@ def _state_key(token: str) -> str:
 
 def create_github_link_url(slack_user_id: str) -> str:
     token = secrets.token_urlsafe(32)
-    kv().set(_state_key(token), json.dumps({"slack_user_id": slack_user_id}), ex=LINK_TTL_SECONDS)
+    org = tenancy.current_org_or_none()
+    record = {"slack_user_id": slack_user_id, "org": org.id if org is not None else tenancy.LEGACY_ORG_ID}
+    kv().set(_state_key(token), json.dumps(record), ex=LINK_TTL_SECONDS)
     return authorize_url(token, callback_url())
 
 
@@ -56,7 +61,16 @@ def complete_github_link(state: str, code: str, exchange=exchange_code_for_ident
     raw = kv().getdel(key) if state else None  # one-time: a replayed callback finds nothing
     if not raw:
         return GitHubLinkResult(False, "This link expired or was already used. Send `link github` to the bot again.")
-    slack_user_id = json.loads(raw)["slack_user_id"]
+    record = json.loads(raw)
+    try:
+        org = tenancy.resolve(record.get("org") or tenancy.LEGACY_ORG_ID)
+    except LookupError:
+        return GitHubLinkResult(False, "This link expired or was already used. Send `link github` to the bot again.")
+    with tenancy.org_context(org):
+        return _complete(record["slack_user_id"], code, exchange)
+
+
+def _complete(slack_user_id: str, code: str, exchange) -> GitHubLinkResult:
     person = _person_for_slack_user(slack_user_id)
     if person is None:
         return GitHubLinkResult(False, "Your Slack account isn't linked to anyone in the company graph yet. Message the bot once, then try again.")
