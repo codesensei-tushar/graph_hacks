@@ -135,7 +135,7 @@ def _titled(graph, question: str, scopes: list[str]) -> list[tuple[str, str, str
             CALL db.idx.fulltext.queryNodes('Ticket', $q) YIELD node AS t, score
             WHERE {SCOPED.format(var="t")} AND t.name IS NOT NULL
             RETURN t.id, t.name, coalesce(t.title, ''), score
-            ORDER BY score DESC
+            ORDER BY score DESC, t.name
             LIMIT $k
             """,
             {"q": query, "scopes": list(scopes), "k": TITLE_HITS + 1},

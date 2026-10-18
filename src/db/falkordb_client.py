@@ -84,6 +84,8 @@ _WRITE = re.compile(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE)\b", re.IGNORECASE)
 GENERATION_KEY = "brain:graph_generation:{}"
 # Generations already read in this context, by graph name; set by ``generation_snapshot``.
 _generations: ContextVar[dict | None] = ContextVar("graph_generations", default=None)
+# Graphs changed inside ``deferred_generation()``, bumped once when it ends; None outside one.
+_deferred: ContextVar[set | None] = ContextVar("graph_generation_deferred", default=None)
 # The statistics of a write that changed something.
 _CHANGES = ("nodes_created", "nodes_deleted", "relationships_created", "relationships_deleted", "properties_set", "properties_removed", "labels_added", "labels_removed")
 
@@ -348,14 +350,38 @@ def generation(name: str) -> int | None:
 
 
 def bump_generation(name: str) -> None:
-    """Mark graph ``name`` changed: every cache keyed on its generation reads again."""
+    """Mark graph ``name`` changed: every cache keyed on its generation reads again. Inside
+    ``deferred_generation()`` the bump waits for the block's end, once per graph."""
     seen = _generations.get()
     if seen is not None:
         seen.pop(name, None)
+    deferred = _deferred.get()
+    if deferred is not None:
+        deferred.add(name)
+        return
     try:
         kv().incr(GENERATION_KEY.format(name))
     except Exception as error:
         log.warning("[falkordb] generation of %s not bumped: %s", name, error)
+
+
+@contextmanager
+def deferred_generation() -> Iterator[None]:
+    """Within the block, the graphs a changing write touches are collected, and each one's generation is
+    bumped once when the block ends (also when it raises: what was written stays written). A connector
+    page of hundreds of writes is one INCR, and a block that changed nothing bumps nothing, so a poll
+    that found nothing new leaves every answer cache warm. Nested blocks bump at the outermost end."""
+    if _deferred.get() is not None:
+        yield
+        return
+    token = _deferred.set(set())
+    try:
+        yield
+    finally:
+        changed = _deferred.get() or set()
+        _deferred.reset(token)
+        for name in sorted(changed):
+            bump_generation(name)
 
 
 @contextmanager

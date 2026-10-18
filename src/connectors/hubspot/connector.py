@@ -203,7 +203,7 @@ class HubSpotConnector(Connector):
         if cached and cached[0] > self._clock():
             return cached[1], cached[2]
         # Active users only (mapping.py): someone who has left is nobody's owner or successor.
-        owners = {str(owner["id"]): owner for owner in client.owners()}
+        owners = {str(owner["id"]): owner for owner in client.owners() if mapping.is_person(owner)}
         try:
             stages = client.deal_stages()
         except HttpError:
