@@ -55,7 +55,9 @@ class SchemaTest(unittest.TestCase):
         old.query(
             """
             CREATE (:Service {id: 'billing', name: 'Billing'}), (:Person {id: 'ada', name: 'Ada'}),
-                   (:Ticket {id: 't1', name: 'T-1', scope: 'slack_channel_C1'}), (:Memory {id: 'm1', text: 'kept as is'})
+                   (:Ticket {id: 't1', name: 'T-1', scope: 'slack_channel_C1'}), (:Memory {id: 'm1', text: 'kept as is'}),
+                   (:Ticket {id: 'j1', name: 'PAY-1', scope: 'org_internal', source_updated_at: '2026-09-01T10:00:00.000+0000'}),
+                   (:Ticket {id: 'j2', name: 'PAY-2', scope: 'org_internal', source_updated_at: 'not a time'})
             """
         )
         self.assertEqual(schema.version(old), 0)
@@ -66,6 +68,9 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(schema.indexes(old), _expected())
         scopes = dict(old.ro_query("MATCH (n) WHERE n.id IN ['billing', 'ada', 't1', 'm1'] RETURN n.id, n.scope").result_set)
         self.assertEqual(scopes, {"billing": "org_shared", "ada": "org_shared", "t1": "slack_channel_C1", "m1": None})
+        # Synced before changed_at_ms: it is filled from the source time, -1 when that cannot be read.
+        changed = dict(old.ro_query("MATCH (t:Ticket) RETURN t.id, t.changed_at_ms").result_set)
+        self.assertEqual(changed, {"t1": None, "j1": 1788256800000, "j2": -1})
 
     def test_running_it_again_changes_nothing(self):
         graph = _graph(FRESH)

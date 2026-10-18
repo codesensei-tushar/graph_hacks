@@ -81,6 +81,26 @@ def _backfill_scope(graph) -> None:
                 break
 
 
+def _backfill_changed_at(graph) -> None:
+    """``changed_at_ms`` from ``source_updated_at``, parsed as the connector writer parses it, for
+    synced items written before the writer set it (what_changed reads a window on it). An item
+    whose time cannot be read is marked -1 (never in a window, and not read again)."""
+    from src.connectors.graph import changed_at_ms
+
+    for label in ("Ticket", "Service", "Document"):
+        while True:
+            rows = graph.query(
+                f"MATCH (n:{label}) WHERE n.changed_at_ms IS NULL AND n.source_updated_at IS NOT NULL "
+                f"RETURN n.id, n.source_updated_at LIMIT {BATCH}"
+            ).result_set
+            if not rows:
+                break
+            stamps = [{"id": node_id, "at": changed_at_ms(str(updated)) or -1} for node_id, updated in rows]
+            graph.query(f"UNWIND $rows AS row MATCH (n:{label} {{id: row.id}}) SET n.changed_at_ms = row.at", {"rows": stamps})
+            if len(rows) < BATCH:
+                break
+
+
 def _range_indexes(graph) -> None:
     present = indexes(graph)
     for label, prop in INDEXES:
@@ -97,6 +117,7 @@ def _range_indexes(graph) -> None:
 MIGRATIONS: tuple[tuple[int, str, Callable], ...] = (
     (1, "a missing scope on knowledge nodes is written as org_shared", _backfill_scope),
     (2, "range indexes on every anchored label", _range_indexes),
+    (3, "synced items written before changed_at_ms get it from their source time", _backfill_changed_at),
 )
 LATEST = MIGRATIONS[-1][0]
 
