@@ -45,6 +45,8 @@ SLACK_BOT_EVENTS = [
     "reaction_removed",
     "team_join",
     "user_change",
+    "channel_shared",
+    "channel_unshared",
 ]
 
 # Sign in with Slack (OpenID Connect) for the console. Must stay in sync with both YAML manifests.

@@ -243,6 +243,7 @@ class FakeSlack:
             return SlackPostResult(ok=True, ts=self.idempotent[key][0], deduped=True)
         ts = f"{len(self.idempotent) + 100}.000"
         self.idempotent[key] = (ts, text)
+        self.posts.append((channel, text, blocks))  # a first post is a post like any other
         return SlackPostResult(ok=True, ts=ts)
 
     def update_slack_message(self, channel, ts, text, blocks=None):
