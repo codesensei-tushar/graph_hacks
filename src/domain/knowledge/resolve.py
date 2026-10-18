@@ -158,9 +158,9 @@ def same_word(a: str, b: str) -> bool:
 
 
 def near_word(a: str, b: str) -> bool:
-    """A likely typo: the same first letter and one edit apart (two for words of eight letters or more).
+    """A likely typo: five letters or more, the same first letter, and one edit apart (two for eight or more).
     Only ever used to suggest a name, never to resolve one."""
-    if a == b or min(len(a), len(b)) < 4 or a[0] != b[0] or abs(len(a) - len(b)) > 2:
+    if a == b or min(len(a), len(b)) < 5 or a[0] != b[0] or abs(len(a) - len(b)) > 2:
         return False
     allowed = 2 if min(len(a), len(b)) >= 8 else 1
     return _edits(a, b, allowed) <= allowed
