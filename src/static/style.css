@@ -228,7 +228,7 @@ code { font-variant-ligatures: none; }
 .brand .mark-walk { stroke: var(--path); }
 .top nav { display: flex; flex: 1; align-items: center; justify-content: center; gap: clamp(16px, 4vw, 56px); }
 .top nav a { color: var(--ink-2); text-decoration: none; font: 500 var(--fs-xs)/1 var(--font); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 4px; border-radius: 8px; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
-.top nav a:hover { color: var(--ink); background: var(--surface-2); }
+.top nav a:hover, .top nav a[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 /* "Sign in" to the console: shown only when the server runs it (console_web unhides it). */
 .top-signin {
