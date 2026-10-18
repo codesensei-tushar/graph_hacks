@@ -182,6 +182,23 @@ it imports or onboards from Slack joins it. `src/api/v1/console_teams.py`:
 - `GET /console/api/teams` (members): `{teams: [{id, name, summary, members: [{id, name, role}],
   runs: [{id, name, kind, owners: [{id, name}]}]}]}`, what the member could read in a Slack DM.
 
+## People
+
+Jira often hides emails, so many synced accounts link to no person. `src/api/v1/console_people.py`
+(owners and admins) lets the org link them; this replaces `CONNECTOR_*_PEOPLE` for console orgs.
+
+- `GET /console/api/people/unlinked`: `{unlinked: [{id, name, source: "jira"|"hubspot", items,
+  suggestions: [{person_id, name, reason: "same_name"|"same_email_domain"}]}], people: [{id, name}]}`.
+  At most 500 accounts, most active first; at most 5 suggestions each; public mail domains suggest
+  nobody. No email or domain is ever returned. Apps and bots are left out (`is_bot`, `account_type`
+  app/bot/customer, Jira accountIds under `557058:`, "Automation for Jira") and cannot be linked.
+- `POST /console/api/people/link` (JSON, CSRF) `{external_user_id, person_id}`: writes
+  `(:ExternalUser)-[:IS {via: "admin", by, at}]->(:Person)` and moves the account's OWNS/WORKED_ON
+  onto the person. Audited as `people.link`. 200 `{ok, external_user_id, person: {id, name}, changed}`;
+  404 unknown account or person (in this org); 409 when the account is already linked by email.
+  An admin link can be corrected by linking again. Like an email link, it lets the person read, in a
+  DM, the restricted Jira projects the account can read.
+
 ## Tokens at run time
 
 Connectors get their bearer token from `src/connectors/oauth.py`'s `bearer_for(install)`:

@@ -34,7 +34,7 @@
     <section class="page-head" aria-labelledby="page-title">
       <p class="eyebrow">Set up</p>
       <h1 id="page-title">Set up Company Brain</h1>
-      <p class="lede">Three steps: name your company, add the Slack app to your workspace, and connect the first tool it should read. You can come back to any of them later.</p>
+      <p class="lede">Four steps: name your company, add the Slack app to your workspace, connect the first tool it should read, and add your first team. You can come back to any of them later.</p>
       <noscript><p class="note">The console needs JavaScript.</p></noscript>
     </section>
 
@@ -92,6 +92,21 @@
             <p>Company Brain reads it read-only into your graph. You approve access in the tool itself.</p>
             <ul class="connector-list" id="connectors"></ul>
             <p class="fineprint"><a href="/console">Skip for now and open the console</a></p>
+          </div>
+        </div>
+      </li>
+
+      <li class="setup-step" id="step-team" data-state="todo">
+        <span class="num" aria-hidden="true">4</span>
+        <div class="body">
+          <h2>Add your first team</h2>
+          <p class="done-line" id="team-done"></p>
+          <div class="work">
+            <p>A team file lists who is on a team and what it runs, so answers know who owns what and what rests on one person.</p>
+            <div class="actions">
+              <a class="btn" href="/console/teams">Import a team file</a>
+              <a class="link-btn" href="https://github.com/codesensei-tushar/graph_hacks/blob/main/examples/teams/quillfern-sales.toml">See an example file</a>
+            </div>
           </div>
         </div>
       </li>

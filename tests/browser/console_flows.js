@@ -170,6 +170,29 @@ const [base, shots] = process.argv.slice(2);
     await ctx.close();
   }
 
+  // 10. Teams: the Connections nudge, a refused file's problems, then upload, check and import.
+  {
+    const { ctx, page } = await fresh("empty", "/console");
+    await page.waitForSelector("#teams-nudge:visible");
+    await page.click("#teams-nudge-go");
+    await page.waitForURL(/\/console\/teams$/);
+    await page.waitForSelector("#teams .empty");
+    await page.fill("#team-file", "[[runs]]\nname = \"Gizmo\"\nkind = \"gizmo\"\n");
+    await page.click("#check");
+    await page.waitForSelector("#preview.error .problems li");
+    assert.ok((await page.locator("#preview .problems li").count()) >= 2);
+    step("teams: a refused file lists its problems, nothing written");
+    await page.setInputFiles("#team-upload", require("path").join(__dirname, "..", "..", "examples", "teams", "quillfern-sales.toml"));
+    await page.waitForSelector("#preview.ok #confirm-import");
+    assert.match(await page.textContent("#preview"), /Sales: 3 people/);
+    await page.click("#confirm-import");
+    await page.waitForSelector("#team-sales.just-added");
+    assert.match(await page.textContent("#banner"), /Imported Sales/);
+    assert.equal(await page.inputValue("#team-file"), "");
+    step("teams: upload, check, import; the new team is on the list");
+    await ctx.close();
+  }
+
   await browser.close();
   if (errors.length) { console.log("ERRORS:\n" + errors.join("\n")); process.exit(1); }
   console.log("all flows passed");
