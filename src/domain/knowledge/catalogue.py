@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, memories
+from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, memories
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 
 _TOOLS: dict[str, ToolSpec] = {}
@@ -58,6 +58,10 @@ def _run_working_groups(_args: dict, scopes: list[str]) -> ToolResult:
 
 def _run_blast_radius(args: dict, scopes: list[str]) -> ToolResult:
     return algorithms.blast_radius(args["name"], scopes, args.get("depth"))
+
+
+def _run_who_should_know(args: dict, scopes: list[str]) -> ToolResult:
+    return coordination.who_should_know(args["name"], scopes)
 
 
 def _run_if_person_leaves(args: dict, scopes: list[str]) -> ToolResult:
@@ -194,6 +198,26 @@ register(
             ["name"],
         ),
         run=_run_blast_radius,
+    )
+)
+register(
+    ToolSpec(
+        name="who_should_know",
+        description=(
+            "Who should know about a change but wasn't involved: owners of everything that depends on what a pull request "
+            "or service change touches, up to two hops, minus the author and reviewers, with whether each has worked with "
+            "the author before."
+        ),
+        args_schema=_schema(
+            {
+                "name": {
+                    "type": "string",
+                    "description": "The pull request (notebook#45, #45 or PR 45) or the service that changes, copied from the question.",
+                }
+            },
+            ["name"],
+        ),
+        run=_run_who_should_know,
     )
 )
 register(
