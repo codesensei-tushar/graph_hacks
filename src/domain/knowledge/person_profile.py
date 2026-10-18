@@ -209,7 +209,8 @@ def _grid(graph, person: Entity, held: list[_Held], alone_ids: set[str], scopes:
     for thing in held[:MAX_GRID_ROWS]:
         entity = Entity(thing.id, thing.name, "Service", thing.kind)
         known = ask_service.knowers(graph, entity, scopes)
-        others = [who for who, _score, _reasons in ask_service.rank_people(known.path, entity) if who != person.name]
+        # Told apart by id: an unlinked account with their name is someone else.
+        others = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, entity) if who != ("Person", person.id)]
         alone = thing.id in alone_ids
         rows.append(
             {
@@ -312,18 +313,19 @@ def _pull_requests(graph, person: Entity, params: dict, result: ToolResult) -> s
 
 
 def _tickets(graph, person: Entity, params: dict, result: ToolResult) -> str:
-    """Open tickets they worked on, or are assigned through their GitHub account."""
+    """Open tickets they worked on, or are assigned through a linked account (GitHub, Jira)."""
     rows = graph.ro_query(
         f"""
         MATCH (:Person {{id: $id}})-[:WORKED_ON]->(ticket:Ticket)
         WHERE {SCOPED.format(var="ticket")} AND coalesce(ticket.state, 'open') <> 'closed'
         RETURN ticket.id AS id, ticket.name AS name, coalesce(ticket.title, ticket.name) AS title, 'WORKED_ON' AS rel
         UNION
-        MATCH (:Person {{id: $id}})<-[:IS]-(:GitHubUser)-[:ASSIGNED]->(ticket:Ticket)
-        WHERE {SCOPED.format(var="ticket")} AND coalesce(ticket.state, 'open') <> 'closed'
+        MATCH (:Person {{id: $id}})<-[:IS]-(account)-[:ASSIGNED]->(ticket:Ticket)
+        WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
+          AND {SCOPED.format(var="ticket")} AND coalesce(ticket.state, 'open') <> 'closed'
         RETURN ticket.id AS id, ticket.name AS name, coalesce(ticket.title, ticket.name) AS title, 'ASSIGNED' AS rel
         """,
-        params,
+        {**params, "accounts": list(ask_service.ACCOUNT_LABELS)},
     ).result_set
     tickets: dict[str, tuple[str, str, str]] = {}
     for ticket_id, name, title, rel in sorted(rows, key=lambda row: (row[1], row[3] != "WORKED_ON")):
