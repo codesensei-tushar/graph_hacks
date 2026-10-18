@@ -526,6 +526,12 @@ def pagerank_by_id(graph) -> dict[str, float]:
     return {service_id: score for service_id, score in rows}
 
 
+def _ordinal(number: int) -> str:
+    """1st, 2nd, 3rd, 4th, 11th, 21st."""
+    suffix = "th" if 10 <= number % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
 def load_bearing(limit=DEFAULT_LOAD_BEARING, scopes: list[str] | None = None) -> ToolResult:
     """The services the rest of the company leans on: PageRank over DEPENDS_ON.
 
@@ -554,6 +560,16 @@ def load_bearing(limit=DEFAULT_LOAD_BEARING, scopes: list[str] | None = None) ->
         result.answer = "The graph has no services with dependencies yet."
         return result
 
+    # PageRank runs over every Service, accounts included, so at scale each score is tiny: the rank
+    # among the services that take part in DEPENDS_ON is what reads ("1st of 13").
+    pool = graph.ro_query(
+        f"""
+        MATCH (s:Service)-[:DEPENDS_ON]-(:Service)
+        WHERE NOT {kinds.KIND_OF.format(var="s")} IN $excluded AND {resolve.SCOPED.format(var="s")}
+        RETURN count(DISTINCT s)
+        """,
+        {"excluded": sorted(kinds.NOT_DEPENDABLE), "scopes": scopes},
+    ).result_set[0][0]
     sentences = []
     for index, (service_id, name, score) in enumerate(ranked):
         dependents = graph.ro_query(
@@ -577,11 +593,11 @@ def load_bearing(limit=DEFAULT_LOAD_BEARING, scopes: list[str] | None = None) ->
             result.add(PathStep(dependent_name, "DEPENDS_ON", name, from_id=dependent_id, to_id=service_id, from_label="Service", to_label="Service"))
         if index == 0:
             sentences.append(
-                f"{name} carries the most weight (PageRank {score:.2f}): {dependents} service{'s' if dependents != 1 else ''} "
+                f"{name} carries the most weight (PageRank {score:.2f}, 1st of {pool}): {dependents} service{'s' if dependents != 1 else ''} "
                 f"depend{'s' if dependents == 1 else ''} on it directly or through others."
             )
         else:
-            sentences.append(f"{name} ({score:.2f}, {dependents})")
+            sentences.append(f"{name} ({_ordinal(index + 1)}, {dependents})")
     answer = sentences[0]
     if len(sentences) > 1:
         answer += " Then " + join_names(sentences[1:]) + "."

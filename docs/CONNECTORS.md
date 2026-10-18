@@ -43,16 +43,28 @@ outside the install, so a connector cannot touch a seeded or team-imported node.
 | --- | --- |
 | `Container(id, name, external_id, url, kind, restricted)` | `(:Container)`. Scope `org_internal`, or its own scope when `restricted`. |
 | `Item(label, id, external_id, container, name, title, url, state, status, updated_at, summary, kind, about, props)` | `(:Ticket\|Service\|Document)-[:IN_CONTAINER]->(:Container)`, scope from the container. `name` is the short handle (`PAY-12`), `title` the full text. `state` is `open` or `closed`, the raw value goes in `status`. A CRM company is `Service` with `kind='account'`. |
-| `ExternalUser(id, source, external_id, name, email)` | `(:ExternalUser)-[:IS]->(:Person)` when exactly one Person has the email. Connectors never create a Person. |
+| `ExternalUser(id, source, external_id, name, email, email_from, account_type)` | `(:ExternalUser)-[:IS {via: 'email'}]->(:Person)` when exactly one Person has the email, matched on the lower-cased `email_lc` (indexed on both labels). `email_from` is `api` (the vendor shows it) or `admin` (an admin mapped it). `account_type` is the vendor's (`atlassian`, `customer`; HubSpot `person`). A bot is never an account: Jira's `accountType: app` users and HubSpot's queue owners are left out. An admin's link from the console (`IS {via: 'admin'}`) always wins: a sync drops the email link instead and moves `OWNS`/`WORKED_ON` to the admin's Person. Connectors never create a Person. |
 | `Edge(rel, from_id, to_id, props)` | `OPENED`, `ASSIGNED`, `OWNS`, `WORKED_ON`, `ABOUT` (within the install) or `BLOCKS`. `OWNS` and `WORKED_ON` from a linked user are written from its Person. |
-| `Item.about` hints | `(item)-[:ABOUT]->(:Service)`: each hint (a component, a label) resolved strictly against the graph's services, else the best guess over all hints. |
+| `Item.about` hints | `(item)-[:ABOUT]->(:Service)`: each hint (a component, a label) resolved strictly against the graph's services (never on part of a name), else the best guess over all hints when they hold every distinctive word of its name ("store" alone is not Graph Store). |
 
 Every item node gets `id`, `name`, `title`, `summary` (clipped to 2000 characters), `url`,
-`state`, `status`, `source_updated_at`, `external_id`, `source`, `install`, `scope` and
-`synced_at` (ms), then `props` under any name not already taken.
+`state`, `status`, `source_updated_at`, `changed_at_ms` (`updated_at` as epoch ms, for
+`what_changed`), `external_id`, `source`, `install`, `scope`, `content_hash` and `synced_at` (ms),
+then `props` under any name not already taken.
+
+**How a page is written** (`graph.write_page`). In a fixed number of queries, whatever the page's
+size: the accounts in a few (read, link, write what changed), the items of one label in one, the
+edges of one (type, start label, end label) in one. An item whose fields, ABOUT targets and edges
+hash to the `content_hash` stored on it is not written at all, so a poll that found nothing new
+writes nothing, and bumps no graph generation: the page's writes bump it once, at the end
+(`falkordb_client.deferred_generation`). Measured on a page of 50 tickets with ~90 accounts: 1,032
+queries and 446 generation bumps before, 16 queries and 1 bump now; the same page polled again,
+648 queries and 350 bumps before, 6 reads and none now. No reader sees an item without its edges:
+its node, container and ABOUT edges are one query, its other edges are merged next, and only then
+are the edges it no longer has deleted.
 
 **Edges belong to an item**: the `from_id` item, else the `to_id` item. Writing an item
-replaces all of its edges, so a page carries every edge of each item in it, and an edge between
+replaces all of its edges (the new ones are merged before the old ones go), so a page carries every edge of each item in it, and an edge between
 two items comes once, with the item it points out of (`PAY-13 BLOCKS PAY-12` comes with
 PAY-13). An edge whose item is not in the page is only added.
 

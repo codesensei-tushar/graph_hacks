@@ -198,8 +198,8 @@ class AlgorithmToolsTest(unittest.TestCase):
 
     def test_load_bearing_ranks_by_pagerank_with_dependent_counts(self):
         result = algorithms.load_bearing(3)
-        self.assertRegex(result.answer, r"^Postgres carries the most weight \(PageRank 0\.\d+\): 6 services depend on it directly or through others\.")
-        self.assertRegex(result.answer, r"Then Auth Service \(0\.\d+, 5\) and Graph Store \(0\.\d+, 2\)\.")
+        self.assertRegex(result.answer, r"^Postgres carries the most weight \(PageRank 0\.\d+, 1st of \d+\): 6 services depend on it directly or through others\.")
+        self.assertIn("Then Auth Service (2nd, 5) and Graph Store (3rd, 2).", result.answer)
         self.assertIn("Auth Service -[DEPENDS_ON]-> Postgres", _cites(result))
         self.assertIn("Billing Service -[DEPENDS_ON]-> Postgres", _cites(result))
         self.assertEqual(ask_service.ask("which services are load bearing", ORG).tool, "load_bearing")

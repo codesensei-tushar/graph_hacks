@@ -15,7 +15,7 @@ from src.connectors.base import Install  # noqa: E402
 from src.connectors.hubspot.connector import HubSpotConnector  # noqa: E402
 from src.core import scheduler  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_service, brief, catalogue, find, team_page  # noqa: E402
+from src.domain.knowledge import ask_service, brief, catalogue, find, team_page, what_changed  # noqa: E402
 from src.seed import quillfern, quillfern_sales, seed  # noqa: E402
 from tests.fixtures.hubspot.fake_hubspot import SERVER_MS, FakeHubSpot  # noqa: E402
 
@@ -95,7 +95,8 @@ class CrmQuestionsTest(unittest.TestCase):
         self.assertIn("Larkspur Freightways", result.answer)
         self.assertIn("Tidewhistle Robotics", result.answer)
         self.assertNotIn("Bramblecote", result.answer)  # its only deal is closed lost
-        self.assertTrue(result.answer.startswith("2 accounts with an open deal:"), result.answer)
+        # The pipeline grouped by deal stage, with counts.
+        self.assertEqual(result.answer, "2 accounts with an open deal, by stage: Contract Sent (1): Larkspur Freightways; Qualified To Buy (1): Tidewhistle Robotics.")
 
     def test_accounts_by_owner_include_an_unlinked_hubspot_user(self):
         self.assertEqual(_ask("which accounts does Dev Patel own").answer, "3 accounts owned by Dev Patel: Enterprise accounts, Larkspur Freightways and Saltwick Outfitters.")
@@ -125,6 +126,44 @@ class CrmQuestionsTest(unittest.TestCase):
 
     def test_a_team_that_does_not_run_hubspot_has_none(self):
         self.assertEqual(team_page.team_page("payments", SLACK).synced_total, 0)
+
+    def test_what_changed_includes_crm_accounts_with_their_stage(self):
+        result = what_changed.what_changed("what changed", SLACK, days=365)
+        self.assertIn("the Larkspur Freightways account changed in the CRM (customer, open); deals: Closed Won (Dev Patel) and Contract Sent (Priya Shah)", result.answer)
+        self.assertNotIn("Larkspur", what_changed.what_changed("what changed", ORG, days=365).answer)
+
+    def test_sales_phrasings(self):
+        self.assertEqual(_ask("what accounts are open opportunities").answer, "1 open opportunity account: Tidewhistle Robotics.")
+        self.assertTrue(_ask("what's in the pipeline").answer.startswith("2 accounts with an open deal, by stage:"))
+        self.assertEqual(_ask("which deals did we lose").answer, "1 account with a deal in closed lost: Bramblecote Analytics.")
+        self.assertEqual(
+            ask_service.ask("which deals did we win this quarter", SLACK).answer,
+            "1 account with a deal in closed won: Larkspur Freightways. (Deal dates are not synced, so these are every deal at that stage, not only this quarter's.)",
+        )
+        self.assertTrue(_ask("how many customers do we have").answer.startswith("2 customer accounts:"))
+        self.assertEqual(_ask("customers in healthcare").answer, "1 customer account in healthcare: Hollowpine Health.")
+        renew = _ask("when does Larkspur Freightways renew")
+        self.assertTrue(renew.answer.startswith("No renewal date is synced from the CRM for Larkspur Freightways; here is what is."), renew.answer)
+        self.assertIn("HubSpot lifecycle stage: customer, open.", renew.answer)
+
+    def test_an_industry_nobody_synced_is_said_so(self):
+        _, graph = falkordb_client.connect()
+        graph.query("MATCH (s:Service {source: 'hubspot'}) SET s.industry_saved = s.industry REMOVE s.industry")
+        try:
+            self.assertEqual(_ask("customers in healthcare").answer, "No account has an industry synced from the CRM, so I can't tell which are in healthcare.")
+        finally:
+            graph.query("MATCH (s:Service {source: 'hubspot'}) SET s.industry = s.industry_saved REMOVE s.industry_saved")
+
+    def test_sales_rules_never_take_ordinary_questions(self):
+        for question, tool in (
+            ("what is in the billing service", "who_knows"),
+            ("customers complained about refunds", "who_knows"),
+            ("who is in the payments team", "onboarding_brief"),
+            ("when does the refund batch run", "who_knows"),
+            ("which deals did we lose to rivals and why", "decision_trace"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
 
 
 if __name__ == "__main__":

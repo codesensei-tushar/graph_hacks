@@ -73,8 +73,20 @@ class IssueTest(unittest.TestCase):
     def test_no_component_falls_back_to_the_title(self):
         mapped = mapper.issue(INSTALL, ISSUES["PAY-5"], _pay(), SITE)
         self.assertEqual(mapped.item.about, ("Document refund retries in the billing runbook",))
-        # An app account can open an issue; it is an account like any other, with no email.
-        self.assertEqual([(user.name, user.email) for user in mapped.users], [("Automation for Jira", "")])
+        # An app account ("Automation for Jira", accountType "app") opened it: a bot is no person, so it is
+        # not an account in the graph and the issue has no OPENED edge.
+        self.assertEqual(mapped.users, [])
+        self.assertEqual([edge for edge in mapped.edges if edge.rel == "OPENED"], [])
+
+    def test_accounts_say_their_type_and_where_their_email_came_from(self):
+        human = {"accountId": "a1", "accountType": "atlassian", "displayName": "Maya", "emailAddress": "maya@x.example.com"}
+        hidden = {"accountId": "a2", "accountType": "atlassian", "displayName": "Robin"}
+        self.assertEqual((mapper.user(INSTALL, human).account_type, mapper.user(INSTALL, human).email_from), ("atlassian", "api"))
+        mapped = mapper.user(INSTALL, hidden, {"a2": "robin@x.example.com"})
+        self.assertEqual((mapped.email, mapped.email_from), ("robin@x.example.com", "admin"))
+        # The address Jira shows wins over an admin's mapping, and is then the API's.
+        self.assertEqual(mapper.user(INSTALL, human, {"a1": "other@x.example.com"}).email_from, "api")
+        self.assertIsNone(mapper.user(INSTALL, {"accountId": "bot", "accountType": "app", "displayName": "Automation for Jira"}))
 
     def test_description_is_flattened_to_text(self):
         summary = mapper.issue(INSTALL, ISSUES["PAY-3"], _pay(), SITE).item.summary

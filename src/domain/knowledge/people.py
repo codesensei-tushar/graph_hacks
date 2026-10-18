@@ -176,6 +176,28 @@ def email_conflict(graph, entity: Entity, scopes: list[str]) -> str:
     return f" {'; '.join(parts)}, so no users are taken for one person by that email."
 
 
+def identities(graph, scopes: list[str]) -> dict[str, Entity]:
+    """Every readable connector user no person is linked to, as its identity, in one read: user id ->
+    the identity as shown ("Yash Patil (Jira, HubSpot)"). The same rules as ``shown``: one user per
+    tool, by a tool-reported email; a same-tool clash merges nobody; a group with a linked user is a person."""
+    groups: dict[str, list[_User]] = {}
+    for user in _users(graph, scopes):
+        groups.setdefault(_key(user), []).append(user)
+    order = list(SOURCE_NAMES)
+    found: dict[str, Entity] = {}
+    for group in groups.values():
+        sources = [user.source for user in group]
+        for same in ([[user] for user in group] if len(sources) != len(set(sources)) else [group]):
+            if any(user.person_id for user in same):
+                continue
+            same = sorted(same, key=lambda user: (order.index(user.source) if user.source in order else len(order), user.source, user.id))
+            tools = list(dict.fromkeys(tool_name(user.source) for user in same))
+            entity = Entity(same[0].id, f"{_bare(same[0].name)} ({', '.join(tools)})", ACCOUNT, ", ".join(tools))
+            for user in same:
+                found[user.id] = entity
+    return found
+
+
 def shown(graph, account: Entity, scopes: list[str]) -> Entity:
     """The person a user (or a user of the same identity) is linked to, or the identity named with its tools."""
     same = _identity(graph, account.id, scopes)

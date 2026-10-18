@@ -92,11 +92,18 @@ class EdgesAndUsersTest(unittest.TestCase):
         self.assertEqual(edges[-1], Edge("WORKED_ON", "hubspot:default:user:101", "hubspot:default:company:9002"))
         self.assertEqual(edges[-1].props["stage"], "qualifiedtobuy")
 
+    def test_a_queue_is_no_owner_and_an_admins_email_says_so(self):
+        self.assertFalse(mapping.is_person({"id": "9", "type": "QUEUE"}))
+        self.assertTrue(mapping.is_person({"id": "9", "type": "PERSON"}))
+        self.assertTrue(mapping.is_person({"id": "9"}))  # older payloads name no type: people
+        mapped = mapping.owner_user(INSTALL, {"id": "9", "type": "PERSON", "email": "login@x.example.com"}, "Real@X.example.com")
+        self.assertEqual((mapped.email, mapped.email_from, mapped.account_type), ("real@x.example.com", "admin", "person"))
+
     def test_an_owner_is_an_external_user_with_a_lowercased_email(self):
         owners = {owner["id"]: owner for owner in load("owners.json")["results"] + load("owners_archived.json")["results"]}
         self.assertEqual(
             mapping.owner_user(INSTALL, owners["103"]),
-            ExternalUser("hubspot:default:user:103", "hubspot", "103", "Noor Haddad", "noor@quillfern.example.com"),
+            ExternalUser("hubspot:default:user:103", "hubspot", "103", "Noor Haddad", "noor@quillfern.example.com", account_type="person"),
         )
         # A user with no name reads as their email's local part, never the whole address; the
         # email is kept for linking only.

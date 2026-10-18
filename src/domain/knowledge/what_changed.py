@@ -68,7 +68,7 @@ _NOUNS = {
     "pull_requests": ("pull request", "pull requests"),
     "memories": ("thing said", "things said"),
 }
-_KIND_ORDER = {"decisions": 0, "pull_requests": 1, "tickets": 2, "memories": 3}
+_KIND_ORDER = {"decisions": 0, "pull_requests": 1, "tickets": 2, "memories": 3, "accounts": 4}
 
 
 def now_millis() -> int:
@@ -262,8 +262,48 @@ def _around(scope: Scope) -> str:
 
 
 def _changes(graph, scopes: list[str], only: str | None) -> list[Change]:
-    readers = {"decisions": _decisions, "memories": _memories, "pull_requests": _pull_requests, "tickets": _tickets}
+    readers = {"decisions": _decisions, "memories": _memories, "pull_requests": _pull_requests, "tickets": _tickets, "accounts": _accounts}
     return [change for kind, read in readers.items() if only in (None, kind) for change in read(graph, scopes)]
+
+
+def _accounts(graph, scopes: list[str]) -> list[Change]:
+    """CRM accounts a connector synced, dated by the CRM's own last change, with their lifecycle stage
+    and the stage of each deal on them (the WORKED_ON edges a deal writes)."""
+    rows = graph.ro_query(
+        f"""
+        MATCH (s:Service)
+        WHERE s.source IS NOT NULL AND {kinds.KIND_OF.format(var="s")} = 'account' AND {SCOPED.format(var="s")}
+          AND coalesce(s.source_updated_at, '') <> ''
+        OPTIONAL MATCH (who)-[r:WORKED_ON]->(s)
+        WHERE r.evidence = 'deal' AND labels(who)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="who")}
+        RETURN s.id, s.name, coalesce(s.status, ''), coalesce(s.state, 'open'), s.source_updated_at,
+               collect(DISTINCT [who.id, who.name, labels(who)[0], who.source, r.stage])
+        """,
+        {"scopes": scopes},
+    ).result_set
+    from src.domain.knowledge import people  # people reads the connectors' admin mappings; imported when needed
+
+    changes = []
+    for account_id, name, status, state, updated_at, deals in rows:
+        at = _iso_millis(updated_at)
+        if at is None:
+            continue
+        from src.domain.knowledge.ask_service import LIFECYCLE_LABELS  # ask_service reaches what_changed through the catalogue
+
+        lifecycle = ", ".join(part for part in (LIFECYCLE_LABELS.get(status.lower(), status.replace("_", " ")), state) if part)
+        sentence = f"the {name} account changed in the CRM" + (f" ({lifecycle})" if lifecycle else "")
+        steps = []
+        told = []
+        for who_id, who, label, source, stage in deals:
+            if who_id is None:
+                continue
+            shown = people.account_label(who, source) if label == people.ACCOUNT else who
+            told.append(f"{stage} ({shown})" if stage else shown)
+            steps.append(_step(shown, "WORKED_ON", name, who_id, account_id, label, "Service"))
+        if told:
+            sentence += f"; deals: {join_names(sorted(told))}"
+        changes.append(Change("accounts", account_id, name, at, sentence, [(account_id, name, "Service")], steps))
+    return changes
 
 
 def _decisions(graph, scopes: list[str]) -> list[Change]:

@@ -28,6 +28,8 @@ LABELS = ("Service", "Ticket", "Decision", "PullRequest", "Document", "Person", 
 TICKET_STATES = ("open", "closed")
 PULL_REQUEST_STATES = ("open", "closed", "merged")
 MAX_ROWS = 25
+# Accounts named per deal stage in the pipeline before "and N more".
+MAX_PER_STAGE = 5
 PATH_CAP = 50
 
 
@@ -62,6 +64,7 @@ FILTERS: dict[str, dict[str, Filter]] = {
         "state": Filter("state"),
         "status": Filter("status"),
         "stage": Filter("stage"),
+        "industry": Filter("industry"),
     },
     "Ticket": {
         "state": Filter("state"),
@@ -129,16 +132,28 @@ CONTEXT = {
 }
 _ROWS = _q(
     """
-    MATCH (x)
-    WHERE labels(x)[0] = $label AND x.name IS NOT NULL AND {scoped_x}
-    RETURN x.id, x.name, coalesce(x.title, ''), x.kind, x.state, x.merged, x.decided_at, coalesce(x.role, ''), coalesce(x.status, '')
+    MATCH (x:{label})
+    WHERE labels(x)[0] = '{label}' AND x.name IS NOT NULL AND {scoped_x}
+    RETURN x.id, x.name, coalesce(x.title, ''), x.kind, x.state, x.merged, x.decided_at, coalesce(x.role, ''), coalesce(x.status, ''), coalesce(x.industry, '')
     """
 )
+
+
+def _rows_query(label: str) -> str:
+    """``_ROWS`` for one of ``LABELS``: a scan of that label, never of every node."""
+    if label not in LABELS:
+        raise ValueError(f"find lists {', '.join(LABELS)}, not {label!r}")
+    return _ROWS.replace("{label}", label)
+
+
 # The deals on each of $ids: who works each one, and its stage.
 _DEALS = _q(
     """
-    MATCH (who)-[r:WORKED_ON]->(x:Service)
-    WHERE x.id IN $ids AND r.evidence = 'deal' AND labels(who)[0] IN ['Person', 'ExternalUser'] AND coalesce(who.scope, 'org_shared') IN $scopes
+    UNWIND $ids AS id
+    MATCH (x:Service {id: id})
+    WITH x
+    MATCH (who)-[r:WORKED_ON]->(x)
+    WHERE r.evidence = 'deal' AND labels(who)[0] IN ['Person', 'ExternalUser'] AND coalesce(who.scope, 'org_shared') IN $scopes
     RETURN x.id, coalesce(r.stage, ''), who.id, who.name, labels(who)[0], who.source, x.name
     """
 )
@@ -151,7 +166,11 @@ _BLOCKERS = _q(
     """
 )
 _ACCOUNTS_OF ="MATCH (a)-[:IS]->(p:Person {id: $id}) RETURN a.id"
-_OWNED = "MATCH (:Person)-[:OWNS]->(x:Service) WHERE x.id IN $ids RETURN DISTINCT x.id"
+# Owned by a person, or by a connector user (an unlinked HubSpot owner is an owner all the same).
+_OWNED = (
+    "MATCH (o)-[:OWNS]->(x:Service) WHERE x.id IN $ids AND labels(o)[0] IN ['Person', 'ExternalUser']"
+    " AND coalesce(o.scope, 'org_shared') IN $scopes RETURN DISTINCT x.id, labels(o)[0], o.name, o.source"
+)
 
 _NOUNS = {
     "Service": ("service", "services"), "Ticket": ("ticket", "tickets"), "Decision": ("decision", "decisions"),
@@ -176,6 +195,8 @@ class Row:
     role: str
     # A connector item's own status: a ticket's tracker status, an account's lifecycle stage.
     status: str = ""
+    # An account's industry, when its CRM syncs one.
+    industry: str = ""
 
 
 def find(label, filters: dict, scopes: list[str]) -> ToolResult:
@@ -233,7 +254,7 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
         named[key] = resolution.entity
         candidates.extend(name for name in resolution.candidate_names() if name not in candidates)
 
-    rows = {row[0]: Row(row[0], row[1], row[2], row[3], _state(row[4], row[5]), row[6], row[7], row[8]) for row in graph.ro_query(_ROWS, {"label": chosen, "scopes": scopes}).result_set}
+    rows = {row[0]: Row(row[0], row[1], row[2], row[3], _state(row[4], row[5]), row[6], row[7], row[8], row[9]) for row in graph.ro_query(_rows_query(chosen), {"scopes": scopes}).result_set}
     edges: dict[str, list[list]] = {}
     for key, entity in named.items():
         passing: dict[str, list[list]] = {}
@@ -256,6 +277,8 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
             if node_id in rows:
                 edges.setdefault(node_id, []).extend(cited)
 
+    # The stages of the deals on each account listed, for the pipeline by stage.
+    pipeline: dict[str, set[str]] = {}
     if "stage" in enums:
         # A deal is a WORKED_ON edge from its owner to the account, with the deal's stage; "open" is any stage not closed.
         deals: dict[str, list[list]] = {}
@@ -264,6 +287,7 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
             if key == enums["stage"] or (enums["stage"] == "open" and not key.startswith("closed")):
                 shown = people.account_label(who, source) if who_label == people.ACCOUNT else who
                 deals.setdefault(node_id, []).append([who_id, shown, who_label, "WORKED_ON", node_id, name, "Service"])
+                pipeline.setdefault(node_id, set()).add(" ".join(str(stage).split()) or "no stage")
         rows = {node_id: row for node_id, row in rows.items() if node_id in deals}
         for node_id, cited in deals.items():
             edges.setdefault(node_id, []).extend(cited)
@@ -281,15 +305,31 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
 
     replaced = _replaced(graph, [row.id for row in listed], scopes) if chosen == "Decision" else set()
     qualified = ", ".join(allowed[key].words.format(value=_named(entity)) for key, entity in named.items())
-    described = " ".join(part for part in (_noun(chosen, enums, len(ordered)), _deal_words(enums, filters), qualified) if part)
+    industry = f"in {filters['industry']}" if "industry" in enums else ""
+    described = " ".join(part for part in (_noun(chosen, enums, len(ordered)), _deal_words(enums, filters), industry, qualified) if part)
     hints = "".join(f" {people.unlinked_hint(entity)}" for entity in named.values() if people.is_account(entity))
+    if unlinked := enums.get("unlinked_owners"):
+        counted = [f"{count} by {who}" for who, count in sorted(unlinked.items(), key=lambda pair: (-pair[1], pair[0]))[:3]]
+        hints += f" Not counted as unowned: owned by someone not linked to a person ({join_names(counted)})."
     if not ordered:
+        if "industry" in enums and not enums.get("industry_synced"):
+            result.answer = f"No account has an industry synced from the CRM, so I can't tell which are in {filters['industry']}."
+            return result
         result.answer = f"No {described}.{hints}"
         return result
     # "3 accounts: Acme and Initech": an account is a company, and "Acme account" reads as something else.
     items = [row.name if enums.get("kind") == "account" else _item(chosen, row, row.id in replaced) for row in listed]
     if len(ordered) > len(listed):
         items.append(f"{len(ordered) - len(listed)} more")
+    if enums.get("stage") == "open" and pipeline:
+        # The pipeline by stage, with counts: "Contract Sent (1): Larkspur Freightways; Qualified To Buy (1): Tidewhistle Robotics".
+        by_stage: dict[str, list[str]] = {}
+        for row in ordered:
+            for stage in sorted(pipeline.get(row.id, ())):
+                by_stage.setdefault(stage, []).append(row.name)
+        told = "; ".join(f"{stage} ({len(names)}): {join_names(names[:MAX_PER_STAGE] + ([f'{len(names) - MAX_PER_STAGE} more'] if len(names) > MAX_PER_STAGE else []))}" for stage, names in sorted(by_stage.items(), key=lambda pair: (-len(pair[1]), pair[0])))
+        result.answer = f"{len(ordered)} {described}, by stage: {told}.{hints}" + coverage.note_for(graph, scopes, result.path)
+        return result
     result.answer = f"{len(ordered)} {described}: {join_names(items)}.{hints}" + coverage.note_for(graph, scopes, result.path)
     return result
 
@@ -308,7 +348,7 @@ def _enum(label: str, key: str, value):
         if kind not in kinds.SERVICE_KINDS:
             return ToolResult(tool=TOOL, answer=f"“{value}” is not a kind. A service's kind is one of {join_names(list(kinds.SERVICE_KINDS))}.", found=False)
         return kind
-    if key in ("status", "stage"):
+    if key in ("status", "stage", "industry"):
         # Free text from the CRM (a lifecycle stage, a deal stage), compared without case, spaces or plurals.
         text = stage_key(value)
         if not text:
@@ -367,13 +407,26 @@ def _apply_enums(graph, label: str, rows: dict[str, Row], enums: dict, scopes: l
         rows = {node_id: row for node_id, row in rows.items() if kinds.kind_or_default(row.kind) == enums["kind"]}
     if "state" in enums:
         rows = {node_id: row for node_id, row in rows.items() if row.state == enums["state"]}
+    if "industry" in enums:
+        # An account in this industry, as the CRM names it ("healthcare" finds "Hospital & Health Care").
+        enums["industry_synced"] = any(row.industry for row in rows.values())
+        rows = {node_id: row for node_id, row in rows.items() if enums["industry"] in stage_key(row.industry)}
     if "status" in enums:
         rows = {node_id: row for node_id, row in rows.items() if stage_key(row.status) == enums["status"]}
     if "standing" in enums:
         replaced = _replaced(graph, list(rows), scopes)
         rows = {node_id: row for node_id, row in rows.items() if (node_id not in replaced) == enums["standing"]}
     if enums.get("unowned"):
-        owned = {row[0] for row in graph.ro_query(_OWNED, {"ids": list(rows)}).result_set}
+        owners = graph.ro_query(_OWNED, {"ids": list(rows), "scopes": list(scopes)}).result_set
+        owned = {row[0] for row in owners}
+        # Owned only by connector users nobody linked to a person: owned, and told apart in the answer.
+        by_person = {node_id for node_id, label, _name, _source in owners if label == "Person"}
+        unlinked: dict[str, int] = {}
+        for node_id, label, name, source in owners:
+            if label == "ExternalUser" and node_id not in by_person:
+                shown = people.account_label(name, source)
+                unlinked[shown] = unlinked.get(shown, 0) + 1
+        enums["unlinked_owners"] = unlinked
         rows = {node_id: row for node_id, row in rows.items() if node_id not in owned}
     return rows
 

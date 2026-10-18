@@ -42,6 +42,8 @@ SOURCE_NAMES = {"jira": "Jira", "hubspot": "HubSpot"}
 # Tickets about a service that who_knows lists: open ones first; then the ones with no sync
 # time (seeded, or filed from Slack: few, and written by hand); then the most recently updated.
 MAX_TICKETS = 8
+# Ticket-only assignees named in "Ask first" before the rest are counted.
+MAX_ASSIGNEES_NAMED = 2
 _UPDATED = "coalesce(ticket.source_updated_at, ticket.updated_at, '')"
 _TICKET_ORDER = (
     f"CASE WHEN coalesce(ticket.state, 'open') = 'closed' THEN 1 ELSE 0 END, CASE WHEN {_UPDATED} = '' THEN 0 ELSE 1 END, {_UPDATED} DESC, ticket.name"
@@ -135,6 +137,11 @@ _NAMES_A_TEAM = re.compile(r"\bteam\b|\b(?:for|in|on|within)\s+(?:the\s+|our\s+)
 _NEWEST = re.compile(r"\b(?:newest|latest|most recent|last) decision(?P<many>s)?\b(?!.*\b(?:about|on|for|in)\s+\S)", re.IGNORECASE)
 # Services only: "tickets with no owner" asks about tickets, which have no owner filter.
 _UNOWNED = re.compile(r"\b(?:no|without an?) owners?\b|\bunowned\b|\bnobody owns\b", re.IGNORECASE)
+_KEY_PEOPLE = re.compile(
+    r"\b(?:most (?:important|critical|central|valuable)|key|load[- ]bearing) (?:people|persons|engineers|employees|folks)\b"
+    r"|\bwho (?:is|are) (?:the |our )?(?:most (?:important|critical)|bus factor|single points? of failure)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
 _NOT_SERVICES = re.compile(r"\b(?:tickets?|decisions?|docs?|documents?|pull requests?|prs?|accounts?|deals?|people|teams?)\b", re.IGNORECASE)
 # A person leaving, not a service failing. "who is the only one who knows billing" names a
 # service and stays on who_knows; "what is Arjun the only one who knows" names a person, and so
@@ -224,6 +231,34 @@ _CRM_LIST = (
     r"|^\s*(?:(?:show|list)(?: me)?\s+|(?:which|what)\s+)?(?:all |the |our )?deals? (?:(?:that )?are (?:in |at )?|in |at )"
     r"(?:the )?(?:stage )?(?!.*\b(?:depend|depends|if|why|who|how|risk|scale|tier|because)\b)[a-z][a-z ]*?(?: stage)?\s*[?.!]*\s*$)"
 )
+# Sales questions in the words people use, each a whole question, each one find over accounts.
+_ACCOUNT = {"label": "Service", "kind": "account"}
+_SALES = (
+    (re.compile(r"^\s*(?:what|which) accounts are (?:open )?opportunit(?:y|ies)\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "state": "open", "status": "opportunity"}),
+    (re.compile(r"^\s*what(?:'s|s| is) in (?:the |our )?(?:sales |deal )?pipeline\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "stage": "open"}),
+    (re.compile(r"^\s*(?:which|what) deals did we lose(?: this (?:quarter|month|year))?\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "stage": "closed lost"}),
+    (re.compile(r"^\s*(?:which|what) deals did we win(?: this (?:quarter|month|year))?\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "stage": "closed won"}),
+    (re.compile(r"^\s*how many customers (?:do we have|are there|have we got)\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "status": "customer"}),
+)
+# "customers in healthcare", "accounts in logistics": by the industry the CRM syncs.
+_IN_INDUSTRY = re.compile(r"^\s*(?:(?:show|list)(?: me)?\s+|(?:which|what) are (?:our )?)?(?P<what>customers|accounts) in (?P<industry>[a-z][a-z &-]{2,30}?)\s*[?.!]*\s*$", re.IGNORECASE)
+# "when does Larkspur renew": an account's renewal, which the CRM sync does not carry.
+_RENEW = re.compile(r"^\s*when (?:does|is|will) .+? (?:renew|up for renewal|due for renewal|renewing)\b", re.IGNORECASE)
+# A deal window the sync cannot apply: deal edges carry a stage, not a date.
+_DEAL_WINDOW = re.compile(r"\bthis (quarter|month|year)\b", re.IGNORECASE)
+
+
+def sales_route(text: str) -> tuple[str, dict] | None:
+    """The find a sales question asks for, or None."""
+    for pattern, args in _SALES:
+        if pattern.match(text):
+            return "find", dict(args)
+    if (industry := _IN_INDUSTRY.match(text)) is not None:
+        status = {"status": "customer"} if industry.group("what").lower() == "customers" else {}
+        return "find", {**_ACCOUNT, **status, "industry": industry.group("industry")}
+    return None
+
+
 # A list by filter: "which tickets are open", "list the services in payments", "what decisions have we
 # made". Before decisions, which shares "decisions"; "what decisions have we made about billing" names
 # one thing and stays on decision_trace, as does any "list ... about X".
@@ -295,6 +330,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
         return "team_dependencies", {"name": text, "direction": "dependencies" if _TEAM_NEEDS.search(text) else "dependents"}
     if _DECISION_HEALTH.search(text):
         return "decision_health", {"name": text}
+    if _KEY_PEOPLE.search(text):
+        # "who are the most important people", "who is the bus factor": people ranked by what they hold,
+        # not services by PageRank, and not one person leaving.
+        return "people_ranking", {"measure": "holds", "team": text}
     if _PEOPLE_RANK.search(text):
         from src.domain.knowledge.people_insights import measure_in
 
@@ -306,6 +345,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
         return "find", {"label": "Decision", "standing": True, **({} if newest.group("many") else {"limit": 1})}
     if _UNOWNED.search(text) and not _NOT_SERVICES.search(text):
         return "find", {"label": "Service", "owner": "none"}
+    nouns = [noun.lower() for noun in _NOT_SERVICES.findall(text)]
+    if _UNOWNED.search(text) and nouns and all(noun.startswith("account") for noun in nouns):
+        # "which accounts have no owner": the CRM's accounts nobody owns, linked or not.
+        return "find", {"label": "Service", "kind": "account", "owner": "none"}
     if _CHANGED.search(text):
         from src.domain.knowledge.what_changed import only_in
 
@@ -331,6 +374,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     if _SEARCH.search(text):
         # Before decisions and memories: "search for decisions about refunds" wants every hit, not one decision.
         return "search", {"text": text}
+    if (sales := sales_route(text)) is not None:
+        return sales
+    if _RENEW.match(text):
+        return "who_owns", {"name": text}
     if _FIND.search(text):
         return "find", find.parse(text) or {"label": "Decision"}
     if EXPLORE.search(text):
@@ -417,6 +464,14 @@ def ask(question: str, scopes: list[str]) -> ToolResult:
         result = _ROUTED[tool](args, scopes)
     if result.found and taken:
         result.answer = resolve.taken_note(taken, result.answer) + result.answer
+    return deal_window_note(question, tool, args, result)
+
+
+def deal_window_note(question: str, tool: str, args: dict, result: ToolResult) -> ToolResult:
+    """"which deals did we win this quarter": deals carry a stage, not a date, so the window is said, not applied."""
+    window = _DEAL_WINDOW.search(question or "")
+    if window and tool == "find" and args.get("stage") and result.found:
+        result.answer += f" (Deal dates are not synced, so these are every deal at that stage, not only this {window.group(1).lower()}'s.)"
     return result
 
 
@@ -462,7 +517,7 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     if target.label != "Service":
         rows = graph.ro_query(
             f"""
-            MATCH (node {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
             WHERE {SCOPED.format(var="service")}
             RETURN service.id, service.name, type(rel), service.kind
             LIMIT 1
@@ -525,11 +580,15 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
             parts.append(f"{named} is in the graph, and no owner or team is recorded for it.")
         if teams:
             parts.append(f"Run by {run_by}.")
+    parts.append(account_line(graph, service, scopes))
+    if _RENEW.match(question) and kinds.kind_or_default(service.kind) == "account":
+        # The sync carries the lifecycle stage and the deals, never a renewal date: said, not guessed.
+        parts.insert(0, f"No renewal date is synced from the CRM for {service.name}; here is what is.")
     if kinds.kind_or_default(service.kind) in ("policy", "playbook"):
         summary = graph.ro_query("MATCH (s:Service {id: $id}) RETURN coalesce(s.summary, '')", {"id": service.id}).result_set
         if summary and summary[0][0].strip():
             parts.append(summary[0][0].strip().rstrip(".") + ".")
-    result.answer = " ".join(parts)
+    result.answer = " ".join(part for part in parts if part)
     return result
 
 
@@ -563,7 +622,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
         result = ToolResult(tool="who_knows", answer="")
         rows = graph.ro_query(
             f"""
-            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node)
             WHERE {SCOPED.format(var="person")}
             RETURN person.id, person.name, type(rel), node.name
             ORDER BY person.name, type(rel)
@@ -576,7 +637,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
         # worked on an account but is not linked to a person (HubSpot).
         account_rows = graph.ro_query(
             f"""
-            MATCH (account)-[rel:{ACCOUNT_RELS}]->(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (account)-[rel:{ACCOUNT_RELS}]->(node)
             WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
             OPTIONAL MATCH (account)-[:IS]->(person:Person)
             RETURN {_ACCOUNT_ID}, {_ACCOUNT_NAME}, {_ACCOUNT_LABEL}, account.source, type(rel), node.name
@@ -588,7 +651,7 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
             result.add(PathStep(account_name(who, who_label, source), rel, node, from_id=who_id, to_id=target.id, from_label=who_label, to_label=target.label))
         links = graph.ro_query(
             f"""
-            MATCH (node {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
             WHERE {SCOPED.format(var="service")}
             RETURN node.name, type(rel), service.id, service.name
             """,
@@ -599,7 +662,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
             result.add(PathStep(source, rel, service, from_id=target.id, to_id=service_id, from_label=target.label, to_label="Service"))
         via = graph.ro_query(
             f"""
-            MATCH (person:Person)-[rel:OWNS|WORKED_ON|KNOWS]->(service:Service)<-[:DESCRIBES|ABOUT]-(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (person:Person)-[rel:OWNS|WORKED_ON|KNOWS]->(service:Service)<-[:DESCRIBES|ABOUT]-(node)
             WHERE {SCOPED.format(var="service")}
             RETURN person.id, person.name, type(rel), service.id, service.name
             ORDER BY person.name
@@ -629,14 +694,59 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
     else:
         named = kinds.capitalized(kinds.subject(target.name, target.kind))
         parts = [f"{named} is {kinds.owned(target.kind)} {join_names(owners)}." if owners else f"{named} has no named owner."]
-    ranked = rank_people(result.path, target)
+        parts.append(account_line(graph, target, scopes))
+    ranked = rank_people_tiered(result.path, target)
     if ranked:
-        first, *rest = [f"{name} ({reasons})" for name, _score, reasons in ranked]
+        # Assignees whose only tie is tickets come after everyone who knows the thing, a few by name.
+        named = [entry for entry in ranked if entry[4] == 0]
+        assignees = [entry for entry in ranked if entry[4] == 1]
+        named += assignees[:MAX_ASSIGNEES_NAMED]
+        first, *rest = [f"{name} ({reasons})" for _who, name, _score, reasons, _tier in named]
+        if len(assignees) > MAX_ASSIGNEES_NAMED:
+            more = len(assignees) - MAX_ASSIGNEES_NAMED
+            rest.append(f"{more} more ticket assignee{'s' if more != 1 else ''}")
         parts.append(f"Ask first: {first}" + (f", then {join_names(rest)}" if rest else "") + ".")
     if open_tickets:
         parts.append(f"Open tickets: {join_names(open_tickets + ([f'{more_open} more'] if more_open else []))}.")
-    result.answer = " ".join(parts)
+    result.answer = " ".join(part for part in parts if part)
     return result
+
+
+def account_line(graph, thing: Entity, scopes: list[str]) -> str:
+    """An account's place in the CRM: "It is a customer (open); deals: Contract Sent (Priya Shah)." "" for anything else."""
+    if kinds.kind_or_default(thing.kind) != "account":
+        return ""
+    rows = graph.ro_query(
+        f"""
+        MATCH (s:Service {{id: $id}})
+        OPTIONAL MATCH (who)-[r:WORKED_ON]->(s)
+        WHERE r.evidence = 'deal' AND labels(who)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="who")}
+        RETURN coalesce(s.status, ''), s.state, coalesce(s.source, ''), collect(DISTINCT [who.name, labels(who)[0], who.source, r.stage])
+        """,
+        {"id": thing.id, "scopes": scopes},
+    ).result_set
+    if not rows:
+        return ""
+    status, state, source, deals = rows[0]
+    if source != "hubspot":
+        # Only a CRM's lifecycle stage is a lifecycle: another tool's status means something else.
+        return ""
+    sentences = []
+    if status:
+        stage = LIFECYCLE_LABELS.get(status.lower(), status.replace("_", " ").lower())
+        sentences.append(f"HubSpot lifecycle stage: {stage}" + (f", {state}" if state else "") + ".")
+    told = sorted(f"{stage} ({account_name(who, label, who_source)})" if stage else account_name(who, label, who_source) for who, label, who_source, stage in deals if who)
+    if told:
+        sentences.append(f"Deals: {join_names(told)}.")
+    return " ".join(sentences)
+
+
+# HubSpot's lifecycle stage ids as people say them.
+LIFECYCLE_LABELS = {
+    "subscriber": "subscriber", "lead": "lead", "marketingqualifiedlead": "marketing qualified lead",
+    "salesqualifiedlead": "sales qualified lead", "opportunity": "opportunity", "customer": "customer",
+    "evangelist": "evangelist", "other": "other",
+}
 
 
 def account_name(name: str, label: str, source: str | None) -> str:
@@ -661,8 +771,18 @@ def rank_people_keyed(path: list[PathStep], target: Entity) -> list[tuple[tuple[
     person the company knows is someone else until it is linked. Work on tickets that lead to the
     target counts once per person, at its heaviest edge.
     """
+    return [(who, name, score, reasons) for who, name, score, reasons, _tier in rank_people_tiered(path, target)]
+
+
+def rank_people_tiered(path: list[PathStep], target: Entity) -> list[tuple[tuple[str, str], str, int, str, int]]:
+    """``rank_people_keyed`` with each one's tier: 0 for a person, or an account with its own edge to
+    the thing (owns, worked on, knows, wrote); 1 for an account whose only tie is tickets (a Jira
+    assignee). Tier 0 always ranks first: one assigned ticket never puts a contractor ahead of the
+    engineer who knows the service."""
     scores: dict[tuple[str, str], int] = {}
     ticket_work: dict[tuple[str, str], int] = {}
+    direct: set[tuple[str, str]] = set()
+    tickets_of: dict[tuple[str, str], set[str]] = {}
     names: dict[tuple[str, str], str] = {}
     reasons: dict[tuple[str, str], dict[str, list[str]]] = {}
     for step in path:
@@ -675,20 +795,28 @@ def rank_people_keyed(path: list[PathStep], target: Entity) -> list[tuple[tuple[
         leads_to_target = step.to_id != target_id if step.to_id and target_id else step.to_name != target.name
         if step.to_label == "Ticket" and step.rel in TICKET_RELS and leads_to_target:
             ticket_work[who] = max(ticket_work.get(who, 0), weight)
+            tickets_of.setdefault(who, set()).add(step.to_id or step.to_name)
             scores.setdefault(who, 0)
         else:
             scores[who] = scores.get(who, 0) + weight
+            if step.to_label != "Ticket":
+                direct.add(who)
         verb, what = _reason(step, target)
         objects = reasons.setdefault(who, {}).setdefault(verb, [])
         if what not in objects:
             objects.append(what)
     for who, weight in ticket_work.items():
         scores[who] += weight
+
+    def tier(who: tuple[str, str]) -> int:
+        return 1 if who[0] in ACCOUNT_LABELS and who not in direct else 0
+
     ranked = []
-    for who in sorted(scores, key=lambda who: (-scores[who], names[who], who)):
+    # Among equals, more tickets first: twelve assigned tickets ahead of one.
+    for who in sorted(scores, key=lambda who: (tier(who), -scores[who], -len(tickets_of.get(who, ())), names[who], who)):
         # "worked on it and TKT-102, wrote notebook#52": one clause per verb, "it" first.
         clauses = [f"{verb} {join_names(sorted(objects, key=lambda what: what != 'it'))}" for verb, objects in reasons[who].items()]
-        ranked.append((who, names[who], scores[who], ", ".join(clauses)))
+        ranked.append((who, names[who], scores[who], ", ".join(clauses), tier(who)))
     return ranked
 
 
