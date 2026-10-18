@@ -35,6 +35,8 @@ def _strict(on: bool) -> None:
 
 
 class TenancyTest(unittest.TestCase):
+    NO_ORG_CONTEXT = True  # what happens with no org is what these test (tests/strict_tenancy.py)
+
     @classmethod
     def setUpClass(cls):
         orgs.ensure_control_indexes()
@@ -137,9 +139,9 @@ class TenancyTest(unittest.TestCase):
             scheduler.schedule(0, name, {"n": "y"}, job_id=job)
         # The legacy org's ids are not prefixed, and its jobs carry no org: queued jobs keep working.
         scheduler.schedule(0, name, {"n": "legacy"}, job_id=job)
-        self.assertIsNotNone(kv().zscore("brain:schedule", job))
-        self.assertIsNotNone(kv().zscore("brain:schedule", f"{self.x.id}:{job}"))
-        self.assertNotIn("org", json.loads(kv().hget("brain:schedule:payload", job)))
+        self.assertIsNotNone(kv().zscore(scheduler.QUEUE, job))
+        self.assertIsNotNone(kv().zscore(scheduler.QUEUE, f"{self.x.id}:{job}"))
+        self.assertNotIn("org", json.loads(kv().hget(scheduler.PAYLOADS, job)))
         scheduler.run_due(now=time.time() + 1)
         self.assertEqual(
             sorted(ran),
@@ -162,11 +164,11 @@ class TenancyTest(unittest.TestCase):
         ran = []
         name = f"tenancyGone{uuid.uuid4().hex[:6]}"
         scheduler.register(name, ran.append)
-        kv().hset("brain:schedule:payload", "gone:j", json.dumps({"name": name, "payload": {}, "org": "01gone"}))
-        kv().zadd("brain:schedule", {"gone:j": time.time() - 1})
+        kv().hset(scheduler.PAYLOADS, "gone:j", json.dumps({"name": name, "payload": {}, "org": "01gone"}))
+        kv().zadd(scheduler.QUEUE, {"gone:j": time.time() - 1})
         scheduler.run_due()
         self.assertEqual(ran, [])
-        self.assertIsNone(kv().zscore("brain:schedule", "gone:j"))
+        self.assertIsNone(kv().zscore(scheduler.QUEUE, "gone:j"))
 
     # --- Slack routing -----------------------------------------------------------------------
 
@@ -329,7 +331,8 @@ class TenancyTest(unittest.TestCase):
 
     def test_a_team_the_legacy_org_serves_cannot_be_taken_before_or_after_migration(self):
         team = f"TLEG{uuid.uuid4().hex[:6].upper()}"
-        workspace_module.upsert_workspace(team_id=team, bot_token_enc="plain:xoxb-legacy", team_name="Legacy Co")
+        with tenancy.org_context(tenancy.legacy_org()):
+            workspace_module.upsert_workspace(team_id=team, bot_token_enc="plain:xoxb-legacy", team_name="Legacy Co")
         try:
             self.assertIsNone(orgs.routed_org_id(team))
             self.assertEqual(self._install(self.x.id, team).status_code, 409)
@@ -338,7 +341,8 @@ class TenancyTest(unittest.TestCase):
                 self.assertIsNone(workspace_module.get_workspace_row(team))
             self.assertEqual(workspace_module.get_workspace_row(team)["bot_token_enc"], "plain:xoxb-legacy")
         finally:
-            workspace_module.forget_workspace_row(team)
+            with tenancy.org_context(tenancy.legacy_org()):
+                workspace_module.forget_workspace_row(team)
 
     def test_installs_into_new_orgs_wait_for_the_migration(self):
         from fastapi import FastAPI
@@ -407,8 +411,9 @@ class TenancyTest(unittest.TestCase):
         app = FastAPI()
         app.include_router(org_ops.router)
         team, taken = f"TMIG{uuid.uuid4().hex[:6].upper()}", f"TTAKEN{uuid.uuid4().hex[:6].upper()}"
-        workspace_module.upsert_workspace(team_id=team, bot_token_enc="plain:xoxb-1", team_name="Legacy Co")
-        workspace_module.upsert_workspace(team_id=taken, bot_token_enc="plain:xoxb-2", team_name="Moved Co")
+        with tenancy.org_context(tenancy.legacy_org()):
+            workspace_module.upsert_workspace(team_id=team, bot_token_enc="plain:xoxb-1", team_name="Legacy Co")
+            workspace_module.upsert_workspace(team_id=taken, bot_token_enc="plain:xoxb-2", team_name="Moved Co")
         orgs.route_team(taken, self.y.id)
         object.__setattr__(settings, "brain_admin_token", ADMIN)
         try:
@@ -428,8 +433,9 @@ class TenancyTest(unittest.TestCase):
             self.assertIn(self.x.id, [org["id"] for org in listed])
         finally:
             object.__setattr__(settings, "brain_admin_token", "")
-            _, graph = connect()
-            graph.query("MATCH (w:SlackWorkspace) WHERE w.team_id IN $teams DETACH DELETE w", {"teams": [team, taken]})
+            with tenancy.org_context(tenancy.legacy_org()):
+                _, graph = connect()
+                graph.query("MATCH (w:SlackWorkspace) WHERE w.team_id IN $teams DETACH DELETE w", {"teams": [team, taken]})
             orgs.unroute_team(team)
             orgs.unroute_team(taken)
 

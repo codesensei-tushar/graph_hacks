@@ -287,13 +287,15 @@ class AlgorithmToolsTest(unittest.TestCase):
         try:
             public = ask_service.decision_pressure("billing retries still the last word", ORG)
             self.assertIn("TKT-109 (about Billing Service)", public.answer)
-            self.assertIn("app#99 (about Billing Service)", public.answer)
+            # The top 3 by topic, then a count (app#99 is the fourth).
+            self.assertIn("and 1 more.", public.answer)
             self.assertNotIn("ledger#9", public.answer)
             self.assertIn("TKT-109 -[ABOUT]-> Billing Service", _cites(public))
-            self.assertIn("app#99 -[TOUCHES]-> Billing Service", _cites(public))
             self.assertIn("Retry renewal webhooks inside the billing service -[BASED_ON]-> TKT-102", _cites(public))
             private = ask_service.decision_pressure("billing retries still the last word", ORG + [PRIVATE])
-            self.assertIn("ledger#9 (about Billing Service)", private.answer)
+            # A private pull request counts in its room (the fourth and fifth uncited items are told as a count).
+            self.assertIn("and 2 more.", private.answer)
+            self.assertIn("and 1 more.", public.answer)
             self.assertEqual(ask_service.route("why did we move the memory layer off postgres")[0], "decision_trace")
         finally:
             graph.query("MATCH (n) WHERE n.id IN ['TKT-109', 'pr-hidden', 'pr-shown'] DETACH DELETE n")

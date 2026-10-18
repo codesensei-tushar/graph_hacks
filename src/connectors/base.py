@@ -134,6 +134,9 @@ class Container:
     # False: the container and its items are org_internal. True: their scope is the container's own,
     # and only people whose linked account ``readers()`` returns may read it, in a DM.
     restricted: bool = False
+    # The vendor's own count of what the container holds (a Jira project's issues, a HubSpot portal's
+    # companies), when the listing gives it cheaply; None when unknown. Shown next to what was synced.
+    available: int | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +147,7 @@ class AvailableContainer:
     external_id: str
     key: str
     name: str
+    available: int | None = None  # as ``Container.available``
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,9 @@ TEST_GRAPH_SUFFIX = os.environ.get("TEST_GRAPH_SUFFIX", "")
 os.environ["FALKORDB_GRAPH"] = f"company_test{TEST_GRAPH_SUFFIX}"
 # The control graph (orgs, workspace routes) gets the same treatment.
 os.environ["BRAIN_CONTROL_GRAPH"] = f"brain_control_test{TEST_GRAPH_SUFFIX}"
+# And the scheduler's queue: another run's run_due() would otherwise run this run's jobs, or drop
+# them as belonging to an org its own control graph does not have.
+os.environ["BRAIN_SCHEDULE_KEY"] = f"brain:schedule:test{TEST_GRAPH_SUFFIX}"
 os.environ["SLACK_OWNER_ID"] = "UOWNER"
 os.environ["SLACK_ADMIN_IDS"] = ""
 # Tests never call a real model; LLM-gated code takes its no-model fallback.
@@ -22,3 +25,9 @@ os.environ["LLM_API_KEY"] = ""
 # dummy so tests can sign events for /slack/events without reading the dev .env value.
 os.environ["SLACK_BOT_TOKEN"] = ""
 os.environ["SLACK_SIGNING_SECRET"] = "test-signing-secret"
+
+# The suite as production runs it: a graph write with no org raises (tests/strict_tenancy.py).
+if os.environ.get("TENANCY_WRITE_STRICT", "").lower() in ("1", "true", "yes"):
+    from tests import strict_tenancy
+
+    strict_tenancy.install()

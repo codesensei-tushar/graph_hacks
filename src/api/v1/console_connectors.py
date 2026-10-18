@@ -1,13 +1,17 @@
 """The console's JSON API for connections, and its ask. The console UI uses only this.
 
-    GET    /console/api/connections                    every connection of the org, with sync status
+    GET    /console/api/connections                    every connection of the org, with sync status; each container
+                                                       has ``readers`` (null: company-wide; N: restricted to N
+                                                       readers) and ``available`` (the vendor's total, or null)
     GET    /console/api/connections/{id}/sites         Jira sites to choose from, when more than one (admins)
     POST   /console/api/connections/{id}/site          {cloud_id}: the chosen site (admins)
-    GET    /console/api/connections/{id}/available     [{external_id, key, name}]: containers to select (admins)
+    GET    /console/api/connections/{id}/available     [{external_id, key, name, available}]: containers to select (admins)
     PUT    /console/api/connections/{id}/containers    {selected: [external_id]} (admins)
     POST   /console/api/connections/{id}/sync          fetch now (admins)
     DELETE /console/api/connections/{id}               disconnect: removes everything it wrote (admins)
     POST   /console/api/ask                            {q}: the /api/ask shape, with the asker's own scopes
+    GET    /console/api/slack                          the session's Slack workspace: {team_id, team_name, bot_installed,
+                                                       home_channel, channels, last_event_at, install_url}
 
 Connecting a source (``POST /console/api/connectors/{source}/connect``) and the vendor callbacks
 are package D's (``console_oauth.py``); the Jira site routes here call D's
@@ -22,13 +26,16 @@ is returned, and vendor error text is never echoed.
 ``{id}`` is the install key, ``<source>:<install>``.
 """
 
+import json
 import logging
 import time
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from src.connectors import graph as connector_graph
 from src.connectors import registry, store, sync
 from src.connectors.base import Install
 from src.core import tenancy
@@ -108,10 +115,17 @@ def _connector(source: str):
 def _row(install: Install, status: str, *, account=None, site=None, created_by=None, created_at=None, error=None) -> dict:
     connector = registry.get(install.source)
     sync_status = sync.install_status(connector, install) if connector else {"containers": []}
-    containers = [
-        {key: container.get(key) for key in ("id", "name", "items", "backfilled", "capped", "last_fetch_at", "last_error")}
-        for container in sync_status["containers"]
-    ]
+    facts = connector_graph.container_facts(install)
+    containers = []
+    for container in sync_status["containers"]:
+        row = {key: container.get(key) for key in ("id", "name", "items", "backfilled", "capped", "last_fetch_at", "last_error")}
+        fact = facts.get(container["id"]) or {}
+        row["name"] = row["name"] or fact.get("name")
+        # None: everyone in the company reads it; N: restricted to the N linked accounts the vendor lets read it.
+        row["readers"] = fact.get("readers")
+        # The vendor's own total for the container, when its listing gives one cheaply; None when unknown.
+        row["available"] = fact.get("available")
+        containers.append(row)
     return {
         "id": install.key,
         "source": install.source,
@@ -216,7 +230,7 @@ async def available(install_key: str, session=Depends(console_admin)):
     except Exception as error:
         log.warning("[console] available containers failed install=%s: %s", install_key, type(error).__name__)
         return JSONResponse({"error": "the source could not be reached; try again"}, status_code=502)
-    return [{"external_id": c.external_id, "key": c.key, "name": c.name} for c in found]
+    return [{"external_id": c.external_id, "key": c.key, "name": c.name, "available": c.available} for c in found]
 
 
 @router.put("/connections/{install_key}/containers")
@@ -297,6 +311,90 @@ def disconnect(install_key: str, request: Request, session=Depends(console_admin
 
 def _audit(org_id: str, session, action: str, target: str) -> None:
     sync._audit(org_id, _actor(session), action, target, "ok")
+
+
+# --- slack -----------------------------------------------------------------------------
+
+SLACK_CHANNELS_CACHE_SECONDS = 120
+SLACK_MAX_CHANNELS = 500
+_INSTALLER_ROLES = ("owner", "pending")
+
+
+def _slack_channels(team_id: str, workspace) -> list[dict]:
+    """The channels the bot is in, ``[{id, name, private}]``, cached per team for two minutes so a
+    dashboard reload is not a Slack call. Empty when Slack cannot be asked."""
+    key = f"console:slack:channels:{team_id}"
+    cached = kv().get(key)
+    if cached:
+        try:
+            return json.loads(cached)
+        except ValueError:
+            pass
+    try:
+        found = workspace.client.get_bot_conversations(max_channels=SLACK_MAX_CHANNELS)
+    except Exception as error:
+        log.warning("[console] Slack channels unavailable team=%s: %s", team_id, type(error).__name__)
+        return []
+    channels = sorted(({"id": c.id, "name": c.name, "private": bool(c.is_private)} for c in found), key=lambda c: (c["private"], c["name"]))
+    kv().set(key, json.dumps(channels), ex=SLACK_CHANNELS_CACHE_SECONDS)
+    return channels
+
+
+def _visible_channels(channels: list[dict], slack_user: str | None) -> list[dict]:
+    """Every public channel; a private one only when the asker is in it (as the graph records it)."""
+    private = [c["id"] for c in channels if c["private"]]
+    mine: set[str] = set()
+    if private and slack_user:
+        from src.db.falkordb_client import connect
+
+        _, graph = connect()
+        rows = graph.ro_query(
+            "MATCH (:SlackUser {id: $user})-[:MEMBER_OF]->(c:Channel) WHERE c.id IN $ids RETURN c.id", {"user": slack_user, "ids": private}
+        ).result_set
+        mine = {row[0] for row in rows}
+    return [c for c in channels if not c["private"] or c["id"] in mine]
+
+
+def _iso(seconds) -> str | None:
+    try:
+        return datetime.fromtimestamp(float(seconds), UTC).isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError):
+        return None
+
+
+def slack_status(org: tenancy.OrgRef, session) -> dict:
+    """The session's own Slack workspace, in the org in context. Nothing secret: no token, no scopes."""
+    from src.domain.slack.workspace import get_workspace_by_team_id, get_workspace_row
+
+    team_id = _get(session, "team") or None
+    row = get_workspace_row(team_id) if team_id else None
+    workspace = get_workspace_by_team_id(team_id) if team_id else None
+    installed = workspace is not None  # a pending (unverified) install is invisible to both lookups
+    channels = _visible_channels(_slack_channels(team_id, workspace), _get(session, "slack_user")) if installed else []
+    home_id = (row or {}).get("home_channel_id") or (getattr(workspace, "home_channel_id", None) if workspace else None)
+    home = None
+    if home_id:
+        from src.domain.slack.channel_membership import channel_names
+
+        name = next((c["name"] for c in channels if c["id"] == home_id), None) or channel_names([home_id]).get(home_id)
+        home = {"id": home_id, "name": name or home_id}
+    may_install = settings.slack_oauth_enabled and _get(session, "role") in _INSTALLER_ROLES
+    return {
+        "team_id": team_id,
+        "team_name": (row or {}).get("team_name") or (getattr(workspace, "team_name", None) if workspace else None),
+        "bot_installed": installed,
+        "home_channel": home,
+        "channels": channels,
+        "last_event_at": _iso(kv().get(f"slack:last_event:{team_id}")) if team_id else None,
+        "install_url": "/slack/oauth/install" if may_install else None,
+    }
+
+
+@router.get("/slack")
+def slack(session=Depends(console_user)):
+    org = _org(session)
+    with tenancy.org_context(org):
+        return slack_status(org, session)
 
 
 # --- ask -------------------------------------------------------------------------------

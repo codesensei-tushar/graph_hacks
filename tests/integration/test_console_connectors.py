@@ -173,6 +173,80 @@ class ConsoleConnectorsTest(unittest.TestCase):
         self.assertIsNone(orgs.external_account_org(self.account))
         self.assertIn("connector.disconnect", [call.args[2] for call in audit.call_args_list])
 
+    def test_containers_say_who_reads_them_and_what_the_vendor_holds(self):
+        """Per container: ``readers`` null (company-wide) or N (restricted to N readers), and ``available``,
+        the vendor's own total when its listing gives one (null otherwise)."""
+        from src.connectors import graph as connector_graph
+        from src.connectors.base import ExternalUser
+
+        key = self.install.key
+        readers = [ExternalUser(self.install.user_id(f"acc{n}"), "consolefake", f"acc{n}", f"Reader {n}", None) for n in range(2)]
+
+        def containers(install):
+            wanted = set(install.get_list("projects"))
+            listed = [
+                Container(id=install.container_id("10"), name="ALPHA", external_id="10", available=42),
+                Container(id=install.container_id("30"), name="GAMMA", external_id="30", restricted=True),
+            ]
+            return [c for c in listed if c.name in wanted]
+
+        with mock.patch.object(FAKE, "containers", containers), mock.patch.object(FAKE, "readers", lambda install, container: readers, create=True):
+            with tenancy.org_context(self.x.id):
+                for user in readers:
+                    connector_graph.upsert_user(self.install, user)
+            self.client.put(f"/console/api/connections/{key}/containers", json={"selected": ["10", "30"]}, headers=self.headers)
+            self._run_scheduler()
+        row = next(row for row in self.client.get("/console/api/connections").json() if row["id"] == key)
+        got = {c["name"]: (c["readers"], c["available"]) for c in row["containers"]}
+        self.assertEqual(got, {"ALPHA": (None, 42), "GAMMA": (2, None)})
+        available = self.client.get(f"/console/api/connections/{key}/available").json()
+        self.assertEqual(set(available[0]), {"external_id", "key", "name", "available"})
+
+    def test_slack_card_is_the_sessions_own_workspace(self):
+        from src.domain.slack import channel_membership
+        from src.domain.slack import workspace as workspace_module
+        from src.domain.slack.token_crypto import encrypt_token
+        from src.integrations.slack.client import SlackConversation
+
+        class Bot:
+            calls = 0
+
+            def get_bot_conversations(self, max_channels=1000, require_complete=False):
+                Bot.calls += 1
+                return [SlackConversation("CGEN", "general", False), SlackConversation("GLEAD", "leads", True), SlackConversation("GHR", "hr", True)]
+
+        team = f"TX{uuid.uuid4().hex[:6].upper()}"
+        self.session = {**self.session, "team": team, "role": "owner"}
+        with tenancy.org_context(self.x.id):
+            workspace_module.upsert_workspace(team_id=team, bot_token_enc=encrypt_token("xoxb-x"), bot_user_id="UBOT", team_name="Console X", installed_by="UADA")
+            workspace_module.set_home_channel(team, "CGEN")
+            channel_membership.record_membership("GLEAD", "UADA")
+        falkordb_client.kv().set(f"slack:last_event:{team}", 1_760_000_000)
+        with mock.patch.object(workspace_module, "_client_for", return_value=Bot()), mock.patch.object(type(settings), "slack_oauth_enabled", True):
+            card = self.client.get("/console/api/slack").json()
+            again = self.client.get("/console/api/slack").json()
+        self.assertEqual(Bot.calls, 1, "the channel list is cached")
+        self.assertEqual(card, again)
+        self.assertEqual(
+            card,
+            {
+                "team_id": team, "team_name": "Console X", "bot_installed": True, "home_channel": {"id": "CGEN", "name": "general"},
+                # A private channel shows only to someone in it: UADA is in #leads, not #hr.
+                "channels": [{"id": "CGEN", "name": "general", "private": False}, {"id": "GLEAD", "name": "leads", "private": True}],
+                "last_event_at": "2025-10-09T08:53:20Z", "install_url": "/slack/oauth/install",
+            },
+        )
+        self.assertNotIn("xoxb", str(card))
+        # A member gets no install link; another org's session sees its own (absent) workspace.
+        self.session = {**self.session, "role": "member"}
+        with mock.patch.object(workspace_module, "_client_for", return_value=Bot()):
+            self.assertIsNone(self.client.get("/console/api/slack").json()["install_url"])
+        self.session = {**self.session, "org": self.y.id, "team": "TNOBOT"}
+        self.assertEqual(
+            self.client.get("/console/api/slack").json(),
+            {"team_id": "TNOBOT", "team_name": None, "bot_installed": False, "home_channel": None, "channels": [], "last_event_at": None, "install_url": None},
+        )
+
     def test_a_step_finishing_after_disconnect_does_not_cancel_the_removal(self):
         key = self.install.key
         self.client.put(f"/console/api/connections/{key}/containers", json={"selected": ["10"]}, headers=self.headers)

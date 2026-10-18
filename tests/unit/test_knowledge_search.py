@@ -121,7 +121,8 @@ class FallbackTest(unittest.TestCase):
             self.assertIs(fallback.before_refusing("q", ["org_shared"], self.MISS), self.MISS)
 
     def test_search_is_the_last_step(self):
-        self.assertIs(fallback.STEPS[-1], fallback._search)
+        # Search, then what was said in chat, last.
+        self.assertEqual(fallback.STEPS[-2:], (fallback._search, fallback._recall))
 
 
 class EnsureIndexesTest(unittest.TestCase):

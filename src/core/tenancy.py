@@ -13,7 +13,10 @@ the public ask page and MCP, exactly as before there were orgs.
 org itself (its graph): with none set it falls back to the legacy org:
 production logs where that happened (rate-limited), and with ``TENANCY_STRICT`` set (the
 tenancy tests) it raises ``NoOrgContext`` instead, so a code path that forgot to set the
-org fails loudly rather than reading another org's graph.
+org fails loudly rather than reading another org's graph. ``TENANCY_WRITE_STRICT`` (on in
+production) does the same for graph writes only (``falkordb_client._GraphProxy``): reads keep
+the fallback, a write with no org raises ``NoOrgContext``. The legacy-only routes set the legacy
+org explicitly (``LegacyOrgRoutes``), and so does startup.
 
 Entry points set the context explicitly: the scheduler (per job), the Slack routes (per
 team), the console API (per session), background threads and BackgroundTasks (they copy
@@ -161,6 +164,37 @@ def in_org(org: "OrgRef | str", fn: Callable, *args, **kwargs):
     is gone, so pass ``background.add_task(in_org, org, fn, ...)``."""
     with org_context(org):
         return fn(*args, **kwargs)
+
+
+# The surfaces that serve only the legacy org: the public site and ask page, MCP, the GitHub app,
+# and the operator's seed and team import. A request to one of them runs in the legacy org's
+# context, set explicitly (``LegacyOrgRoutes``), so its writes pass ``TENANCY_WRITE_STRICT``.
+# Every other route sets its own org (Slack per team, the console per session) or none.
+LEGACY_EXACT_PATHS = frozenset({"/", "/explore", "/ops/seed", "/ops/import"})
+LEGACY_PATH_PREFIXES = ("/api/", "/github/", "/mcp", "/team/")
+
+
+def is_legacy_path(path: str) -> bool:
+    return path in LEGACY_EXACT_PATHS or path.startswith(LEGACY_PATH_PREFIXES)
+
+
+class LegacyOrgRoutes:
+    """ASGI middleware: a request to a legacy-only surface (``is_legacy_path``) runs in the legacy
+    org's context. Pure ASGI, so the route, its thread pool call and its BackgroundTasks (which run
+    inside this call, after the response) all see it."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or not is_legacy_path(scope.get("path") or ""):
+            await self.app(scope, receive, send)
+            return
+        token = _current.set(legacy_org())
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _current.reset(token)
 
 
 _CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz"

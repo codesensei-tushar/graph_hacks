@@ -198,25 +198,30 @@ def run_in_process(args) -> None:
                 os.environ["GITHUB_PRIVATE_KEY"] = "unused"
         from fastapi.testclient import TestClient
 
+        from src.core import tenancy
         from src.core.config import settings
         from src.main import app
 
-        _seed_and_repos(args)
-        register_fake_workspace()
-        use_agent_loop()
-        replayer = WorkspaceReplayer(
-            TestClient(app),
-            signing_secret=settings.slack_signing_secret,
-            fake=fake,
-            fake_base_url=server.base_url,
-            response_url=server.response_url("replay"),
-        )
-        _play(replayer, args.steps or "all", sales=not args.no_sales)
-        if not args.no_github and (args.steps or "all") in ("all", "demo"):
-            _play_heads_up(replayer, fake)
-        # Queued reactions and expiry jobs would wait for a scheduler that never runs here.
-        clear_team_state(replayer)
-        print(f"\nfake Slack calls={len(fake.calls)} bot messages={sum(1 for m in fake.messages if m.user == fake.bot_user_id and not m.deleted)}")
+        # Imported only now, after the environment above: tenancy loads src.core.config, which reads
+        # the fake Slack's address once. In process the replay writes the legacy org's graph, said
+        # explicitly for TENANCY_WRITE_STRICT.
+        with tenancy.org_context(tenancy.legacy_org()):
+            _seed_and_repos(args)
+            register_fake_workspace()
+            use_agent_loop()
+            replayer = WorkspaceReplayer(
+                TestClient(app),
+                signing_secret=settings.slack_signing_secret,
+                fake=fake,
+                fake_base_url=server.base_url,
+                response_url=server.response_url("replay"),
+            )
+            _play(replayer, args.steps or "all", sales=not args.no_sales)
+            if not args.no_github and (args.steps or "all") in ("all", "demo"):
+                _play_heads_up(replayer, fake)
+            # Queued reactions and expiry jobs would wait for a scheduler that never runs here.
+            clear_team_state(replayer)
+            print(f"\nfake Slack calls={len(fake.calls)} bot messages={sum(1 for m in fake.messages if m.user == fake.bot_user_id and not m.deleted)}")
 
 
 def run_against_instance(args) -> None:
@@ -264,6 +269,7 @@ def main() -> None:
     if args.app_url:
         run_against_instance(args)
     else:
+        # Nothing may load src.core.config before run_in_process points it at the fake Slack API.
         run_in_process(args)
 
 

@@ -23,6 +23,7 @@ the portal the CRM answers for is the ``hub_id`` the install claimed (``hubspot/
 
 import email.utils
 import json
+import logging
 import time
 
 from src.connectors.base import Connector, ConnectorError, Container, Install, InstallInfo, OAuthSpec, Page
@@ -31,6 +32,8 @@ from src.connectors.hubspot import oauth as hubspot_oauth
 from src.connectors.hubspot.client import API_VERSION, BATCH, HubSpotClient
 from src.connectors.http import HttpError
 from src.connectors.oauth import OAUTH_SECRET_FIELDS, bearer_for
+
+log = logging.getLogger(__name__)
 
 # Accounts kept per portal, newest first.
 MAX_COMPANIES = 500
@@ -73,9 +76,18 @@ class HubSpotConnector(Connector):
         return [
             Container(
                 id=install.container_id(portal), name=f"HubSpot portal {portal}", external_id=portal,
-                url=f"https://{ui_domain}/contacts/{portal}/companies", kind="portal",
+                url=f"https://{ui_domain}/contacts/{portal}/companies", kind="portal", available=self._company_total(install),
             )
         ]
+
+    def _company_total(self, install: Install) -> int | None:
+        """The portal's companies in scope, as HubSpot counts them: one search asking for one record, made
+        when the containers are listed (hourly). A failure is no count, never a failed listing."""
+        try:
+            return self._client_for(install).total("companies", mapping.scope_filters())
+        except Exception as error:
+            log.info("[hubspot] company count unavailable for %s: %s", install.key, type(error).__name__)
+            return None
 
     def fetch(self, install: Install, container: Container, cursor: str | None) -> Page:
         state = _decode(cursor)
