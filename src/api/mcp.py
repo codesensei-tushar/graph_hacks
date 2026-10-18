@@ -11,8 +11,9 @@ SDK's session manager inside the app's lifespan.
 The server is stateless JSON-RPC over POST: it has no stream to hold open for a GET and no
 session to end with a DELETE, so both are 405 before anything else. The gate, per request:
 
-- no bearer token: counted against the address's ask-page budget (``ask_api.admit``);
-  over it, 429 with ``Retry-After``;
+- no bearer token: counted against the address's ask-page budget (``ask_api.admit``),
+  priced by what the body calls (``call_cost``: a heavy tool spends ``ask_api.HEAVY_COST``);
+  over it, 429 with ``Retry-After``; a body over ``MAX_BODY_BYTES`` is 413;
 - a bearer token while ``MCP_TOKEN`` is unset: the same as no token;
 - ``MCP_TOKEN`` itself: passes and is never counted;
 - any other token while ``MCP_TOKEN`` is set: 403.
@@ -78,6 +79,59 @@ async def _reply(send: Send, status: int, body: dict, headers: list[tuple[bytes,
     await send({"type": "http.response.body", "body": payload})
 
 
+# A public caller's request body is read to price it; no JSON-RPC call to these tools is near this size.
+MAX_BODY_BYTES = 64 * 1024
+
+
+def call_cost(body: bytes) -> int:
+    """Tokens a JSON-RPC body spends: each ``tools/call`` at its tool's price, any other message 1."""
+    try:
+        payload = json.loads(body or b"null")
+    except ValueError:
+        return 1
+    messages = payload if isinstance(payload, list) else [payload]
+    cost = 0
+    for message in messages:
+        params = message.get("params") if isinstance(message, dict) else None
+        if isinstance(message, dict) and message.get("method") == "tools/call" and isinstance(params, dict):
+            arguments = params.get("arguments")
+            cost += ask_api.tool_cost(params.get("name"), arguments if isinstance(arguments, dict) else None)
+        else:
+            cost += 1
+    return max(1, cost)
+
+
+async def _read_body(receive: Receive) -> bytes | None:
+    """The whole request body, or None once it passes ``MAX_BODY_BYTES`` or the client goes away."""
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        message = await receive()
+        if message["type"] != "http.request":
+            return None
+        chunk = message.get("body", b"")
+        size += len(chunk)
+        if size > MAX_BODY_BYTES:
+            return None
+        chunks.append(chunk)
+        if not message.get("more_body", False):
+            return b"".join(chunks)
+
+
+def _replay(body: bytes, receive: Receive) -> Receive:
+    """A ``receive`` that hands the app the body already read, then defers to the real one."""
+    sent = False
+
+    async def replay():
+        nonlocal sent
+        if not sent:
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return await receive()
+
+    return replay
+
+
 # Stateless JSON-RPC: every call is a POST. A GET would otherwise hold an empty 200 open.
 ALLOWED_METHODS = ("POST",)
 
@@ -108,7 +162,11 @@ class CallerGate:
             return
         # nginx sets X-Real-IP; a direct caller is known by its socket.
         client = headers.get(b"x-real-ip", b"").decode("latin-1") or (scope.get("client") or (None,))[0]
-        decision = ask_api.admit(client)
+        body = await _read_body(receive)
+        if body is None:
+            await _reply(send, 413, {"error": f"request bodies are limited to {MAX_BODY_BYTES} bytes"})
+            return
+        decision = ask_api.admit(client, call_cost(body))
         if not decision.allowed:
             await _reply(
                 send,
@@ -117,7 +175,7 @@ class CallerGate:
                 [(b"retry-after", str(decision.retry_after).encode())],
             )
             return
-        await self.app(scope, receive, send)
+        await self.app(scope, _replay(body, receive), send)
 
 
 class BareMountPath:
