@@ -54,7 +54,7 @@
     try {
       const data = await getJson("/api/ask/tools");
       company = data.company || null;
-      catalogue = { company, name: data.company_name || null };
+      catalogue = { company, name: data.company_name || null, also: data.also || [] };
       renderChips(data.examples || []);
       renderGraphLine();
       renderTools(data.tools || [], data.writes || []);
@@ -105,6 +105,7 @@
     if (!catalogue) return;
     const line = $("#graph-line");
     if (catalogue.company === "company-brain") line.textContent = "This project's own graph";
+    else if (catalogue.name && catalogue.also.includes("company-brain")) line.textContent = `${catalogue.name}, a synthetic demo company, and this project's own repo`;
     else if (catalogue.name) line.textContent = `${catalogue.name}, a synthetic demo company`;
   }
 

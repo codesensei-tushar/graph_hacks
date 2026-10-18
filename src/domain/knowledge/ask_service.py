@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, coordination, coverage, fallback, find, kinds, memories, resolve, ticket_status
+from src.domain.knowledge import algorithms, bridges, coordination, coverage, fallback, find, kinds, memories, pr_explain, resolve, ticket_status
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -312,6 +312,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     if rest:
         # "who owns billing and what breaks if auth goes down": the first question; the agent answers the second after it.
         return route(first, tickets)
+    if pr_explain.asks_about_a_pull_request(text) and not _SHOULD_KNOW.search(text) and not _ASK_WHO.search(text) and not EXPLORE.search(text):
+        # "what did PR #207 do", "who did #216", "who reviewed graph_hacks#207", "what does #207 affect": the
+        # pull request itself. Who should hear about it stays on who_should_know; a ticket key is no pull request.
+        return "pr_explain", {"name": text}
     ask_who = _ASK_WHO.search(text)
     if ask_who and ask_who.start() > 0 and not coordination.pr_reference(text):
         # "I am new on payments ... who should I talk to about the invoice worker": the person to go to, about
@@ -965,6 +969,7 @@ _ROUTED = {
     "recall": lambda args, scopes: memories.recall(args["query"], scopes, args.get("k")),
     "explore": lambda args, scopes: _explore().explore(args["name"], scopes, args.get("depth")),
     "ticket_status": lambda args, scopes: ticket_status.ticket_status(args["name"], scopes),
+    "pr_explain": lambda args, scopes: pr_explain.pr_explain(args["name"], scopes),
     "find": lambda args, scopes: find.find(args.get("label"), {key: value for key, value in args.items() if key != "label"}, scopes),
     "search": lambda args, scopes: _search(args["text"], scopes),
 }

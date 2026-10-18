@@ -311,6 +311,17 @@ def _pull_request_named(graph, question: str, reference: tuple[str | None, int],
     return _miss(Resolution(query=question, reason="no_match"))
 
 
+def find_pull_request(graph, question: str, reference: tuple[str | None, int], scopes: list[str]):
+    """The readable pull request ``reference`` names, as (Entity, candidates), or a ``ToolResult`` miss.
+    For other tools that name a pull request by number (``pr_explain``)."""
+    return _pull_request_named(graph, question, reference, scopes)
+
+
+def find_issue(graph, reference: tuple[str | None, int], scopes: list[str]) -> Entity | None:
+    """The one readable GitHub issue ``reference`` names, or None."""
+    return _issue(graph, reference, scopes)
+
+
 def _in_repo(row: tuple, repo: str) -> bool:
     wanted, short, full = repo.lower(), _repo_of(row).lower(), row[2].lower()
     return wanted in (short, full) or (bool(full) and full.endswith("/" + wanted))

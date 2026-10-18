@@ -100,6 +100,7 @@
     load_bearing: ["what breaks if {service} goes down", "who knows {service}"],
     onboarding_brief: ["what if {person} leaves", "what breaks if {service} goes down"],
     who_should_know: ["what breaks if {service} goes down", "what if {owner} leaves"],
+    pr_explain: ["who knows {service}", "what breaks if {service} goes down"],
     decision_pressure: ["why did we {decision}", "who knows {service}"],
     working_groups: ["who is on the {team} team", "what if {person} leaves"],
     reading_list: ["who knows {service}", "what breaks if {service} goes down"],

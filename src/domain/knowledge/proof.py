@@ -11,7 +11,7 @@ because the refusal must not depend on the graph being up.
 from dataclasses import asdict, dataclass
 
 from src.db.falkordb_client import connect, dark_graph
-from src.domain.knowledge import ask_service, catalogue
+from src.domain.knowledge import ask_service, catalogue, companies
 from src.domain.knowledge.dto import ToolResult
 
 # Six read questions per seeded company: ownership, who knows, a decision, blast radius,
@@ -103,8 +103,8 @@ def _cell(outcome: ProofOutcome) -> str:
 
 def company_id() -> str:
     _, graph = connect()
-    rows = graph.ro_query("MATCH (c:Company) RETURN c.id ORDER BY c.id LIMIT 1").result_set
-    return rows[0][0] if rows else "quillfern"
+    primary, _name = companies.primary_company(graph)
+    return primary or "quillfern"
 
 
 def outcome_of(result: ToolResult) -> ProofOutcome:
