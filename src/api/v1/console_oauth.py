@@ -41,7 +41,11 @@ SOURCES = ("jira", "hubspot")
 STATE_TTL_SECONDS = 600
 SESSION_COOKIE = "__Host-brain_session"
 # The only error codes a callback redirect carries; the console words each one itself.
-ERRORS = frozenset({"oauth_state", "oauth_session", "oauth_denied", "oauth_failed", "no_jira_site", "claimed", "not_configured"})
+#   oauth_denied     the person declined on the vendor's consent page
+#   oauth_state      the state is unknown, expired, spent, for another tool, or the session changed
+#   account_claimed  another org already reads this Jira site or HubSpot portal
+#   oauth_failed     anything else (the exchange, no Jira site, the app not configured); the log has the type
+ERRORS = frozenset({"oauth_denied", "oauth_state", "account_claimed", "oauth_failed"})
 
 
 def _state_key(state: str) -> str:
@@ -116,6 +120,11 @@ def _fail(code: str) -> RedirectResponse:
     return _go(f"/console?error={code if code in ERRORS else 'oauth_failed'}")
 
 
+def _connected(source: str) -> RedirectResponse:
+    """Success: the console lists the new connection and offers its next step (Jira: pick projects)."""
+    return _go(f"/console?connected={source}")
+
+
 def _take_state(state: str) -> dict | None:
     """The state's record, deleted in the same round trip so it is used once."""
     pipe = kv().pipeline()
@@ -145,13 +154,13 @@ async def callback(source: str, request: Request, code: str | None = None, state
         return _fail("oauth_state")
     browser = _session_hash(request)
     if not browser or not _same(browser, str(record.get("session") or "")):
-        return _fail("oauth_session")
+        return _fail("oauth_state")
     try:
         session = await _admin_session(request)
     except HTTPException:
-        return _fail("oauth_session")
+        return _fail("oauth_state")
     if session.org != record.get("org") or getattr(session, "id_hash", "") != browser:
-        return _fail("oauth_session")
+        return _fail("oauth_state")
     if error or not code:
         return _fail("oauth_denied" if error == "access_denied" else "oauth_failed")
     return await run_in_threadpool(_complete, source, session, code)
@@ -162,7 +171,7 @@ def _complete(source: str, session, code: str) -> RedirectResponse:
     connector = _connector(source)
     spec = getattr(connector, "oauth", None)
     if spec is None or not oauth.configured(spec):
-        return _fail("not_configured")
+        return _fail("oauth_failed")
     try:
         tokens = oauth.exchange_code(spec, code, oauth.callback_url(source))
         with org_context(session.org):
@@ -226,7 +235,7 @@ def _finish_jira(session, tokens: oauth.Tokens) -> RedirectResponse:
 
     sites = jira_oauth.accessible_resources(tokens.access_token)
     if not sites:
-        return _fail("no_jira_site")
+        return _fail("oauth_failed")
     secret = tokens.as_secret()
     if len(sites) > 1:
         # The admin picks one (POST /console/api/connections/{id}/site, jira_oauth.choose_site); until then
@@ -235,10 +244,10 @@ def _finish_jira(session, tokens: oauth.Tokens) -> RedirectResponse:
         return _go(f"/console/connect/jira/site?id={urllib.parse.quote(install_id, safe='')}")
     site = sites[0]
     try:
-        install_id = _store_install(session, "jira", site.external_account, site.url, {"cloud_id": site.cloud_id, "site_url": site.url}, secret)
+        _store_install(session, "jira", site.external_account, site.url, {"cloud_id": site.cloud_id, "site_url": site.url}, secret)
     except _Claimed:
-        return _fail("claimed")
-    return _go(f"/console/connectors/{urllib.parse.quote(install_id, safe='')}/projects")
+        return _fail("account_claimed")
+    return _connected("jira")
 
 
 def _finish_hubspot(session, tokens: oauth.Tokens) -> RedirectResponse:
@@ -254,7 +263,7 @@ def _finish_hubspot(session, tokens: oauth.Tokens) -> RedirectResponse:
     ui_domain = str(details.get("uiDomain") or "app.hubspot.com")
     site = f"https://{ui_domain}" if hubspot_oauth.UI_DOMAIN.fullmatch(ui_domain) else "https://app.hubspot.com"
     try:
-        install_id = _store_install(session, "hubspot", f"hubspot:{hub_id}", site, {"hub_id": hub_id}, tokens.as_secret())
+        _store_install(session, "hubspot", f"hubspot:{hub_id}", site, {"hub_id": hub_id}, tokens.as_secret())
     except _Claimed:
-        return _fail("claimed")
-    return _go(f"/console/connectors/{urllib.parse.quote(install_id, safe='')}")
+        return _fail("account_claimed")
+    return _connected("hubspot")

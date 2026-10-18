@@ -174,9 +174,14 @@ class ConsoleOAuthTest(unittest.TestCase):
         state = self._authorize(source)["query"]["state"]
         answer = self._callback(source, code=f"{source}-code", state=state)
         self.assertEqual(answer.status_code, 303)
-        location = answer.headers["location"]
-        self.assertNotIn("error", location)
-        return urllib.parse.unquote(location.split("/")[3])
+        self.assertEqual(answer.headers["location"], f"/console?connected={source}")
+        return self._install_id(self.acme.id, source)
+
+    def _install_id(self, org: str, source: str) -> str:
+        with tenancy.org_context(org):
+            rows = store.list_installs(source)
+        self.assertEqual(len(rows), 1)
+        return rows[0].id
 
     def _raw_secret(self, org: str, install_id: str) -> str:
         with tenancy.org_context(org):
@@ -232,8 +237,9 @@ class ConsoleOAuthTest(unittest.TestCase):
         answer = self._callback("jira", code="jira-code", state=query["state"])
         self.assertEqual(answer.status_code, 303)
         location = answer.headers["location"]
-        self.assertRegex(location, r"^/console/connectors/jira%3A[0-9a-f]{12}/projects$")
-        install_id = urllib.parse.unquote(location.split("/")[3])
+        self.assertEqual(location, "/console?connected=jira")
+        install_id = self._install_id(self.acme.id, "jira")
+        self.assertRegex(install_id, r"^jira:[0-9a-f]{12}$")
 
         with tenancy.org_context(self.acme.id):
             stored = store.get(install_id)
@@ -344,7 +350,7 @@ class ConsoleOAuthTest(unittest.TestCase):
         self.vendors.resources[0]["url"] = "https://quillfern.evil.example"
         self.addCleanup(self.vendors.resources[0].__setitem__, "url", "https://quillfern.atlassian.net")
         state = self._authorize("jira")["query"]["state"]
-        self.assertEqual(self._callback("jira", code="jira-code", state=state).headers["location"], "/console?error=no_jira_site")
+        self.assertEqual(self._callback("jira", code="jira-code", state=state).headers["location"], "/console?error=oauth_failed")
 
     # --- HubSpot --------------------------------------------------------------------------------
 
@@ -353,8 +359,8 @@ class ConsoleOAuthTest(unittest.TestCase):
         self.assertEqual(authorize["url"].netloc, "app.hubspot.com")
         self.assertEqual(authorize["query"]["scope"], "crm.objects.companies.read crm.objects.deals.read crm.objects.owners.read oauth")
         answer = self._callback("hubspot", code="hubspot-code", state=authorize["query"]["state"])
-        self.assertRegex(answer.headers["location"], r"^/console/connectors/hubspot%3A[0-9a-f]{12}$")
-        install_id = urllib.parse.unquote(answer.headers["location"].split("/")[3])
+        self.assertEqual(answer.headers["location"], "/console?connected=hubspot")
+        install_id = self._install_id(self.acme.id, "hubspot")
         with tenancy.org_context(self.acme.id):
             stored = store.get(install_id)
             store.set_status(install_id, "active")
@@ -384,13 +390,13 @@ class ConsoleOAuthTest(unittest.TestCase):
 
     def test_a_state_works_once_for_its_own_session_and_org(self):
         state = self._authorize("jira")["query"]["state"]
-        self.assertEqual(self._callback("jira", cookie="someone-else", code="jira-code", state=state).headers["location"], "/console?error=oauth_session")
+        self.assertEqual(self._callback("jira", cookie="someone-else", code="jira-code", state=state).headers["location"], "/console?error=oauth_state")
         # The state was spent by that attempt.
         self.assertEqual(self._callback("jira", code="jira-code", state=state).headers["location"], "/console?error=oauth_state")
 
         state = self._authorize("jira")["query"]["state"]
         type(self).current = FakeSession(org=self.rival.id, id_hash=_hash(self.cookie))
-        self.assertEqual(self._callback("jira", code="jira-code", state=state).headers["location"], "/console?error=oauth_session")
+        self.assertEqual(self._callback("jira", code="jira-code", state=state).headers["location"], "/console?error=oauth_state")
 
         type(self).current = FakeSession(org=self.acme.id, id_hash=_hash(self.cookie))
         state = self._authorize("jira")["query"]["state"]
@@ -411,7 +417,7 @@ class ConsoleOAuthTest(unittest.TestCase):
         self._connected("jira")
         type(self).current = FakeSession(org=self.rival.id, id_hash=_hash(self.cookie))
         state = self._authorize("jira")["query"]["state"]
-        self.assertEqual(self._callback("jira", code="jira-code", state=state).headers["location"], "/console?error=claimed")
+        self.assertEqual(self._callback("jira", code="jira-code", state=state).headers["location"], "/console?error=account_claimed")
         with tenancy.org_context(self.rival.id):
             self.assertEqual(store.list_installs(), [])
 
