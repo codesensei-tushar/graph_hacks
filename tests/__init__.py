@@ -22,3 +22,9 @@ os.environ["LLM_API_KEY"] = ""
 # dummy so tests can sign events for /slack/events without reading the dev .env value.
 os.environ["SLACK_BOT_TOKEN"] = ""
 os.environ["SLACK_SIGNING_SECRET"] = "test-signing-secret"
+
+# The suite as production runs it: a graph write with no org raises (tests/strict_tenancy.py).
+if os.environ.get("TENANCY_WRITE_STRICT", "").lower() in ("1", "true", "yes"):
+    from tests import strict_tenancy
+
+    strict_tenancy.install()
