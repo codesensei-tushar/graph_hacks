@@ -47,7 +47,7 @@ class OffByDefaultTest(unittest.TestCase):
     def test_the_public_header_keeps_sign_in_hidden(self):
         for path in ("/", "/team/sales", "/explore"):
             page = self.http.get(path).text
-            self.assertIn('class="top-signin" href="/signin" hidden data-console-link>', page, path)
+            self.assertIn(console_web.CONSOLE_OFF, page, path)
 
     def test_privacy_is_served_with_the_strict_policy(self):
         response = self.http.get("/privacy")
@@ -65,14 +65,16 @@ class OnTest(unittest.TestCase):
         for route, name in console_web.PAGES.items():
             response = self.http.get(route.replace("{connection_id}", "jira:abc"))
             self.assertEqual(response.status_code, 200, route)
-            self.assertEqual(response.text, (STATIC / "console" / name).read_text(), route)
+            self.assertEqual(response.text, console_web.render((STATIC / "console" / name).read_text(), console_on=True), route)
+            self.assertIn("<nav aria-label=", response.text, route)
             self.assertEqual(response.headers["content-security-policy"], console_web.CSP, route)
             self.assertEqual(response.headers["x-content-type-options"], "nosniff", route)
 
     def test_the_public_header_shows_sign_in(self):
         for path in ("/", "/team/sales", "/explore"):
             page = self.http.get(path).text
-            self.assertIn('class="top-signin" href="/signin" data-console-link>Sign in</a>', page, path)
+            self.assertIn(console_web.CONSOLE_ON, page, path)
+            self.assertNotIn(console_web.CONSOLE_OFF, page, path)
 
     def test_the_policy_is_the_one_nginx_sets(self):
         self.assertEqual(
@@ -113,13 +115,39 @@ class StrictPageTest(unittest.TestCase):
             text = (STATIC / name).read_text()
             self.assertIsNone(re.search(r"""\bstyle:\s*[`"']|setAttribute\(\s*["']style""", text), name)
 
-    def test_console_nav_links_name_their_own_pages(self):
-        for page in CONSOLE_PAGES:
+    def test_one_shared_header_on_every_page(self):
+        # Every page carries the brand, which page it is, and the two marks console_web.render
+        # fills from its one NAV; the files hold no nav of their own.
+        here = {"site": {"home", "team", "explore", "privacy", "signin"}, "console": {"connections", "start", "ask"}}
+        for page in [*sorted(STATIC.glob("*.html")), *CONSOLE_PAGES]:
             text = page.read_text()
-            if '<nav aria-label="Console">' not in text:
-                continue
-            self.assertIn('<a href="/console" data-nav="connections">Connections</a>', text, page.name)
-            self.assertIn('<a href="/console/ask" data-nav="ask">Ask</a>', text, page.name)
+            match = re.search(r'<header class="top" data-shell="(site|console)" data-here="([a-z]+)">(.*?)</header>', text, re.S)
+            self.assertIsNotNone(match, page.name)
+            self.assertIn(match.group(2), here[match.group(1)], page.name)
+            self.assertNotIn("<nav", match.group(3), page.name)
+            self.assertIn(console_web.NAV_MARK, match.group(3), page.name)
+            self.assertIn(console_web.ACTIONS_MARK, match.group(3), page.name)
+            self.assertIn('id="theme-toggle"', match.group(3), page.name)
+            self.assertIn('<meta name="brain-console" content="', text, page.name)
+
+    def test_the_rendered_header_is_plain_html_with_the_page_marked(self):
+        site = [href for _, _, href in console_web.NAV["site"]]
+        for page, current in (("index.html", None), ("team.html", "/#teams"), ("explorer.html", "/explore")):
+            html = console_web.render((STATIC / page).read_text(), console_on=False)
+            nav = re.search(r'<nav aria-label="Sections">(.*?)</nav>', html).group(1)
+            self.assertEqual(re.findall(r'href="([^"]+)"', nav), site, page)
+            marked = re.findall(r'href="([^"]+)" data-nav="[a-z]+" aria-current="page"', nav)
+            self.assertEqual(marked, [current] if current else [], page)
+            self.assertNotIn(console_web.NAV_MARK, html)
+            self.assertNotIn('href="/signin"', html, page)
+            self.assertIn('href="/signin"', console_web.render((STATIC / page).read_text(), console_on=True), page)
+        console = console_web.render((STATIC / "console" / "ask.html").read_text(), console_on=True)
+        self.assertIn(
+            '<nav aria-label="Console"><a href="/console" data-nav="connections">Connections</a><a href="/console/ask" data-nav="ask" aria-current="page">Ask</a></nav>',
+            console,
+        )
+        self.assertIn('id="sign-out"', console)
+        self.assertNotIn('href="/signin"', console_web.render((STATIC / "console" / "signin.html").read_text(), console_on=True))
 
     def test_every_page_stamps_the_theme_before_its_stylesheets(self):
         for page in sorted(STATIC.glob("*.html")) + CONSOLE_PAGES:

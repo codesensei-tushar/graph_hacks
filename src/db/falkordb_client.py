@@ -12,10 +12,21 @@ query passes through. It does two things and forwards everything else untouched:
   the public and MCP surfaces), each ``query`` and ``ro_query`` that names no timeout of its
   own gets that one, so a public caller cannot hold a worker for FalkorDB's full ``TIMEOUT``.
   Outside it (Slack turns, sync, jobs) queries keep the server default.
+- **Per-request deadline.** While ``request_deadline(ms)`` is active, every query's timeout
+  (its own, or the context's) is cut to the time left before the deadline, so a request that
+  sends many queries (``risk_map``) stops at the deadline too, not after many full timeouts.
+  Once the deadline has passed, a query is not sent: ``DeadlineExceeded`` is raised, which
+  reads as a timeout (``Query timed out``) to ``tool_guard``.
 - **Hooks.** ``BEFORE_QUERY`` and ``AFTER_QUERY`` are lists of callbacks, each called with the
   same ``QueryCall`` for every query: before it runs, and after it returns or raises (with
   ``duration_ms``, and ``result`` or ``error``, filled in). Register with ``add_query_hook``.
   A hook that raises is logged and skipped; it never fails or changes the query.
+
+It also keeps each graph's **generation**: a counter in Redis that every ``query`` changing
+something (nodes, edges, properties, labels) and every ``delete`` bumps. Caches of what a graph
+holds (the answer cache) put ``generation(name)`` in their key, so a write anywhere, in any
+process, makes them read again: a disconnected tool's data is not served from a cache after its
+nodes are deleted. Within ``generation_snapshot()`` (one question) Redis is asked once per graph.
 """
 
 import logging
@@ -29,6 +40,7 @@ from functools import lru_cache
 from typing import Any
 
 from falkordb import FalkorDB
+from redis.exceptions import ResponseError
 
 from src.core.config import settings
 
@@ -41,7 +53,48 @@ graph_reads_disabled: ContextVar[bool] = ContextVar("graph_reads_disabled", defa
 # The timeout, in milliseconds, for queries that name none of their own; None is the server's TIMEOUT.
 query_timeout_ms: ContextVar[int | None] = ContextVar("query_timeout_ms", default=None)
 
+# When the request running in this context must be done by (time.monotonic()); None is no deadline.
+query_deadline: ContextVar[float | None] = ContextVar("query_deadline", default=None)
+
 _WRITE = re.compile(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE)\b", re.IGNORECASE)
+
+GENERATION_KEY = "brain:graph_generation:{}"
+# Generations already read in this context, by graph name; set by ``generation_snapshot``.
+_generations: ContextVar[dict | None] = ContextVar("graph_generations", default=None)
+# The statistics of a write that changed something.
+_CHANGES = ("nodes_created", "nodes_deleted", "relationships_created", "relationships_deleted", "properties_set", "properties_removed", "labels_added", "labels_removed")
+
+
+class DeadlineExceeded(ResponseError):
+    """The request's deadline passed before this query could be sent. Reads like FalkorDB's own timeout."""
+
+    def __init__(self) -> None:
+        super().__init__("Query timed out: the request's deadline has passed")
+
+
+@contextmanager
+def request_deadline(ms: int | None) -> Iterator[None]:
+    """Within the block, every query must finish ``ms`` from now. Nested blocks keep the earlier deadline."""
+    current = query_deadline.get()
+    wanted = None if ms is None else time.monotonic() + ms / 1000
+    token = query_deadline.set(wanted if current is None or (wanted is not None and wanted < current) else current)
+    try:
+        yield
+    finally:
+        query_deadline.reset(token)
+
+
+def _timeout_for(timeout: int | None) -> int | None:
+    """The timeout to send: the query's own or the context's, cut to what is left of the request's deadline."""
+    if timeout is None:
+        timeout = query_timeout_ms.get()
+    deadline = query_deadline.get()
+    if deadline is None:
+        return timeout
+    left = int((deadline - time.monotonic()) * 1000)
+    if left <= 0:
+        raise DeadlineExceeded()
+    return left if timeout is None else min(timeout, left)
 
 
 @contextmanager
@@ -115,14 +168,21 @@ class _GraphProxy:
     def ro_query(self, q: str, params=None, timeout=None, **kwargs):
         return self._run("ro_query", q, params, timeout, kwargs)
 
+    def delete(self):
+        try:
+            return self._graph.delete()
+        finally:
+            bump_generation(getattr(self._graph, "name", ""))
+
     def _run(self, method: str, q: str, params, timeout, kwargs):
-        if timeout is None:
-            timeout = query_timeout_ms.get()
+        timeout = _timeout_for(timeout)
         call = QueryCall(getattr(self._graph, "name", ""), method, q, params, timeout)
         _run_hooks(BEFORE_QUERY, call)
         started = time.perf_counter()
         try:
             call.result = getattr(self._graph, method)(q, params, timeout=timeout, **kwargs)
+            if method == "query" and _changed(call.result):
+                bump_generation(call.graph)
             return call.result
         except BaseException as error:
             call.error = error
@@ -189,3 +249,46 @@ def connect():
 def kv():
     """The Redis connection under FalkorDB. Holds short-lived keys: event dedupe, approvals, bot threads."""
     return client().connection
+
+
+def _changed(result) -> bool:
+    try:
+        return any(getattr(result, stat, 0) for stat in _CHANGES)
+    except Exception:  # an unexpected result shape counts as a change: a cache may reload, never go stale
+        return True
+
+
+def generation(name: str) -> int | None:
+    """How many changing writes graph ``name`` has had; None when Redis cannot say (cache nothing then)."""
+    seen = _generations.get()
+    if seen is not None and name in seen:
+        return seen[name]
+    try:
+        value = int(kv().get(GENERATION_KEY.format(name)) or 0)
+    except Exception as error:
+        log.warning("[falkordb] generation of %s unreadable: %s", name, error)
+        return None
+    if seen is not None:
+        seen[name] = value
+    return value
+
+
+def bump_generation(name: str) -> None:
+    """Mark graph ``name`` changed: every cache keyed on its generation reads again."""
+    seen = _generations.get()
+    if seen is not None:
+        seen.pop(name, None)
+    try:
+        kv().incr(GENERATION_KEY.format(name))
+    except Exception as error:
+        log.warning("[falkordb] generation of %s not bumped: %s", name, error)
+
+
+@contextmanager
+def generation_snapshot() -> Iterator[None]:
+    """Within the block each graph's generation is read from Redis once, and again after a write."""
+    token = _generations.set({})
+    try:
+        yield
+    finally:
+        _generations.reset(token)

@@ -15,10 +15,9 @@ per graph, so a walk back along the breadcrumb is answered from memory.
 
 from dataclasses import dataclass, field
 
-from src.db import falkordb_client
 from src.db.falkordb_client import connect
 from src.domain.knowledge import ask_api, explore, resolve
-from src.domain.knowledge.ask_api import ANSWERS, GraphEdge, GraphNode, QuestionTooLong
+from src.domain.knowledge.ask_api import ANSWERS, GraphEdge, GraphNode, QuestionTooLong, cache_key
 from src.domain.knowledge.dto import ToolResult
 from src.domain.knowledge.kinds import kind_or_default
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution
@@ -95,7 +94,7 @@ class ExplorerView:
 def public_explore(node: str, depth=1) -> ExplorerView:
     text = _clean(node)
     wanted = _clamp(depth, explore.MAX_EXPLORE_DEPTH)
-    return ANSWERS.get_or_compute(("explorer", falkordb_client.graph_name(), text, wanted), lambda: explore_view(text, wanted))
+    return ANSWERS.get_or_compute(cache_key("explorer", text, wanted), lambda: explore_view(text, wanted))
 
 
 def public_neighbors(node: str, relation: str, direction: str | None = None, depth=1) -> ExplorerView:
@@ -103,12 +102,12 @@ def public_neighbors(node: str, relation: str, direction: str | None = None, dep
     rel = (relation or "").strip()[:40]
     way = (direction or explore.BOTH).strip().lower()[:10]
     hops = _clamp(depth, explore.MAX_NEIGHBOR_DEPTH)
-    key = ("explorer_neighbors", falkordb_client.graph_name(), text, rel, way, hops)
+    key = cache_key("explorer_neighbors", text, rel, way, hops)
     return ANSWERS.get_or_compute(key, lambda: neighbors_view(text, rel, way, hops))
 
 
 def public_starters() -> list[GraphNode]:
-    return ANSWERS.get_or_compute(("explorer_starters", falkordb_client.graph_name()), starters)
+    return ANSWERS.get_or_compute(cache_key("explorer_starters"), starters)
 
 
 # --- views -----------------------------------------------------------------------------------

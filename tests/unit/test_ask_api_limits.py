@@ -1,5 +1,6 @@
 """The public surface's limits with a fake clock: the TTL cache, the question cap, the per-client rate limit. No database."""
 
+import json
 import unittest
 from unittest import mock
 
@@ -79,6 +80,39 @@ class RateLimiterTest(unittest.TestCase):
         limiter = ask_api.RateLimiter(ask_api.RATE_LIMIT, ask_api.RATE_WINDOW_SECONDS, clock=Clock(), burst=ask_api.RATE_BURST)
         self.assertTrue(all(limiter.check("office-nat").allowed for _ in range(10)))
         self.assertGreaterEqual(ask_api.RATE_LIMIT, 60)
+
+    def test_a_heavy_call_spends_its_cost_and_waits_for_enough_tokens(self):
+        clock = Clock()
+        limiter = ask_api.RateLimiter(limit=60, window=60, clock=clock, burst=12)
+        self.assertTrue(limiter.check("a", 5).allowed)
+        self.assertTrue(limiter.check("a", 5).allowed)
+        refused = limiter.check("a", 5)
+        self.assertEqual((refused.allowed, refused.retry_after), (False, 3))
+        # Two tokens left: a light call still passes.
+        self.assertTrue(limiter.check("a").allowed)
+        clock.now += 4
+        self.assertTrue(limiter.check("a", 5).allowed)
+        # A cost over the burst is charged the whole burst, never refused forever.
+        clock.now += 3600
+        self.assertTrue(limiter.check("b", 1000).allowed)
+        self.assertFalse(limiter.check("b").allowed)
+
+    def test_heavy_tools_and_deep_explores_cost_more_and_questions_are_priced_by_their_route(self):
+        heavy = ask_api.HEAVY_COST
+        self.assertGreater(heavy, 1)
+        for tool in ("path_between", "risk_map", "onboarding_brief"):
+            self.assertEqual(ask_api.tool_cost(tool), heavy, tool)
+        self.assertEqual(ask_api.tool_cost("who_owns"), 1)
+        self.assertEqual(ask_api.tool_cost("explore"), 1)
+        self.assertEqual(ask_api.tool_cost("explore", {"depth": 2}), heavy)
+        self.assertEqual(ask_api.tool_cost("explore", {"depth": "lots"}), 1)
+        self.assertEqual(ask_api.tool_cost(None), 1)
+        self.assertEqual(ask_api.question_cost("how is maya connected to the invoice worker"), heavy)
+        self.assertEqual(ask_api.question_cost("what are our riskiest services"), heavy)
+        self.assertEqual(ask_api.question_cost("who owns billing"), 1)
+        self.assertEqual(ask_api.question_cost("who owns billing", tool="risk_map"), heavy)
+        self.assertEqual(ask_api.question_cost(""), 1)
+        self.assertEqual(ask_api.question_cost("x" * (ask_api.MAX_QUESTION_CHARS + 1)), 1)
 
     def test_stale_clients_are_dropped_when_the_table_is_full(self):
         clock = Clock()
@@ -161,3 +195,20 @@ class AnswerLimitsTest(unittest.TestCase):
             self.assertIs(ask_api.public_proof(), report)
             self.assertIs(ask_api.public_proof(), report)
         run.assert_called_once_with()
+
+
+class McpCallCostTest(unittest.TestCase):
+    def test_a_body_is_priced_by_the_tools_it_calls(self):
+        from src.api import mcp as mcp_api
+
+        def call(name, arguments=None):
+            return {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments or {}}}
+
+        heavy = ask_api.HEAVY_COST
+        self.assertEqual(mcp_api.call_cost(json.dumps(call("path_between")).encode()), heavy)
+        self.assertEqual(mcp_api.call_cost(json.dumps(call("explore", {"name": "billing", "depth": 2})).encode()), heavy)
+        self.assertEqual(mcp_api.call_cost(json.dumps(call("who_owns")).encode()), 1)
+        self.assertEqual(mcp_api.call_cost(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()), 1)
+        self.assertEqual(mcp_api.call_cost(json.dumps([call("risk_map"), call("who_owns")]).encode()), heavy + 1)
+        for junk in (b"", b"not json", b"[]", b'{"method": "tools/call", "params": "x"}'):
+            self.assertEqual(mcp_api.call_cost(junk), 1, junk)

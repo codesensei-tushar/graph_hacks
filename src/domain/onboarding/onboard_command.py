@@ -25,12 +25,13 @@ from src.domain.knowledge import catalogue
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 from src.domain.knowledge.kinds import SERVICE_KINDS, capitalized
 from src.domain.onboarding.team_import import (
+    NO_COMPANY,
     ORG_SHARED,
     GraphLookup,
     TeamFileError,
     check_team_data,
     counted,
-    default_company_id,
+    company_id,
     describe,
     edges,
     import_team_data,
@@ -169,7 +170,7 @@ def check(args: dict, scope: str, scopes: list[str]) -> SimpleNamespace:
     """The team the arguments would write, checked against the graph; ``TeamFileError`` otherwise."""
     _, graph = connect()
     data = team_data(args, GraphLookup(graph, scopes))
-    return check_team_data(data, default_company_id(), scope, scopes)
+    return check_team_data(data, company_id(), scope, scopes)
 
 
 def card(team: SimpleNamespace) -> str:
@@ -216,6 +217,8 @@ def preview_onboard_team(args: dict, scopes: list[str]) -> str:
     try:
         return card(check(args, ORG_SHARED, scopes))
     except TeamFileError as error:
+        if NO_COMPANY in error.problems:
+            return NO_COMPANY
         return f"Onboard *{args.get('team') or 'a team'}*, which will be refused: {for_slack(error.problems)}"
 
 
@@ -224,8 +227,11 @@ def onboard_team(args: dict, scopes: list[str]) -> ToolResult:
     try:
         _, graph = connect()
         data = team_data(args, GraphLookup(graph, scopes))
-        result = import_team_data(data, default_company_id(), scope, scopes)
+        result = import_team_data(data, company_id(), scope, scopes)
     except TeamFileError as error:
+        if NO_COMPANY in error.problems:
+            # The org was never set up; the rest of the line can wait until it is.
+            return ToolResult(tool=TOOL_NAME, answer=NO_COMPANY, found=False)
         return ToolResult(tool=TOOL_NAME, answer=f"Not onboarded: {for_slack(error.problems)}.", found=False)
     report = result.report
     name, _, counts = describe(result.team).partition(": ")
