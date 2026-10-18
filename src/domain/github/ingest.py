@@ -5,6 +5,8 @@
     (:GitHubUser)-[:REVIEW_REQUESTED]->(:PullRequest)    asked to review; GitHub drops it once they do
     (:PullRequest)-[:TOUCHES]->(:Service)       changed files under Service.paths
     (:PullRequest)-[:CLOSES]->(:Ticket)         "closes #12" in the description
+    (:PullRequest)-[:REFERENCES|CLOSES]->(:Ticket {source: 'jira'})   "PAY-12" in the title, branch or description;
+                                                "fixes PAY-12" closes it. Only keys of a synced Jira project count.
     (:GitHubUser)-[:OPENED|ASSIGNED]->(:Ticket)-[:IN_REPO]->(:Repo)
     (:Ticket)-[:ABOUT]->(:Service)              best match on title and body
 
@@ -15,12 +17,19 @@ people, file paths, and states. Code and diffs are never stored.
 
 import re
 
+from src.connectors import graph as connector_graph
 from src.db.falkordb_client import connect
 from src.domain.github.repos import repo_scope
 from src.domain.knowledge import ask_service
 
 SUMMARY_MAX_CHARS = 2000
 _CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b", re.IGNORECASE)
+# A Jira issue key. Upper case in prose, any case in a branch name ("pay-12-retry-fix").
+_JIRA_KEY = re.compile(r"(?<![A-Za-z0-9_-])([A-Z][A-Z0-9_]{1,9}-\d+)\b")
+_JIRA_BRANCH_KEY = re.compile(r"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9_]{1,9}-\d+)(?![0-9])")
+_JIRA_CLOSING = re.compile(r"\b(?i:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+([A-Z][A-Z0-9_]{1,9}-\d+)\b")
+# Where the connector's Jira projects are: their container's URL ends in /browse/<KEY>.
+_JIRA_PROJECT_URL = re.compile(r"/browse/([A-Z][A-Z0-9_]{1,9})$")
 
 
 def pull_request_id(repo_id: str | int, number: int) -> str:
@@ -136,9 +145,35 @@ def upsert_pull_request(repo: dict, pr: dict, files: list[dict] | None = None, r
             {"pr": node_id, "ticket": issue_id(repo["id"], number)},
         )
 
+    link_jira_tickets(node_id, pr)
+
     for review in reviews or []:
         upsert_review(repo, pr["number"], review)
     return node_id
+
+
+def jira_keys(pr: dict, projects: set[str]) -> tuple[list[str], list[str]]:
+    """The Jira keys a pull request names, as (referenced, closed). A key counts only when its project
+    is one the Jira connector syncs, so a Linear id or a version string that looks like one does not."""
+    prose = f"{pr.get('title') or ''}\n{pr.get('body') or ''}"
+    branch = (pr.get("head") or {}).get("ref") or ""
+    named = {*_JIRA_KEY.findall(prose), *(key.upper() for key in _JIRA_BRANCH_KEY.findall(branch))}
+    named = {key for key in named if key.rsplit("-", 1)[0] in projects}
+    closed = sorted({key for key in _JIRA_CLOSING.findall(pr.get("body") or "") if key in named})
+    return sorted(named - set(closed)), closed
+
+
+def link_jira_tickets(pull_request_id: str, pr: dict) -> None:
+    """``REFERENCES`` (or ``CLOSES``, for "fixes PAY-12") the Jira tickets a pull request names, kept in step
+    with its text. A ticket not synced yet links when it is (``connector_graph.link_references`` keeps the keys)."""
+    _, graph = connect()
+    urls = graph.query("MATCH (c:Container {source: 'jira'}) RETURN c.url").result_set
+    projects = {match.group(1) for (url,) in urls if (match := _JIRA_PROJECT_URL.search(url or ""))}
+    if not projects:
+        return
+    referenced, closed = jira_keys(pr, projects)
+    connector_graph.link_references(pull_request_id, referenced, "jira", "REFERENCES")
+    connector_graph.link_references(pull_request_id, closed, "jira", "CLOSES")
 
 
 def upsert_review(repo: dict, pr_number: int, review: dict) -> None:
