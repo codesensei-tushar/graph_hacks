@@ -12,7 +12,7 @@ the arguments the model filled in.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import catalogue
+from src.domain.knowledge import catalogue, resolve
 from src.domain.knowledge.agent import ToolChoice, choose_tool, run_choice
 from src.domain.knowledge.dto import MemoryLine, ToolResult, ToolSpec, day_from
 from src.domain.memory.search_brain import search_brain
@@ -44,12 +44,29 @@ def answer_turn(request: TurnRequest) -> TurnOutcome:
     return TurnOutcome(reply=render_reply(result, choice, memories, request.read_tags, channel_names(request.read_tags)))
 
 
+# Tools that take a person, and the argument that names them: asked in the first person ("what team am
+# I on", "what if I leave", "my open tickets"), Slack knows who the asker is and names them.
+_PERSON_ARGS = {"person_profile": ("name",), "if_person_leaves": ("name",), "find": ("person", "owner", "author")}
+
+
 def for_the_asker(choice: ToolChoice, question: str, request: TurnRequest) -> ToolChoice:
-    """``what_changed`` asked in the first person reads around the asker's own things, when they are a person in the graph."""
-    if choice.tool != "what_changed" or choice.args.get("person") or not _FIRST_PERSON.search(question):
+    """A first-person question reads around the asker's own person, when they are a person in the graph:
+    ``what_changed`` about their things, and the person tools (profile, leaving, their lists) about them."""
+    if not _FIRST_PERSON.search(question):
+        return choice
+    if choice.tool == "what_changed":
+        if choice.args.get("person"):
+            return choice
+        person = asker_person(request.asker_slack_user_id)
+        return ToolChoice(choice.tool, {**choice.args, "person": person}, choice.via) if person else choice
+    keys = [key for key in _PERSON_ARGS.get(choice.tool, ()) if key in choice.args and (key == "name" or _FIRST_PERSON.search(str(choice.args[key])))]
+    if not keys or (choice.tool != "find" and not _FIRST_PERSON.search(str(choice.args.get("name") or ""))):
+        return choice
+    if choice.tool != "find" and resolve.resolve_name(str(choice.args["name"]), ("Person",), request.read_tags).found:
+        # "what if Arjun leaves, should I worry": someone else is named; the question is about them.
         return choice
     person = asker_person(request.asker_slack_user_id)
-    return ToolChoice(choice.tool, {**choice.args, "person": person}, choice.via) if person else choice
+    return ToolChoice(choice.tool, {**choice.args, **{key: person for key in keys}}, choice.via) if person else choice
 
 
 def asker_person(slack_user_id: str | None) -> str | None:

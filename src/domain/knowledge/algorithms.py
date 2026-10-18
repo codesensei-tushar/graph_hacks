@@ -301,9 +301,9 @@ def path_between(source: str, target: str, scopes: list[str]) -> ToolResult:
     if start == end:
         return ToolResult(tool="path_between", answer=f"{start.name} is one node; name two things to find the route between them.")
 
-    rows, searched = _shortest_paths(graph, start, end, KNOWLEDGE_RELS, scopes)
+    rows, searched = _identity_paths(graph, start, end, KNOWLEDGE_RELS, scopes)
     if not rows:
-        rows, wider = _shortest_paths(graph, start, end, KNOWLEDGE_RELS + TEAM_RELS, scopes)
+        rows, wider = _identity_paths(graph, start, end, KNOWLEDGE_RELS + TEAM_RELS, scopes)
         searched = min(searched, wider)
     if not rows:
         return ToolResult(
@@ -366,6 +366,24 @@ def _ends(graph, source: str, target: str, scopes: list[str]):
 def _shown(graph, entity: Entity, scopes: list[str]) -> Entity:
     """A connector account as its person, or named with its tool; anything else as it is."""
     return people.shown(graph, entity, scopes) if people.is_account(entity) else entity
+
+
+def _identity_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: list[str]) -> tuple[list[tuple[list, int]], int]:
+    """The shortest routes between two ends, where an unlinked user with the same email in another tool
+    is the same end: the Jira "Yash Patil" reaches Billing even when the HubSpot one is asked about."""
+    starts = [Entity(node_id, start.name, start.label) for node_id in people.identity_ids(graph, start, scopes)] if people.is_account(start) else [start]
+    ends = [Entity(node_id, end.name, end.label) for node_id in people.identity_ids(graph, end, scopes)] if people.is_account(end) else [end]
+    best: list[tuple[list, int]] = []
+    searched = MAX_PATH_LENGTH
+    for one in starts:
+        for other in ends:
+            rows, covered = _shortest_paths(graph, one, other, rels, scopes)
+            searched = min(searched, covered)
+            if rows and (not best or rows[0][1] < best[0][1]):
+                best = rows
+            elif rows and rows[0][1] == best[0][1]:
+                best = best + rows
+    return best, searched
 
 
 def _account_names(graph, hops: list) -> dict[str, str]:

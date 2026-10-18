@@ -91,7 +91,7 @@ def at_risk(graph, person: Entity, scopes: list[str]) -> list[AtRisk]:
 
 def _gather(graph, person: Entity, scopes: list[str]) -> tuple[list[AtRisk], bool]:
     """The items resting on the person alone, and whether anything at all is linked to them."""
-    params = {"id": person.id, "scopes": scopes}
+    params = {"id": person.id, "ids": people.identity_ids(graph, person, scopes), "scopes": scopes}
     reach: dict[str, int] = {}
     things, held = _things(graph, person, params, reach)
     decisions, decided = _decisions(graph, person, params, reach)
@@ -107,10 +107,10 @@ def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple
     rows = graph.ro_query(
         f"""
         MATCH {_me(person)}-[mine:OWNS|WORKED_ON|KNOWS]->(s:Service)
-        WHERE {SCOPED.format(var="s")}
+        WHERE me.id IN $ids AND {SCOPED.format(var="s")}
         WITH s, collect(DISTINCT type(mine)) AS mine
         OPTIONAL MATCH ({others})-[:OWNS]->(s)
-        WHERE other.id <> $id AND labels(other)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="other")}
+        WHERE NOT other.id IN $ids AND labels(other)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="other")}
         RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, mine, count(other)
         ORDER BY s.name
         """,
@@ -121,7 +121,7 @@ def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple
         thing = Entity(service_id, name, "Service", kind)
         known = ask_service.knowers(graph, thing, params["scopes"])
         # The person leaving is told apart by id: an unlinked account with their name is someone else.
-        ranked = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, thing) if who != (person.label, person.id)]
+        ranked = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, thing) if who not in {(person.label, node_id) for node_id in params["ids"]}]
         owns = "OWNS" in mine
         alone = not ranked
         if not alone and not (owns and not other_owners):
@@ -147,7 +147,7 @@ def _decisions(graph, person: Entity, params: dict, reach: dict[str, int]) -> tu
     rows = graph.ro_query(
         f"""
         MATCH {_me(person)}-[mine:PROPOSED|APPROVED]->(d:Decision)
-        WHERE {SCOPED.format(var="d")}
+        WHERE me.id IN $ids AND {SCOPED.format(var="d")}
         OPTIONAL MATCH (newer:Decision)-[:SUPERSEDES]->(d)
         WHERE {SCOPED.format(var="newer")}
         WITH d, collect(DISTINCT type(mine)) AS mine, count(newer) AS newer
@@ -187,7 +187,7 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
     assigned = (
         f"""
         MATCH {_me(person)}-[:ASSIGNED]->(k:Ticket)
-        WHERE {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
+        WHERE me.id IN $ids AND {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
         RETURN k.id AS ticket, 'ASSIGNED' AS rel
         """
         if people.is_account(person)
@@ -201,7 +201,7 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
     for ticket_id, rel in graph.ro_query(
         f"""
         MATCH {_me(person)}-[:WORKED_ON]->(k:Ticket)
-        WHERE {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
+        WHERE me.id IN $ids AND {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
         RETURN k.id AS ticket, 'WORKED_ON' AS rel
         UNION
         {assigned}
@@ -217,7 +217,7 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
         WHERE k.id IN $tickets
         OPTIONAL MATCH (other)-[:WORKED_ON|ASSIGNED]->(k)
         WHERE {SCOPED.format(var="other")}
-          AND ((labels(other)[0] = 'Person' AND other.id <> $id) OR (labels(other)[0] IN $accounts AND other.id <> $id AND NOT (other)-[:IS]->(:Person {{id: $id}})))
+          AND ((labels(other)[0] = 'Person' AND other.id <> $id) OR (labels(other)[0] IN $accounts AND NOT other.id IN $ids AND NOT (other)-[:IS]->(:Person {{id: $id}})))
         WITH k, count(DISTINCT other) AS others
         OPTIONAL MATCH (k)-[:ABOUT]->(s:Service)
         WHERE {SCOPED.format(var="s")}
@@ -259,7 +259,7 @@ def _subject_of(about: list) -> str:
 def _me(person: Entity) -> str:
     """The node leaving, by its label: a person, or an unlinked connector account. Never text from a question."""
     label = "ExternalUser" if people.is_account(person) else "Person"
-    return f"(:{label} {{id: $id}})"
+    return f"(me:{label})"
 
 
 def _reach_clause(dependents: int, subject: str) -> str:

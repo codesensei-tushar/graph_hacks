@@ -113,7 +113,15 @@ _DECISION_HEALTH = re.compile(
 _LEAVES = re.compile(
     r"\b(?:leaves|leaving|quits?|quitting|resigns?|on leave|hit by a bus|bus factor(?! for\b)|covers? for|takes? over (?:from|for))\b"
     r"|\bwhat\b.*\bthe only (?:one|person) who knows\b"
-    r"|\b(?:nobody|no one) else (?:knows|does)\b",
+    r"|\b(?:nobody|no one) else (?:knows|does)\b"
+    # The asker's own: "what if I leave", "which of my accounts are at risk", "what rests on me".
+    r"|\bif i (?:leave|left|quit)\b|\bmy (?:\w+ )?(?:accounts|services|tickets|things) (?:are )?at risk\b|\bwhat rests on me\b",
+    re.IGNORECASE,
+)
+# Who the asker is: "who am I", "what team am I on", "what do I own". Slack swaps in the asker's person.
+_ME = re.compile(
+    r"\bwho am i\b|\bwhat teams? am i (?:on|in|part of)\b|\bwhich teams? am i (?:on|in)\b|\bwhat do i (?:own|hold|know|work on)\b"
+    r"|\bwhat am i working on\b|\bmy profile\b",
     re.IGNORECASE,
 )
 # Joining a team, or asking what a team is. "what should I know about billing" names no team and
@@ -195,7 +203,9 @@ _FIND = re.compile(
     rf"|^\s*(?:what|which|list|show(?: me)?) (?:all |the )?(?:open |closed )?{_LISTED} (?:are |is )?(?:assigned to|worked on by|owned by|opened by)\b"
     rf"|^\s*(?:what|which) {_LISTED} (?:does|do) .+ (?:own|have|hold|handle|work on)\b"
     # The CRM, only as a whole list question (_CRM_LIST below): "show me our customers", "open opportunities".
-    rf"|{_CRM_LIST}",
+    rf"|{_CRM_LIST}"
+    # The asker's own lists: "my open tickets", "tickets assigned to me", "which of my accounts". Slack swaps in the asker.
+    rf"|\bmy (?:open |closed )?{_LISTED}\b|^\s*(?:which|what) of my {_LISTED}\b|\b(?:assigned to|owned by) me\b",
     re.IGNORECASE,
 )
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:
@@ -230,6 +240,8 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
 
         only = only_in(text)
         return "what_changed", {"name": text, **({"only": only} if only else {})}
+    if _ME.search(text):
+        return "person_profile", {"name": text}
     if _LEAVES.search(text):
         # Before blast radius: "what breaks if Arjun leaves" is about a person.
         return "if_person_leaves", {"name": text}

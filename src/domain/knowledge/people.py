@@ -16,6 +16,7 @@ users are ``org_internal``, so the company-wide reader never resolves one.
 Every answer about an unlinked user carries ``unlinked_hint``: how an admin links them.
 """
 
+import re
 from dataclasses import dataclass
 
 from src.domain.knowledge import resolve
@@ -27,6 +28,10 @@ SOURCE_NAMES = {"jira": "Jira", "hubspot": "HubSpot"}
 # How an admin tells a connector which email a user goes by.
 PEOPLE_SETTINGS = {"jira": ("CONNECTOR_JIRA_PEOPLE", "accountId=email"), "hubspot": ("CONNECTOR_HUBSPOT_PEOPLE", "ownerId=email")}
 MIN_FIRST_NAME = 2
+# The asker named as themselves. Slack swaps in the asker's person (``slack/agent_turn.for_the_asker``);
+# anywhere else nobody knows who asks, and the refusal says where to ask instead.
+FIRST_PERSON = re.compile(r"\b(?:i|me|my|mine|myself|i'm|im|i am)\b", re.IGNORECASE)
+SELF = "self"
 
 
 def tool_name(source: str | None) -> str:
@@ -101,7 +106,8 @@ def _identity(graph, account_id: str, scopes: list[str]) -> list[_User]:
     if mine is None:
         return []
     key = _key(mine)
-    return sorted([user for user in users if _key(user) == key], key=lambda user: (user.source, user.id))
+    order = list(SOURCE_NAMES)
+    return sorted([user for user in users if _key(user) == key], key=lambda user: (order.index(user.source) if user.source in order else len(order), user.source, user.id))
 
 
 def shown(graph, account: Entity, scopes: list[str]) -> Entity:
@@ -137,6 +143,9 @@ def resolve_person(text: str, scopes: list[str], graph) -> Resolution:
     by_first = _by_first_name(graph, text, scopes) if not person.candidates else None
     if by_first is not None:
         return Resolution(query=text, entity=by_first)
+    if FIRST_PERSON.search(text or "") and not person.candidates and not account.candidates:
+        # "what team am I on" where nobody knows who asks (the ask page, MCP, an unlinked Slack user).
+        return Resolution(query=text, reason=SELF)
     # The person refusal, with any user named nearby as a candidate too.
     known = {candidate.entity.id for candidate in person.candidates}
     for candidate in account.candidates:
