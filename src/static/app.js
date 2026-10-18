@@ -437,6 +437,7 @@
     reading_list: ["who knows {service}", "what breaks if {service} goes down"],
     risk_map: ["what if {owner} leaves", "what breaks if {service} goes down", "who is on the {team} team"],
     related_memories: ["who knows {service}", "what breaks if {service} goes down"],
+    person_profile: ["what if {person} leaves", "what breaks if {service} goes down", "who knows {service}"],
   };
   const MAX_NEXT = 3;
   // The answer text names its subject first where the drawing does not start with it: "If Auth
