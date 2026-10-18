@@ -383,7 +383,7 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
             "customers complained about refunds": "who_knows",
             "accounts payable process": "who_knows",
             "accounts team": "who_knows",
-            "my accounts": "who_knows",
+            "my accounts": "find",  # the asker's own, which Slack fills in (for_the_asker)
             "show me the pipeline": "who_knows",
         }
         for question, tool in kept.items():
