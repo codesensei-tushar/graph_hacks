@@ -7,11 +7,13 @@ public page each read.
 """
 
 import unittest
+from unittest import mock
 
-from tests.fixtures.jira import CONFIG, FakeJiraClient
+from tests.fixtures.jira import CONFIG, NOW, FakeJiraClient
 
 import src.connectors.jira as jira  # noqa: E402
 from src.connectors import graph as connector_graph  # noqa: E402
+from src.connectors import registry, sync  # noqa: E402
 from src.connectors.base import ORG_INTERNAL, Install  # noqa: E402
 from src.db.falkordb_client import connect  # noqa: E402
 from src.domain.knowledge import ask_service  # noqa: E402
@@ -132,6 +134,56 @@ class JiraSyncTest(unittest.TestCase):
         maya = next(step for step in result.path if step.rel == "OPENED" and step.to_name == "PAY-3")
         self.assertEqual((maya.from_name, maya.from_label, maya.from_id), ("Maya Ortiz", "Person", "maya"))
         self.assertFalse(ask_service.ask("who should know about PAY-3", PUBLIC).found)
+
+
+class JiraCappedBackfillTest(unittest.TestCase):
+    """Through the framework's own sync step: a project that reaches the cap stops walking older
+    pages and polls from the ``poll_cursor`` the backfill gave."""
+
+    def setUp(self):
+        reset_and_seed(quillfern)
+        connector_graph.ensure_indexes()
+        self.install = Install(source="jira", config={**CONFIG, "projects": "PAY"})
+        self.fake = FakeJiraClient(page_size=2)
+        connector = registry.get("jira")
+        for patch in (
+            mock.patch.object(connector, "client_for", lambda _install: self.fake),
+            mock.patch.object(connector, "now", lambda: NOW),
+            mock.patch.object(sync, "MORE_DELAY_SECONDS", 0.0),
+            mock.patch.object(sync, "MAX_ITEMS_PER_CONTAINER", 2),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+        sync._containers.clear()
+        registry.configure(self.install)
+        self.addCleanup(registry.unconfigure, "jira")
+        self.addCleanup(sync._containers.clear)
+
+    def _steps(self) -> list[str]:
+        statuses = []
+        for _ in range(10):
+            statuses.append(sync.sync_step("jira")["status"])
+            if statuses[-1] != "synced":
+                return statuses
+        raise AssertionError(f"sync never went idle: {statuses}")
+
+    def test_a_capped_backfill_polls_from_the_poll_cursor_and_reads_no_older_page(self):
+        self.assertEqual(self._steps(), ["synced", "idle"])
+        container = "jira:default:container:10000"
+        state = connector_graph.get_state(container)
+        # Two of PAY's four recent issues fill the cap; the backfill ends on its first page.
+        self.assertEqual(_rows("MATCH (t:Ticket {source: 'jira'}) RETURN t.name ORDER BY t.name"), [["PAY-1"], ["PAY-2"]])
+        self.assertEqual((state["cursor"], state["has_more"], state["capped"], state["backfilled"]), ('{"since": "2026-10-18T03:30:00.000Z"}', False, True, True))
+        self.assertNotIn("poll_cursor", state)
+
+        connector_graph.set_state(container, self.install, due_at=0)
+        self.assertEqual(self._steps(), ["synced", "idle"])
+        # One backfill page, then a poll for what changed since PAY-1 (03:30, 150 minutes before NOW, plus
+        # the overlap): never the backfill's next page, whose issues the cap would only drop.
+        self.assertEqual(
+            [(jql.split(" AND ", 1)[1], token) for jql, token, _size in self.fake.queries],
+            [("updated >= -90d ORDER BY updated DESC", None), ("updated >= -155m ORDER BY updated ASC", None)],
+        )
 
 
 ORDER_SCOPE = ORG_INTERNAL

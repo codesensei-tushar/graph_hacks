@@ -107,7 +107,9 @@ After changing the mapping, run a full sync (below) so accounts already written 
 The sync runs on the app's scheduler, one page of up to 100 issues per step:
 
 1. **Backfill**, on the first run or after a full sync: each project's issues updated in the
-   last 90 days, newest first, at most 500 per project.
+   last 90 days, newest first, at most 500 per project. A project that already holds the
+   framework's limit (1000 tickets) stops its backfill at once and polls from the newest issue
+   it saw, so it never reads older pages it could not keep.
 2. **Polls**, every five minutes after that: issues updated since the newest one already seen,
    oldest first. The cursor only moves forward, and each poll re-reads a few minutes of overlap,
    which writes nothing new.

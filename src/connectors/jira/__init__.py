@@ -101,12 +101,14 @@ class JiraConnector(Connector):
         newest = max(filter(None, (state.get("newest"), newest)), default=None)
         seen += len(result.get("issues") or [])
         token = result.get("nextPageToken")
+        # Where polling picks up: what changed since the newest issue seen (the poll applies the overlap).
+        # The framework switches to it when the project reaches its cap before the backfill ends.
+        page.poll_cursor = json.dumps({"since": newest or mapper.format_time(self.now())})
         if token and not result.get("isLast") and result.get("issues") and seen < MAX_ISSUES_PER_PROJECT:
             page.next_cursor = json.dumps({"jql": jql, "token": token, "seen": seen, "newest": newest})
             page.has_more = True
         else:
-            # Caught up: from here on, poll for what changed since the newest issue seen.
-            page.next_cursor = json.dumps({"since": newest or mapper.format_time(self.now())})
+            page.next_cursor = page.poll_cursor
         log.info("[jira] backfill project=%s issues=%d written=%d more=%s", container.name, seen, len(page.items), page.has_more)
         return page
 

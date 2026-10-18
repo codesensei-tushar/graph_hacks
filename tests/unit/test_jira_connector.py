@@ -68,6 +68,9 @@ class JiraConnectorTest(unittest.TestCase):
         self.assertEqual(names, ["PAY-1", "PAY-2", "PAY-3", "PAY-5"])
         self.assertEqual([deleted for page in pages for deleted in page.deleted_ids], ["jira:default:10104"])
         self.assertEqual(json.loads(cursor), {"since": "2026-10-18T03:30:00.000Z"})
+        # Every page says where polling would pick up if the framework ended the backfill there: the
+        # same cursor the backfill hands over at its own end, in the form the poll path reads.
+        self.assertEqual([page.poll_cursor for page in pages], [cursor] * len(pages))
 
     def test_backfill_stops_at_the_cap(self):
         self.fake.page_size = 2
