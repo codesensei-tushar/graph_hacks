@@ -93,6 +93,11 @@ def command_args(body: str) -> dict:
     return args
 
 
+def mentioned_users(args: dict) -> list[str]:
+    """Every Slack user the arguments mention, once, in order."""
+    return list(dict.fromkeys(MENTION.findall(" ".join([*args.get("members", []), *args.get("runs", [])]))))
+
+
 def _runs(value: str) -> list[str]:
     """The things in an ``owns:`` part. After ``aka`` outside the brackets, the names up to the next
     thing with a ``(kind)`` are aliases: ``Billing (service) aka billing, payments, Ledger (system)``."""
@@ -127,13 +132,13 @@ def unlinked_mentions(args: dict, scopes: list[str] | None = None) -> list[str]:
     """The Slack users in the arguments with no person yet: the caller looks up their names."""
     _, graph = connect()
     lookup = GraphLookup(graph, scopes)
-    users = dict.fromkeys(MENTION.findall(" ".join([*args.get("members", []), *args.get("runs", [])])))
-    return [user for user in users if lookup.linked_person(user) is None]
+    return [user for user in mentioned_users(args) if lookup.linked_person(user) is None]
 
 
 def team_data(args: dict, lookup: GraphLookup) -> dict:
     """The arguments as team-file data, each mention resolved to a member row."""
     profiles = args.get("profiles") or {}
+    handles = args.get("handles") or {}
     members: dict[str, dict] = {}
     problems = []
 
@@ -141,7 +146,13 @@ def team_data(args: dict, lookup: GraphLookup) -> dict:
         if user not in members:
             linked = lookup.linked_person(user)
             if linked is not None:
-                members[user] = {"id": linked[0], "name": linked[1], "slack_id": user}
+                # A stored name that is this user's Slack login handle ("amy") gives way to the name
+                # Slack shows; any other stored name stays. The caller gives a linked person's real or
+                # display name, never the handle, so a handle never replaces anything.
+                stored = linked[1]
+                handle = handles.get(user)
+                name = profiles[user] if profiles.get(user) and handle and stored == handle else stored
+                members[user] = {"id": linked[0], "name": name, "slack_id": user}
             elif profiles.get(user):
                 # A new person, never someone already here matched by name.
                 members[user] = {"id": f"slack-{user.lower()}", "name": profiles[user], "slack_id": user}

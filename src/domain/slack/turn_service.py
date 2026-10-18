@@ -1096,6 +1096,23 @@ def _turn_control_of(approval: approvals.PendingApproval):
     return turn_control.TurnControlSnapshot(thread_key=stored["thread_key"], turn_id=stored["turn_id"], revision=stored["revision"])
 
 
+ONBOARD_NEEDS_ADMIN = "Onboarding a team needs an owner or admin of this Company Brain: ask one to click Approve."
+
+
+def _needs_org_admin(tool_name: str) -> bool:
+    """Team onboarding in a console org waits for an owner or admin; the legacy org keeps the demo's rule (the asker)."""
+    from src.core import tenancy
+    from src.domain.onboarding.onboard_command import TOOL_NAME
+
+    return tool_name == TOOL_NAME and not tenancy.is_legacy()
+
+
+def _is_org_admin(user_id: str) -> bool:
+    from src.domain.access.roles import role_at_least, role_of
+
+    return role_at_least(role_of(user_id, env_roles=False), "admin")
+
+
 def run_slack_approval_decision(team_id: str, approval_id: str, approved: bool, user_id: str, response_url: str | None) -> None:
     def ephemeral(text: str) -> None:
         update_interaction_response(response_url or "", text, response_type="ephemeral")
@@ -1112,7 +1129,14 @@ def run_slack_approval_decision(team_id: str, approval_id: str, approved: bool, 
     if approval.team_id != team_id:
         ephemeral("That approval belongs to a different Slack workspace.")
         return
-    if approval.asker_user != user_id:
+    admin_only = _needs_org_admin(approval.tool_name)
+    if admin_only:
+        # Onboarding a team in a console org writes for everyone: an owner or admin approves it.
+        # The requester may still withdraw it with Deny.
+        if not (_is_org_admin(user_id) or (user_id == approval.asker_user and not approved)):
+            ephemeral(ONBOARD_NEEDS_ADMIN)
+            return
+    elif approval.asker_user != user_id:
         ephemeral(f"Only <@{approval.asker_user}> can approve or deny this action.")
         return
     if approval.status != "pending":
