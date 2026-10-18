@@ -21,7 +21,7 @@ from src.domain.knowledge.ask_api import ANSWERS, GraphEdge, read_tools
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED
 
 DEFAULT_SCOPES = (ORG_SHARED,)
-COUNTED_LABELS = ("Person", "Team", "Service", "Document", "Ticket", "Decision", "PullRequest", "Memory")
+COUNTED_LABELS = ("Person", "Team", "Service", "Document", "Ticket", "Decision", "PullRequest", "Memory", "Chat")
 # The sample draws what a newcomer reads at a glance: no memory text, no pull request numbers.
 SAMPLE_LABELS = ("Service", "Person", "Team", "Decision", "Ticket", "Document")
 # One hop out from a seed, in the order the sample fills: who runs and owns it first, then what is about it.
