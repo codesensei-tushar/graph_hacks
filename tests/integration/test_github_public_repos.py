@@ -25,7 +25,7 @@ from src.db import falkordb_client  # noqa: E402
 from src.db.falkordb_client import connect, kv  # noqa: E402
 from src.domain import orgs  # noqa: E402
 from src.domain.console import session as console_session  # noqa: E402
-from src.domain.github import backfill, public_repos  # noqa: E402
+from src.domain.github import backfill, ingest, public_repos  # noqa: E402
 from src.domain.slack import token_crypto  # noqa: E402
 from src.integrations.github import app_config, client  # noqa: E402
 from src.seed import company_brain  # noqa: E402
@@ -122,6 +122,11 @@ class PublicReposTest(unittest.TestCase):
             _, graph = connect()
             return graph.query(query, params or {}).result_set
 
+    def _services(self, path: str) -> list[str]:
+        """The seeded services whose Service.paths cover ``path`` (the seed owns which ones)."""
+        with tenancy.org_context(tenancy.legacy_org()):
+            return ingest.services_for_paths([path])
+
     def _add(self, url=REPO_URL, org=None, **body):
         params = {"org": org} if org else {}
         return self.client.post("/ops/github/repos", params=params, json={"url": url, **body}, headers=AUTH)
@@ -149,7 +154,8 @@ class PublicReposTest(unittest.TestCase):
         self.assertEqual(issues[0][0], 12)
         # TOUCHES from Service.paths, reviews, and when it merged.
         touches = self._count(legacy, "MATCH (:PullRequest)-[:TOUCHES]->(s:Service) RETURN DISTINCT s.id")
-        self.assertEqual(touches, [["memory-layer"]])
+        self.assertEqual(touches, [[service] for service in self._services("src/domain/memory/search.py")])
+        self.assertTrue(touches)
         reviewed = self._count(legacy, "MATCH (:GitHubUser)-[:REVIEWED]->(p:PullRequest) RETURN count(DISTINCT p)")
         self.assertEqual(reviewed[0][0], 230)
         merged = self._count(legacy, "MATCH (p:PullRequest {number: 13}) RETURN p.merged_at, p.created_at, p.merged")
@@ -226,7 +232,8 @@ class PublicReposTest(unittest.TestCase):
         with tenancy.org_context(tenancy.legacy_org()):
             backfill.run_public_poll({"repo": REPO_ID})
         rows = self._count(tenancy.legacy_org(), "MATCH (p:PullRequest {number: 999})-[:TOUCHES]->(s:Service) RETURN s.id")
-        self.assertEqual(rows, [["memory-layer"]])
+        self.assertEqual(rows, [[service] for service in self._services("src/domain/memory/a.py")])
+        self.assertTrue(rows)
 
     def test_console_admin_adds_to_their_own_org(self):
         session = FakeSession(org=self.acme.id)
