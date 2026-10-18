@@ -28,7 +28,8 @@ from src.domain import orgs
 log = logging.getLogger(__name__)
 
 ACTIVE, REMOVING, DISCONNECTED = "active", "removing", "disconnected"
-INFLIGHT_KEY = "github:connect:inflight"
+# Per control graph, so two deployments (or two test runs) on one Redis never see each other's.
+INFLIGHT_KEY = f"github:connect:inflight:{tenancy.CONTROL_GRAPH}"
 INFLIGHT_SECONDS = 15 * 60
 _FIELDS = ("id", "org", "account_id", "account_login", "account_type", "status", "backfill_limit", "suspended", "connected_by", "created_at", "updated_at")
 _RETURN = ", ".join(f"i.{name}" for name in _FIELDS)

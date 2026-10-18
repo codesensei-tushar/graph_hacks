@@ -173,6 +173,19 @@ def load_github_history(repos: Iterable[Repo] = script.REPOS, installation_id: i
     return [backfill.backfill_repo(client, repo_payload(repo)) for repo in repos]
 
 
+def run_github_jobs(rounds: int = 200) -> None:
+    """Run the GitHub backfill the installation webhook queued: the replay has no scheduler thread."""
+    from src.core import scheduler
+    from src.domain.github import backfill, connections
+
+    names = {backfill.REPO_STEP, backfill.REMOVE_JOB, connections.INSTALL_JOB}
+    for _ in range(rounds):
+        pending = {json.loads(raw)["name"] for raw in (scheduler.kv().hgetall(scheduler.PAYLOADS) or {}).values()}
+        if not pending & names:
+            return
+        scheduler.run_due(now=time.time() + backfill.MAX_WAIT_SECONDS + 60)
+
+
 def _approve_action_id() -> str:
     # Imported late: loading the Slack client builds the app settings, and the loader must
     # set SLACK_API_BASE_URL before that happens.
@@ -427,7 +440,9 @@ class WorkspaceReplayer:
             "X-Hub-Signature-256": github_signature(webhook_secret, body),
             "Content-Type": "application/json",
         }
-        return self.http.post("/github/webhook", content=body, headers=headers).status_code
+        status = self.http.post("/github/webhook", content=body, headers=headers).status_code
+        run_github_jobs()
+        return status
 
     def post_github_event(self, webhook_secret: str, event: str, payload: dict) -> int:
         """Any signed GitHub webhook through the real route, e.g. ``pull_request`` with action ``opened``."""

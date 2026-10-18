@@ -25,6 +25,7 @@ from src.domain.memory.read_scope import resolve_brain_read_container_tags  # no
 from src.domain.memory.writeback import SlackMemoryScope  # noqa: E402
 from src.integrations.github import app_config  # noqa: E402
 from src.integrations.github.client import GitHubUserIdentity  # noqa: E402
+from scripts.replay.driver import run_github_jobs  # noqa: E402
 from src.seed import company_brain  # noqa: E402
 from src.seed.seed import reset_and_seed  # noqa: E402
 
@@ -152,6 +153,8 @@ class GitHubIngestTest(unittest.TestCase):
 
     def test_uninstall_removes_the_repo_and_its_nodes(self):
         webhooks.handle_github_event("installation", {"action": "deleted", "installation": {"id": 7}})
+        # The removal is batched scheduler jobs.
+        run_github_jobs()
         _, graph = connect()
         left = graph.query("MATCH (n) WHERE n:Repo OR n:PullRequest OR (n:Ticket AND n.source = 'github') RETURN count(n)").result_set[0][0]
         self.assertEqual(left, 0)

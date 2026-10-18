@@ -88,13 +88,67 @@ In production, add the same names as Secret Manager secrets (see [DEPLOY.md](DEP
 awk '{printf "%s\\n", $0}' github-app.pem | gcloud secrets create GITHUB_PRIVATE_KEY --data-file=- --project=graphhacks-brain-8490
 ```
 
-## What happens on install
+## Connect GitHub (each company, from the console)
 
-The `installation` webhook starts a backfill of every selected repo: the collaborator list, the 50 most recently updated issues, and the 50 most recently updated pull requests with their changed files and reviews. After that, webhooks keep the graph current. Collaborators are refreshed every hour.
+Each company installs the app on its own GitHub account. One GitHub account feeds one org.
 
-Uninstalling the app, or removing a repo from it, deletes that repo's nodes.
+1. An owner or admin clicks **Connect GitHub** in the console. `POST /console/api/github/connect` answers `https://github.com/apps/<slug>/installations/new?state=<state>`. The state is 32 random bytes, kept in kv for 15 minutes, bound to the browser session (`Session.id_hash`) and the org, and usable once. GitHub [carries `state`](https://docs.github.com/en/apps/sharing-github-apps/sharing-your-github-app) through the install.
+2. GitHub sends the person to the **setup URL**, `/console/oauth/github/setup?installation_id=…&setup_action=install&state=…`. GitHub [warns that `installation_id` can be spoofed](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/about-the-setup-url). So the route takes the state once and checks that the browser still carries the same session, still an owner or admin of the same org. It then sends the person through a GitHub sign-in.
+3. **Verify:** `/console/oauth/github/verify` trades the sign-in code for a user token. `GET /user/installations` must list the installation, which proves the person in the browser can reach it on GitHub. The token is dropped at once. `GET /app/installations/{id}` (the app's JWT) names its account. The account `ExternalAccount github:<account id>` is claimed under a lock. The binding `(:GitHubInstallation {id, org, account_*, status, backfill_limit})-[:OF]->(:Org)` is written to the control graph, and the backfill is queued in the org.
 
-Check deliveries under the app's **Advanced → Recent Deliveries**. A green tick means the app answered 200; the outcome is in the app log as `[github] event=... outcome=...`.
+Refusals are fixed redirects to `/console/github?error=`:
+
+| Code | Meaning |
+| --- | --- |
+| `github_state` | The state is unknown, expired or spent, or the session changed |
+| `github_denied` | The GitHub sign-in was declined |
+| `github_not_yours` | The person who signed in cannot reach that installation |
+| `account_claimed` | Another org reads that GitHub account |
+| `github_failed` | Anything else |
+
+Nothing GitHub says is echoed.
+
+The connection page (`GET /console/api/github`) lists each installation, with its repos and their status and counts. **Sync now** is `POST /console/api/github/installations/{id}/sync`, optionally with `{"backfill": "all" | N}`. **Disconnect** is `DELETE /console/api/github/installations/{id}`: the binding goes `removing`, every repo it brought is deleted 500 nodes per job (GitHub accounts left with nothing go too), the account claim is released, and a `disconnected` tombstone keeps its webhooks dropped. The answer carries `uninstall_url`, the GitHub page where the company removes the app itself. Uninstalling on GitHub (`installation deleted`) does all of this and forgets the installation.
+
+### The operator: any org, the legacy org included
+
+With the admin token:
+
+| Route | What it does |
+| --- | --- |
+| `GET /ops/github/installations` | Every installation of the app (asked of GitHub with the JWT), and the org each feeds |
+| `POST /ops/github/installations/{id}/bind?org=<id>` | `{"backfill": "all"}`. Binds it to the org, default the legacy org, and starts the backfill. The admin token is the trust; the JWT proves the installation is this app's. |
+| `POST /ops/github/installations/{id}/sync` | Sync now |
+| `DELETE /ops/github/installations/{id}` | Disconnect |
+| `POST /ops/github/connect?org=<id>` | An install link for that org. Whoever installs from it still has to pass the GitHub sign-in check. |
+
+**The demo repo, `codesensei-tushar/graph_hacks`:** it is public, so it needs no installation (see "Public repos by name" below). Live webhooks instead of the 10-minute poll would need the app installed on the `codesensei-tushar` account. That is a user account, so only that user can install it: open the install link from `/ops/github/app`, choose the repo, then bind the installation to the legacy org with the bind route. The other way would be moving the repo into a GitHub organization the operator administers; that is not planned.
+
+## Webhooks, per org
+
+`POST /github/webhook` verifies the signature with the app's webhook secret (env, or the registered app's), dedupes on `X-GitHub-Delivery`, and routes by `installation.id` (`installations.route`). The work runs in a background task inside that org's context, so it writes that org's graph only.
+
+| Installation | Goes to |
+| --- | --- |
+| Bound and active | Its org |
+| Being removed, or disconnected | Dropped |
+| Unknown, with a **registered** app | Dropped, until someone connects it |
+| Unknown, with the app set **by env** (the legacy deployment) | The legacy org, bound on first sight, exactly as before there were orgs |
+
+The last row has one exception: while a console Connect is in flight, a brand-new installation's `installation created` is looked at again 15 minutes later. That way a company's install cannot land in the legacy graph before its own callback binds it.
+
+What each event does:
+- `installation created`: queues the backfill.
+- `installation deleted`: removes the installation's data and forgets it.
+- `suspend` / `unsuspend`: marks the binding.
+- `installation_repositories added`: backfills those repos. `removed`: removes their data.
+- `repository deleted`: removes its data. Any other `repository` action upserts the repo; a visibility change moves its data between `org_shared` and `github_repo_<id>`.
+- `member`: reads the collaborators again.
+- Pull requests, reviews and issues: ingested as before.
+
+A failed route lookup answers 503, so the delivery can be redelivered from **Advanced → Recent Deliveries**.
+
+**The backfill** is the same stepped one public repos use: a page per scheduler job, rate limits waited out, `backfill_limit` deep (default 50; 0 = all). It is idempotent, so it is safe to run at least once. It lists the installation's repos, drops repos it no longer sees, and reads each repo's collaborators first. Collaborators are refreshed every hour in every org with an installation. Private repos keep `github_repo_<id>`, readable in a DM by linked collaborators. `link github` remembers the org the DM came from and links the person in that org's graph.
 
 ## Public repos by name (no app, no installation)
 
@@ -169,6 +223,10 @@ A seeded `Person` with a `github` login (like `tushar` in `src/seed/company_brai
 | `src/api/v1/github_app.py`, `src/static/ops/github-app.*` | The operator page: register the app (manifest flow) |
 | `src/domain/github/app_registration.py` | The manifest, its state, the code conversion |
 | `src/integrations/github/app_config.py` | Which app runs: env, else the stored one (encrypted in the control graph) |
+| `src/api/v1/console_github.py` | Connect GitHub: the console API, the setup and verify callbacks |
+| `src/api/v1/github_installations.py` | The operator's installations: list, bind (any org), sync, disconnect |
+| `src/domain/github/installations.py` | Installation -> org bindings in the control graph, and webhook routing |
+| `src/domain/github/connections.py` | An installation's backfill, sync and disconnect in its org |
 | `src/api/v1/github.py` | `POST /github/webhook` (signature, dedupe on `X-GitHub-Delivery`, background work) and `GET /github/oauth/callback` |
 | `src/domain/github/webhooks.py` | What each event does |
 | `src/domain/github/ingest.py` | Pull requests, reviews, and issues into the graph |

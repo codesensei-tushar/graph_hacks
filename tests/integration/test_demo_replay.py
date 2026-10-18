@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from src.integrations.github import app_config as github_app_config  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
-from src.domain.github import backfill, webhooks  # noqa: E402
+from src.domain.github import backfill, connections, webhooks  # noqa: E402
 from src.domain.slack import workspace as workspace_module  # noqa: E402
 from src.integrations.slack import client as slack_client_module  # noqa: E402
 from src.main import app  # noqa: E402
@@ -67,6 +67,7 @@ class DemoReplayTest(unittest.TestCase):
             mock.patch.object(github_app_config, "settings", github_settings),
             mock.patch.object(backfill, "client_for", return_value=github_client),
             mock.patch.object(webhooks, "client_for", return_value=github_client),
+            mock.patch.object(connections, "client_for", return_value=github_client),
         ]
         for patch in cls.patches:
             patch.start()
