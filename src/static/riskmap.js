@@ -74,7 +74,7 @@
     return cell;
   }
 
-  // Raised: a filled square and "yes". Clear: an empty cell. Null: does not apply.
+  // Raised: a red square, read as "yes". Clear: an empty cell. Null: does not apply.
   function flagCell(column, row) {
     const value = (row.flags || {})[column.key];
     const cell = el("td", { class: "flag" });
@@ -84,7 +84,7 @@
       return cell;
     }
     cell.classList.add("on");
-    cell.append(el("span", { class: "mark", "aria-hidden": "true" }), "yes");
+    cell.append(el("span", { class: "mark", "aria-hidden": "true" }), sr("yes"));
     return cell;
   }
 
@@ -99,9 +99,10 @@
   const sizeOf = (value) => (Array.isArray(value) ? value.length : Number(value) || 0);
 
   // On a phone the grid scrolls sideways inside its frame, never the page; the Thing column
-  // stays put, and a fade at the right edge says there is more.
+  // stays put, and a fade at the right edge says there is more. PageRank, the algorithm's own
+  // number, goes last, so the risk signals fill the first screen of a phone.
   function render(container, grid, opts = {}) {
-    const columns = grid.columns || [];
+    const columns = [...(grid.columns || [])].sort((a, b) => (a.type === "score") - (b.type === "score"));
     const rows = grid.rows || [];
     if (!rows.length) return;
 
@@ -131,16 +132,20 @@
     }
     table.append(body);
 
-    // The caption is read with the table; its visible copy sits above the scroller, so it stays
-    // in view while the grid scrolls.
+    // The caption is read with the table; its visible copy is a heading like the path's, above the
+    // scroller, so it stays in view while the grid scrolls.
+    const heading = el("h3", { class: "riskmap-head", "aria-hidden": "true" }, `${CAPTION} `);
+    const info = el("span", { class: "meta" });
+    info.append("(", el("code", {}, "risk_map"), `, ${plural(rows.length, "thing", "things")})`);
+    heading.append(info);
     const scroller = el("div", { class: "riskmap-scroll", tabindex: "0", role: "region", "aria-label": "Risk map, scrolls sideways" });
     scroller.append(table);
     const pane = el("div", { class: "riskmap-pane" });
     pane.append(scroller, el("span", { class: "riskmap-cue", "aria-hidden": "true" }, "scroll →"));
     const frame = el("div", { class: "riskmap-frame" });
-    frame.append(el("p", { class: "riskmap-title", "aria-hidden": "true" }, CAPTION), pane);
-    container.append(frame);
-    if (grid.scoring) container.append(el("p", { class: "riskmap-note" }, `Ranked by ${grid.scoring}.`));
+    frame.append(pane);
+    container.append(heading, frame);
+    if (grid.scoring) container.append(el("p", { class: "riskmap-note" }, `Ranked by ${grid.scoring.replace(/ x /g, " × ")}.`));
 
     const showEdges = () => {
       const rest = scroller.scrollWidth - scroller.clientWidth;
