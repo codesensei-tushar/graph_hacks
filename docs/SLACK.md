@@ -236,7 +236,7 @@ The Slack layer runs entirely on FalkorDB. Where the product stands:
 
 - **Agent.** Built. `src/domain/knowledge/agent.py` makes one structured model call that picks a tool from the fixed catalogue; `src/domain/slack/agent_turn.py` runs it inside the turn and renders the path. Without a model key the keyword router picks the tool, so every path works offline. The plug-in point is still `register_turn_agent()` in `src/domain/slack/compute.py`.
 - **Search.** Full-text over memories, plus recall that follows `MENTIONS` edges from the entity a question names to the memories about it and its neighbours. Semantic (vector) recall was left out on purpose for the hackathon: an embedding model would have added about a gigabyte to the image, and similarity search is not graph work. FalkorDB has the vector index for it when it is added.
-- **MCP.** Live. The same read-only catalogue is served at `/mcp` behind `MCP_TOKEN`, `org_shared` only. See the README.
+- **MCP.** Live. The same read-only catalogue is served at `/mcp`, public and `org_shared` only, at 30 calls a minute per address shared with the ask page; `MCP_TOKEN`, where one was issued, lifts the limit. See the README.
 - **Work clusters and decisions under pressure.** `working_groups` runs label propagation over who shares a service and says where that splits from the org chart. `decision_pressure` lists tickets and pull requests about a decision's service that the standing decision does not cite. "Why did we" still goes to `decision_trace`.
 
 ## Differences from company-brain
