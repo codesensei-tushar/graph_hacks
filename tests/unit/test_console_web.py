@@ -47,7 +47,7 @@ class OffByDefaultTest(unittest.TestCase):
     def test_the_public_header_keeps_sign_in_hidden(self):
         for path in ("/", "/team/sales", "/explore"):
             page = self.http.get(path).text
-            self.assertIn('class="top-signin" href="/signin" hidden data-console-link>', page, path)
+            self.assertIn(console_web.CONSOLE_OFF, page, path)
 
     def test_privacy_is_served_with_the_strict_policy(self):
         response = self.http.get("/privacy")
@@ -72,7 +72,8 @@ class OnTest(unittest.TestCase):
     def test_the_public_header_shows_sign_in(self):
         for path in ("/", "/team/sales", "/explore"):
             page = self.http.get(path).text
-            self.assertIn('class="top-signin" href="/signin" data-console-link>Sign in</a>', page, path)
+            self.assertIn(console_web.CONSOLE_ON, page, path)
+            self.assertNotIn(console_web.CONSOLE_OFF, page, path)
 
     def test_the_policy_is_the_one_nginx_sets(self):
         self.assertEqual(
@@ -113,13 +114,28 @@ class StrictPageTest(unittest.TestCase):
             text = (STATIC / name).read_text()
             self.assertIsNone(re.search(r"""\bstyle:\s*[`"']|setAttribute\(\s*["']style""", text), name)
 
-    def test_console_nav_links_name_their_own_pages(self):
-        for page in CONSOLE_PAGES:
+    def test_one_shared_header_on_every_page(self):
+        # shell.js builds the nav, Sign in and the theme toggle from one definition (NAV); a page
+        # carries only the brand and which page it is.
+        shell = (STATIC / "shell.js").read_text()
+        for key in (
+            '["ask", "Ask", "/#ask"]',
+            '["explore", "Explore", "/explore"]',
+            '["connections", "Connections", "/console"]',
+            '["ask", "Ask", "/console/ask"]',
+        ):
+            self.assertIn(key, shell)
+        here = {"site": {"home", "team", "explore", "privacy", "signin"}, "console": {"connections", "start", "ask"}}
+        for page in [*sorted(STATIC.glob("*.html")), *CONSOLE_PAGES]:
             text = page.read_text()
-            if '<nav aria-label="Console">' not in text:
-                continue
-            self.assertIn('<a href="/console" data-nav="connections">Connections</a>', text, page.name)
-            self.assertIn('<a href="/console/ask" data-nav="ask">Ask</a>', text, page.name)
+            match = re.search(r'<header class="top" data-shell="(site|console)" data-here="([a-z]+)">(.*?)</header>', text, re.S)
+            self.assertIsNotNone(match, page.name)
+            self.assertIn(match.group(2), here[match.group(1)], page.name)
+            self.assertNotIn("<nav", match.group(3), page.name)
+            self.assertIn('<div class="top-actions">', match.group(3), page.name)
+            self.assertIn('id="theme-toggle"', match.group(3), page.name)
+            self.assertIn('<meta name="brain-console" content="', text, page.name)
+            self.assertIn('<script src="/static/shell.js', text, page.name)
 
     def test_every_page_stamps_the_theme_before_its_stylesheets(self):
         for page in sorted(STATIC.glob("*.html")) + CONSOLE_PAGES:

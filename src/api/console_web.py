@@ -47,9 +47,9 @@ PAGES = {
     "/console/ask": "ask.html",
 }
 
-# The public header's link, hidden in the files; shown when the console runs.
-SIGNIN_HIDDEN = " hidden data-console-link>"
-SIGNIN_SHOWN = " data-console-link>"
+# A public page says whether the console runs; shell.js adds "Sign in" to the header when it does.
+CONSOLE_OFF = '<meta name="brain-console" content="off">'
+CONSOLE_ON = '<meta name="brain-console" content="on">'
 
 router = APIRouter(tags=["console-web"], include_in_schema=False)
 
@@ -62,7 +62,7 @@ def public_page(path: Path) -> Response:
     """A public page (``/``, ``/team/<id>``, ``/explore``), with "Sign in" shown when the console runs."""
     if not console_enabled():
         return FileResponse(path, media_type="text/html", headers={"Cache-Control": "no-cache"})
-    html = path.read_text().replace(SIGNIN_HIDDEN, SIGNIN_SHOWN, 1)
+    html = path.read_text().replace(CONSOLE_OFF, CONSOLE_ON, 1)
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
