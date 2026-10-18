@@ -423,3 +423,14 @@ class WorkspaceReplayer:
             "Content-Type": "application/json",
         }
         return self.http.post("/github/webhook", content=body, headers=headers).status_code
+
+    def post_github_event(self, webhook_secret: str, event: str, payload: dict) -> int:
+        """Any signed GitHub webhook through the real route, e.g. ``pull_request`` with action ``opened``."""
+        body = json.dumps(payload).encode()
+        headers = {
+            "X-GitHub-Event": event,
+            "X-GitHub-Delivery": f"replay-{uuid.uuid4().hex}",
+            "X-Hub-Signature-256": github_signature(webhook_secret, body),
+            "Content-Type": "application/json",
+        }
+        return self.http.post("/github/webhook", content=body, headers=headers).status_code

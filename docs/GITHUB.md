@@ -68,6 +68,10 @@ Uninstalling the app, or removing a repo from it, deletes that repo's nodes.
 
 Check deliveries under the app's **Advanced → Recent Deliveries**. A green tick means the app answered 200; the outcome is in the app log as `[github] event=... outcome=...`.
 
+## Heads-up on a new pull request
+
+With `COORDINATION_ALERTS=true`, a public repo's pull request that is opened, reopened or marked ready for review is ingested first, then `who_should_know` runs for it with the public read scope. If it flags anyone, the bot posts to each installed workspace's home channel: "Heads-up on <title> (<url>):", then the reply and its path. A pull request posts once (`github:coordination:<repo_id>:<number>`, SET NX for seven days; the key is given back if nothing reached Slack). Private repos never post, drafts wait until they are ready for review, and the title is escaped, so it cannot ping a channel. A failure is logged as `[github] coordination alert failed` and never affects ingestion; each run logs its outcome (`posted`, `nobody`, `duplicate`, `private`, ...).
+
 ## Graph
 
 ```

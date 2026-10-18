@@ -5,8 +5,10 @@ Two ways to run it.
 In-process (default): starts the fake Slack Web API, points the app at it, seeds
 Quillfern into the graph and imports its Sales team (examples/teams/quillfern-sales.toml),
 loads the scripted repos, plays the chat history and the demo steps (the seven, then the
-Sales beat) through the real routes, and prints every reply. Nothing reaches Slack. The
-graph it leaves behind is the demo graph.
+Sales beat) through the real routes, and prints every reply. Then a new public pull request,
+notebook#58, arrives as a signed ``pull_request`` webhook on the real GitHub route, and the
+heads-up it posts to #company-brain is printed (``COORDINATION_ALERTS`` is on in-process).
+Nothing reaches Slack. The graph it leaves behind is the demo graph.
 
     python scripts/replay_workspace.py --graph company_demo
 
@@ -42,6 +44,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+# The home channel the heads-up lands in, added to the fake workspace for the last step.
+HOME_CHANNEL = "CBRAIN"
 
 
 def parse_args() -> argparse.Namespace:
@@ -116,6 +121,48 @@ def _seed_and_repos(args) -> None:
             print(f"loaded repo={result['repo']} pull_requests={result['pull_requests']} issues={result['issues']}")
 
 
+def _play_heads_up(replayer, fake) -> None:
+    """A new public pull request arrives as a signed webhook, and the heads-up it posts lands in #company-brain.
+
+    notebook#58 is Maya's, touches services/auth/session.py and has no reviewers. The fake
+    GitHub client knows its files (the webhook payload carries the rest), so it never joins
+    the scripted repos the history loads.
+    """
+    import dataclasses
+    from unittest import mock
+
+    from src.core.config import settings
+    from src.db.falkordb_client import kv
+    from src.domain.github import alerts, webhooks
+    from src.domain.slack.workspace import set_home_channel
+    from src.seed import quillfern_workspace as script
+    from src.seed.quillfern_workspace import RepoPullRequest
+    from scripts.replay.github_api import FakeGitHubClient, pull_request_payload, repo_payload
+    from scripts.replay.slack_api import FakeSlackChannel
+
+    notebook = script.REPOS[0]
+    pr = RepoPullRequest(58, "Shorten session token TTL", "Session tokens expire after 15 minutes instead of an hour.", "maya-ortiz", ("services/auth/session.py",), merged=False)
+    github = FakeGitHubClient((dataclasses.replace(notebook, pull_requests=notebook.pull_requests + (pr,)), *script.REPOS[1:]), script.INSTALLATION_ID)
+    if HOME_CHANNEL not in fake.channels:
+        fake.add_channel(FakeSlackChannel(id=HOME_CHANNEL, name="company-brain", members=[script.BOT_USER_ID]))
+    set_home_channel(script.TEAM_ID, HOME_CHANNEL)
+    # A rerun on the same graph posts again.
+    kv().delete(alerts.dedupe_key(notebook.id, pr.number))
+    payload = {"action": "opened", "installation": {"id": script.INSTALLATION_ID}, "repository": repo_payload(notebook), "pull_request": pull_request_payload(notebook, pr)}
+
+    print("\n# A new pull request, and who should hear about it")
+    seen = len(fake.messages)
+    with mock.patch.object(webhooks, "client_for", return_value=github):
+        status = replayer.post_github_event(settings.github_webhook_secret, "pull_request", payload)
+    print(f"  [github] {pr.author} opens {notebook.full_name.split('/')[-1]}#{pr.number} “{pr.title}”, touching {', '.join(pr.files)}, no reviewers (HTTP {status})")
+    posted = [message for message in fake.messages[seen:] if message.channel == HOME_CHANNEL and message.user == fake.bot_user_id]
+    for message in posted:
+        indented = "\n".join("      " + line for line in message.text.splitlines())
+        print(f"    bot in #company-brain:\n{indented}")
+    if not posted:
+        print("    (no heads-up was posted)")
+
+
 def run_in_process(args) -> None:
     from scripts.replay.driver import (
         WorkspaceReplayer,
@@ -137,6 +184,13 @@ def run_in_process(args) -> None:
         if not args.with_model:
             # No model: the bot keeps channel messages as raw memories and never calls the API.
             os.environ["LLM_API_KEY"] = ""
+        if not args.no_github:
+            # The last step sends a signed pull_request webhook; GitHub's API is the fake client.
+            os.environ["COORDINATION_ALERTS"] = "true"
+            os.environ["GITHUB_APP_ID"] = os.environ.get("GITHUB_APP_ID") or "replay"
+            os.environ["GITHUB_WEBHOOK_SECRET"] = os.environ.get("GITHUB_WEBHOOK_SECRET") or secrets.token_hex(16)
+            if not (os.environ.get("GITHUB_PRIVATE_KEY") or os.environ.get("GITHUB_PRIVATE_KEY_PATH")):
+                os.environ["GITHUB_PRIVATE_KEY"] = "unused"
         from fastapi.testclient import TestClient
 
         from src.core.config import settings
@@ -153,6 +207,8 @@ def run_in_process(args) -> None:
             response_url=server.response_url("replay"),
         )
         _play(replayer, args.steps or "all", sales=not args.no_sales)
+        if not args.no_github and (args.steps or "all") in ("all", "demo"):
+            _play_heads_up(replayer, fake)
         # Queued reactions and expiry jobs would wait for a scheduler that never runs here.
         clear_team_state(replayer)
         print(f"\nfake Slack calls={len(fake.calls)} bot messages={sum(1 for m in fake.messages if m.user == fake.bot_user_id and not m.deleted)}")
@@ -188,6 +244,7 @@ def run_against_instance(args) -> None:
         _play(replayer, args.steps or "history", sales=not args.no_sales)
     if not args.fake_slack:
         print("\nreplies are in Slack; approve cards there by hand")
+    print("the new-pull-request heads-up step runs in-process only: a running instance would ask the real GitHub API for its files")
 
 
 def main() -> None:
