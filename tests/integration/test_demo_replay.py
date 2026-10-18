@@ -42,6 +42,9 @@ from scripts.replay.slack_api import FakeSlackServer  # noqa: E402
 
 GRAPH = f"company_demo_replay_test{tests.TEST_GRAPH_SUFFIX}"
 WEBHOOK_SECRET = "replay-webhook-secret"
+# The team's thread turns and approvals live in Redis, which every checkout's suite shares;
+# its own team id keeps another run's clear_team_state from wiping an approval mid-replay.
+TEAM = f"{script.TEAM_ID}{tests.TEST_GRAPH_SUFFIX.upper()}"
 
 
 def edge(source: str, rel: str, target: str) -> str:
@@ -52,7 +55,7 @@ def edge(source: str, rel: str, target: str) -> str:
 class DemoReplayTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.fake = fake_workspace_from_script()
+        cls.fake = fake_workspace_from_script(TEAM)
         cls.server = FakeSlackServer(cls.fake).start()
         slack_settings = dataclasses.replace(settings, slack_api_base_url=cls.server.base_url)
         github_settings = dataclasses.replace(settings, github_app_id="1", github_webhook_secret=WEBHOOK_SECRET, github_private_key="unused")
@@ -73,12 +76,13 @@ class DemoReplayTest(unittest.TestCase):
 
         seed.reset_and_seed(quillfern)
         seed_sales()
-        register_fake_workspace()
+        register_fake_workspace(TEAM)
         use_agent_loop()
         cls.http = TestClient(app)
         cls.replayer = WorkspaceReplayer(
             cls.http,
             signing_secret=settings.slack_signing_secret,
+            team_id=TEAM,
             fake=cls.fake,
             fake_base_url=cls.server.base_url,
             response_url=cls.server.response_url("test"),

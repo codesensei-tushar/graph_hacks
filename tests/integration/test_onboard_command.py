@@ -221,7 +221,9 @@ class OnboardThroughSlackTest(unittest.TestCase):
         from src.seed.quillfern_sales import seed_sales
 
         cls.script, cls.clear_team_state, cls.use_agent_loop = script, clear_team_state, use_agent_loop
-        cls.fake = fake_workspace_from_script()
+        # Its own team id, so another checkout's replay teardown cannot wipe this run's approval in the shared Redis.
+        team = f"{script.TEAM_ID}{tests.TEST_GRAPH_SUFFIX.upper()}"
+        cls.fake = fake_workspace_from_script(team)
         cls.server = FakeSlackServer(cls.fake).start()
         cls.patches = [
             mock.patch.object(falkordb_client, "graph_name", return_value=f"{GRAPH}_routes"),
@@ -235,10 +237,10 @@ class OnboardThroughSlackTest(unittest.TestCase):
             workspace_module._client_for.cache_clear()
         seed.reset_and_seed(quillfern)
         seed_sales()
-        register_fake_workspace()
+        register_fake_workspace(team)
         use_agent_loop()
         cls.replayer = WorkspaceReplayer(
-            TestClient(app), signing_secret=config.settings.slack_signing_secret, fake=cls.fake,
+            TestClient(app), signing_secret=config.settings.slack_signing_secret, team_id=team, fake=cls.fake,
             fake_base_url=cls.server.base_url, response_url=cls.server.response_url("onboard"),
         )
         line = "onboard team: Deal desk | members: <@UPRIYA> <@UNOOR> | owns: Quote approvals (process), Discount desk (playbook, <@UNOOR>)"
