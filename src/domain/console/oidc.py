@@ -1,7 +1,11 @@
 """Sign in with Slack (OpenID Connect).
 
 ``begin`` stores a state with its nonce and PKCE verifier in kv for ten minutes and
-returns Slack's authorize URL. ``finish`` takes the state back exactly once, swaps the
+returns Slack's authorize URL plus a browser binding: a random value the start route
+sets as the ``__Host-brain_signin`` cookie, stored with the state only as a hash. The
+callback must present the same cookie, so a code and state minted in an attacker's
+browser can't sign a victim's browser in as the attacker (login CSRF).
+``finish`` takes the state back exactly once, checks the binding, swaps the
 code at ``openid.connect.token`` and verifies the id_token with PyJWT against Slack's
 published keys: RS256 only, our client id as audience, Slack as issuer, a live
 ``exp`` and the nonce we sent. Anything else raises ``SignInError`` with a fixed code;
@@ -23,6 +27,7 @@ import httpx
 import jwt
 
 from src.core.config import settings
+from src.domain.console.csrf import same
 from src.db.falkordb_client import kv
 
 log = logging.getLogger(__name__)
@@ -35,6 +40,7 @@ STATE_TTL_SECONDS = 600
 CALLBACK_PATH = "/auth/slack/callback"
 CLAIM_TEAM = "https://slack.com/team_id"
 CLAIM_USER = "https://slack.com/user_id"
+BINDING_COOKIE = "__Host-brain_signin"
 
 # Tests swap in an httpx.MockTransport that plays Slack's token and keys endpoints.
 transport: httpx.BaseTransport | None = None
@@ -67,11 +73,17 @@ def _challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
 
 
-def begin(origin: str) -> str:
+def _binding_hash(binding: str) -> str:
+    return hashlib.sha256(binding.encode()).hexdigest()
+
+
+def begin(origin: str) -> tuple[str, str]:
+    """``(authorize_url, binding)``. The caller sets ``binding`` as the BINDING_COOKIE."""
+    binding = secrets.token_urlsafe(32)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
-    kv().set(_state_key(state), json.dumps({"nonce": nonce, "verifier": verifier}), ex=STATE_TTL_SECONDS)
+    kv().set(_state_key(state), json.dumps({"nonce": nonce, "verifier": verifier, "binding": _binding_hash(binding)}), ex=STATE_TTL_SECONDS)
     query = httpx.QueryParams(
         {
             "response_type": "code",
@@ -84,7 +96,7 @@ def begin(origin: str) -> str:
             "code_challenge_method": "S256",
         }
     )
-    return f"{AUTHORIZE_URL}?{query}"
+    return f"{AUTHORIZE_URL}?{query}", binding
 
 
 def take_state(state: str | None) -> dict | None:
@@ -98,7 +110,9 @@ def take_state(state: str | None) -> dict | None:
         data = json.loads(raw)
     except ValueError:
         return None
-    return data if isinstance(data, dict) and data.get("nonce") and data.get("verifier") else None
+    if not isinstance(data, dict) or not all(isinstance(data.get(k), str) and data[k] for k in ("nonce", "verifier", "binding")):
+        return None
+    return data
 
 
 def _http() -> httpx.Client:
@@ -193,7 +207,7 @@ def verify_id_token(id_token: str, nonce: str) -> SlackIdentity:
     except jwt.InvalidTokenError as exc:
         log.warning("[console] id_token rejected: %s", type(exc).__name__)
         raise SignInError("bad_token") from None
-    if not isinstance(claims.get("nonce"), str) or not secrets.compare_digest(claims["nonce"], nonce):
+    if not isinstance(claims.get("nonce"), str) or not same(claims["nonce"], nonce):
         raise SignInError("bad_token")
     team_id, user_id = claims.get(CLAIM_TEAM), claims.get(CLAIM_USER) or claims.get("sub")
     if not (isinstance(team_id, str) and team_id and isinstance(user_id, str) and user_id):
@@ -208,10 +222,12 @@ def verify_id_token(id_token: str, nonce: str) -> SlackIdentity:
     )
 
 
-def finish(code: str | None, state: str | None, origin: str) -> SlackIdentity:
+def finish(code: str | None, state: str | None, origin: str, binding: str | None) -> SlackIdentity:
     stored = take_state(state)
     if stored is None:
         raise SignInError("expired")
+    if not binding or len(binding) > 128 or not same(_binding_hash(binding), stored["binding"]):
+        raise SignInError("wrong_browser")
     if not code or len(code) > 512:
         raise SignInError("denied")
     return verify_id_token(exchange_code(code, stored["verifier"], origin), stored["nonce"])

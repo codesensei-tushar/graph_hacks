@@ -113,6 +113,10 @@ def _test_app() -> FastAPI:
     def sync(session=Depends(sessions.console_admin)):
         return {"ok": True, "org": tenancy.current_org()}
 
+    @app.get("/console/api/pending")
+    def pending(session=Depends(sessions.console_pending)):
+        return {"org": tenancy.current_org(), "role": session.role}
+
     @app.post("/console/api/ping")
     def ping(session=Depends(sessions.console_user)):
         return {"ok": True}
@@ -251,8 +255,7 @@ class ConsoleAuthTest(unittest.TestCase):
     def test_member_signs_in_and_cookie_is_locked_down(self):
         response, _ = self._sign_in(self.team_x, "UADA")
         self.assertEqual((response.status_code, response.headers["location"]), (303, "/console"))
-        cookie = response.headers["set-cookie"]
-        self.assertTrue(cookie.startswith(f"{sessions.COOKIE}="))
+        cookie = next(c for c in response.headers.get_list("set-cookie") if c.startswith(f"{sessions.COOKIE}="))
         lowered = cookie.lower()
         for flag in ("secure", "httponly", "samesite=lax", "path=/"):
             self.assertIn(flag, lowered)
@@ -432,10 +435,12 @@ class ConsoleAuthTest(unittest.TestCase):
         response = self._mutate("/console/api/orgs", {"name": "  Acme   Robotics ", "invite_code": code})
         self.assertEqual(response.status_code, 201, response.text)
         created = response.json()
-        self.assertEqual((created["org"]["name"], created["role"]), ("Acme Robotics", "owner"))
+        # Pending, not owner, until the Slack install verifies them: only that step is open.
+        self.assertEqual((created["org"]["name"], created["role"]), ("Acme Robotics", "pending"))
         self.assertIsNone(kv().get(old_key))
         org_id = created["org"]["id"]
-        self.assertEqual(self.client.get("/console/api/whoami").json()["org"], org_id)
+        self.assertEqual(self.client.get("/console/api/whoami").json(), {"detail": "slack_install_pending"})
+        self.assertEqual(self.client.get("/console/api/pending").json()["org"], org_id)
         self.assertEqual(self._audit("org.create")[-1], [org_id, f"slack:{team}:UFOUNDER", "ok"])
 
         # A second org from the same person, and the same code again, are both refused.
@@ -444,7 +449,91 @@ class ConsoleAuthTest(unittest.TestCase):
         self.client.cookies.clear()
         response, _ = self._sign_in(team, "UFOUNDER")
         self.assertEqual(response.headers["location"], "/console/start")
-        self.assertEqual(self.client.get("/console/api/me").json()["org"]["id"], org_id)
+        me = self.client.get("/console/api/me").json()
+        self.assertEqual((me["org"]["id"], me["role"]), (org_id, "pending"))
+
+        # The bot install (package B) verifies the creator, then routes the team: now owner.
+        self.slack.users["UFOUNDER"] = SlackUserInfo(id="UFOUNDER", real_name="Founder", team_id=team)
+        self._install_and_route(org_id, team, "UFOUNDER")
+        self._age(role_checked_at=0)
+        self.assertEqual(self.client.get("/console/api/me").json()["role"], "owner")
+        self.assertEqual(self.client.get("/console/api/whoami").json()["org"], org_id)
+
+    def _install_and_route(self, org_id: str, team: str, installer: str) -> None:
+        with tenancy.org_context(org_id):
+            upsert_workspace(team_id=team, bot_token_enc=encrypt_token("xoxb-new"), bot_user_id="UBOT", team_name="New", installed_by=installer)
+            self.assertIsNone(sessions.slack_membership_refusal(team, installer))
+        orgs.route_team(team, org_id)
+
+    # --- review regressions ----------------------------------------------------------------
+
+    def test_login_csrf_code_from_another_browser_is_refused(self):
+        # The attacker starts sign-in in their own browser and gets a code for their own account...
+        params = self._start()
+        code = uuid.uuid4().hex
+        token = self.slack.id_token(self._claims(self.team_x, "UBEA", params["nonce"]))
+        self.slack.codes[code] = {"token": token, "challenge": params["code_challenge"]}
+        # ...then lures the victim's browser, which never started that sign-in, to the callback.
+        victim = TestClient(_test_app(), base_url=ORIGIN, follow_redirects=False)
+        response = victim.get("/auth/slack/callback", params={"code": code, "state": params["state"]})
+        self.assertEqual(response.headers["location"], "/signin?error=wrong_browser")
+        self.assertNotIn(sessions.COOKIE, victim.cookies)
+        # The state is spent, so the attacker can't retry it either.
+        retry = self.client.get("/auth/slack/callback", params={"code": code, "state": params["state"]})
+        self.assertEqual(retry.headers["location"], "/signin?error=expired")
+
+    def test_binding_cookie_is_locked_down_and_cleared(self):
+        start = self.client.get("/auth/slack/start")
+        cookie = start.headers["set-cookie"].lower()
+        self.assertTrue(cookie.startswith(f"{oidc.BINDING_COOKIE.lower()}="))
+        for flag in ("secure", "httponly", "samesite=lax", "path=/", "max-age=600"):
+            self.assertIn(flag, cookie)
+        self.client.cookies.clear()
+        response, _ = self._sign_in(self.team_x, "UADA")
+        self.assertIn(f'{oidc.BINDING_COOKIE}=""', response.headers.get_list("set-cookie")[0])
+        self.assertNotIn(oidc.BINDING_COOKIE, self.client.cookies)
+
+    def test_guest_of_an_unrouted_team_never_becomes_owner(self):
+        team = f"TGST{RUN.upper()}"
+        self.slack.users["UGST2"] = SlackUserInfo(id="UGST2", real_name="Guest", team_id=team, is_restricted=True)
+        response, _ = self._sign_in(team, "UGST2")
+        self.assertEqual(response.headers["location"], "/console/start")
+        created = self._mutate("/console/api/orgs", {"name": "Guest Org", "invite_code": self._mint()})
+        self.assertEqual((created.status_code, created.json()["role"]), (201, "pending"))
+        org_id = created.json()["org"]["id"]
+        self.assertEqual(self.client.get("/console/api/whoami").status_code, 403)
+        self.assertEqual(self._mutate("/console/api/connectors/fake/sync").status_code, 403)
+        self.assertEqual(self.client.get("/console/api/audit").status_code, 403)
+        # The install's membership check refuses the guest, so the team is never routed.
+        with tenancy.org_context(org_id):
+            upsert_workspace(team_id=team, bot_token_enc=encrypt_token("xoxb-g"), bot_user_id="UBOT", team_name="G", installed_by="UGST2")
+            self.assertEqual(sessions.slack_membership_refusal(team, "UGST2"), "not_a_member")
+        self._age(role_checked_at=0)
+        self.assertEqual(self.client.get("/console/api/me").json()["role"], "pending")
+        # Even if something routed the team anyway, the next refresh asks Slack and signs them out.
+        orgs.route_team(team, org_id)
+        self._age(role_checked_at=0)
+        self.assertEqual(self.client.get("/console/api/me").status_code, 401)
+
+    def test_member_without_a_person_is_rechecked_with_slack(self):
+        me = self._signed_in(self.team_x, "UBEA")
+        self.assertIsNone(me["person"]["id"])
+        self.slack.users.pop("UBEA")
+        self._age(role_checked_at=time.time() - 61)
+        self.assertEqual(self.client.get("/console/api/me").status_code, 401)
+
+    def test_member_turned_guest_is_signed_out(self):
+        self._signed_in(self.team_x, "UADA")
+        self.slack.users["UADA"] = SlackUserInfo(id="UADA", real_name="Ada", team_id=self.team_x, is_restricted=True)
+        self._age(role_checked_at=0)
+        self.assertEqual(self.client.get("/console/api/me").status_code, 401)
+
+    def test_non_ascii_secrets_are_refused_not_crashed(self):
+        self._signed_in(self.team_x, "UADA")
+        self.assertEqual(self._mutate("/console/api/ping", x_csrf_token="caf\xe9".encode("latin-1")).status_code, 403)
+        bearer = {"authorization": "Bearer caf\xe9".encode("latin-1")}
+        self.assertEqual(TestClient(_test_app(), base_url=ORIGIN).get("/console/api/whoami", headers=bearer).status_code, 401)
+        self.assertEqual(self.client.post("/ops/invites", headers=bearer).status_code, 403)
 
     def test_invite_misuse(self):
         used = self._mint()

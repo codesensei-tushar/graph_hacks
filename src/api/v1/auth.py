@@ -30,7 +30,6 @@ from src.domain.console.session import COOKIE, Session, console_admin, console_s
 from src.domain.slack.workspace import (
     get_org_actor_by_slack_identity,
     get_workspace_by_team_id,
-    is_workspace_member,
     list_connected_workspaces,
 )
 
@@ -48,7 +47,13 @@ def _origin(request: Request) -> str:
 
 
 def _signin_error(code: str) -> RedirectResponse:
-    return RedirectResponse(f"{SIGNIN_PATH}?error={code}", status_code=303)
+    response = RedirectResponse(f"{SIGNIN_PATH}?error={code}", status_code=303)
+    _clear_binding(response)
+    return response
+
+
+def _clear_binding(response) -> None:
+    response.delete_cookie(oidc.BINDING_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
 
 
 # --- sign in -----------------------------------------------------------------------------
@@ -58,7 +63,13 @@ def _signin_error(code: str) -> RedirectResponse:
 def slack_start(request: Request):
     if not settings.console_signin_enabled:
         return _signin_error("unavailable")
-    return RedirectResponse(oidc.begin(_origin(request)), status_code=302)
+    url, binding = oidc.begin(_origin(request))
+    response = RedirectResponse(url, status_code=302)
+    # Lax: the callback is a top-level GET navigation back from Slack, which carries it.
+    response.set_cookie(
+        oidc.BINDING_COOKIE, binding, max_age=oidc.STATE_TTL_SECONDS, path="/", secure=True, httponly=True, samesite="lax"
+    )
+    return response
 
 
 def _unrouted_org_created_by(created_by: str) -> orgs.Org | None:
@@ -87,19 +98,13 @@ def _resolve(identity: oidc.SlackIdentity) -> tuple[dict, str]:
         # bot isn't installed, or they start one (an invite code is needed for that).
         created = _unrouted_org_created_by(f"{team}:{user}")
         if created is not None:
-            return {**base, "org": created.id, "role": roles.ROLE_OWNER}, START_PATH
+            return {**base, "org": created.id, "role": sessions.ROLE_PENDING}, START_PATH
         return {**base, "org": None, "role": roles.ROLE_MEMBER}, START_PATH
 
     with tenancy.org_context(org.ref()):
-        workspace = get_workspace_by_team_id(team)
-        if workspace is None:
-            raise _Refused("workspace_unavailable", org.id)
-        info = workspace.client.user_info(user)
-        if info is None:
-            raise _Refused("slack_unavailable", org.id)
         # Guests, bots and Slack Connect users from another workspace: not members.
-        if not is_workspace_member(info) or (info.team_id and info.team_id != team):
-            raise _Refused("not_a_member", org.id)
+        if refusal := sessions.slack_membership_refusal(team, user):
+            raise _Refused(refusal, org.id)
         email = identity.email if identity.email_verified else None
         resolution = get_org_actor_by_slack_identity(team, user, email)
         if resolution.lookup == "mapped_not_in_org":
@@ -118,7 +123,7 @@ def slack_callback(request: Request, code: str | None = None, state: str | None 
         return _signin_error("unavailable")
     try:
         # Slack sends ?error= when the person cancels; the state is still spent.
-        identity = oidc.finish(None if error else code, state, _origin(request))
+        identity = oidc.finish(None if error else code, state, _origin(request), request.cookies.get(oidc.BINDING_COOKIE))
     except oidc.SignInError as exc:
         audit.record(None, "unknown", "signin", result=f"refused:{exc.code}")
         return _signin_error(exc.code)
@@ -133,6 +138,7 @@ def slack_callback(request: Request, code: str | None = None, state: str | None 
     sid, session = sessions.create(**fields, replacing=request.cookies.get(COOKIE))
     audit.record(session.org, actor, "signin", result="ok" if session.org else "ok:no_org")
     response = RedirectResponse(destination, status_code=303)
+    _clear_binding(response)
     sessions.set_cookie(response, sid)
     return response
 
@@ -206,7 +212,8 @@ def create_org(body: OrgIn, request: Request, session: Session = Depends(console
         audit.record(None, session.actor, "org.create", result="error")
         return JSONResponse({"error": "org_creation_failed"}, status_code=500)
 
-    sid, rotated = sessions.rotate(request.cookies.get(COOKIE), session, org=org.id, role=roles.ROLE_OWNER)
+    # Pending, not owner, until the Slack install confirms they're a full member of the team.
+    sid, rotated = sessions.rotate(request.cookies.get(COOKIE), session, org=org.id, role=sessions.ROLE_PENDING)
     audit.record(org.id, session.actor, "org.create", target=org.id)
     response = JSONResponse(_me(rotated, org), status_code=201)
     sessions.set_cookie(response, sid)

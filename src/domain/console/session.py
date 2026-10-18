@@ -9,8 +9,13 @@ HttpOnly, SameSite=Lax, Path=/. The record lives in kv under
 - Absolute expiry: 7 days from sign-in. The TTL is never extended past that, and
   rotation keeps the original sign-in time.
 - Rotation: a new id (and CSRF token) at sign-in and when the session gains an org.
-- Role refresh: at most 60 s old. The role is re-read with ``roles.role_of`` in the
-  session's org, and a person who has left the org is signed out.
+- Membership and role refresh: at most 60 s old. Slack's ``users.info`` (the org's bot)
+  must still show a full member of the routed team, the Person mapping must still hold,
+  and the role is re-read with ``roles.role_of``. Anything else signs the session out.
+- Pending: the creator of an org that no workspace routes to yet holds ``pending``, not
+  owner. Their Slack membership can't be checked until the bot is installed, so
+  ``console_pending`` (completing that install) is all they can do. Once the install has
+  verified them (``slack_membership_refusal``) and routed the team, they become owner.
 
 ``console_user`` and ``console_admin`` also accept ``Authorization: Bearer
 <BRAIN_ADMIN_TOKEN>`` (with ``?org=``, default the legacy org): the operator, as owner.
@@ -29,17 +34,19 @@ from dataclasses import dataclass
 from fastapi import HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
 
-from src.core.config import settings
-from src.domain.access import roles
 from src.core import tenancy
+from src.core.config import settings
 from src.domain import orgs
+from src.domain.access import roles
 from src.domain.console import csrf
-from src.domain.slack.workspace import get_org_actor_by_slack_identity
+from src.domain.slack.workspace import get_org_actor_by_slack_identity, get_workspace_by_team_id, is_workspace_member
 
 log = logging.getLogger(__name__)
 
 COOKIE = "__Host-brain_session"
 ROLE_REFRESH_SECONDS = 60
+# An org creator before the Slack install verified them: may only complete that install.
+ROLE_PENDING = "pending"
 
 
 @dataclass(frozen=True)
@@ -165,14 +172,42 @@ def load(sid: str | None) -> Session | None:
     return session
 
 
+def slack_membership_refusal(team_id: str, slack_user_id: str) -> str | None:
+    """None when ``slack_user_id`` is a full member of ``team_id``, else why not.
+
+    Asks Slack (``users.info`` with the bot token of the org in context), so it needs the
+    org's install. Guests, bots and Slack Connect users from another workspace are refused,
+    and so is any failed lookup. The Slack install for a pending org calls this for its
+    creator before routing the team to the org.
+    """
+    workspace = get_workspace_by_team_id(team_id)
+    if workspace is None:
+        return "workspace_unavailable"
+    info = workspace.client.user_info(slack_user_id)
+    if info is None:
+        return "slack_unavailable"
+    if not is_workspace_member(info) or (info.team_id and info.team_id != team_id):
+        return "not_a_member"
+    return None
+
+
+def _is_creator(session: Session, org: orgs.Org) -> bool:
+    return bool(org.created_by) and csrf.same(org.created_by, session.creator_id)
+
+
 def _current_role(session: Session, org: orgs.Org) -> str | None:
     """The role now, or None when the person is no longer in the org. Runs in the org's context."""
-    if org.created_by and secrets.compare_digest(org.created_by, session.creator_id):
-        return roles.ROLE_OWNER
+    if orgs.routed_org_id(session.team) != org.id:
+        # No verified Slack install routes this person's team here: only the creator, pending.
+        return ROLE_PENDING if _is_creator(session, org) else None
+    if slack_membership_refusal(session.team, session.slack_user) is not None:
+        return None
     if session.person:
         resolution = get_org_actor_by_slack_identity(session.team, session.slack_user)
         if resolution.actor is None or resolution.actor.person_id != session.person:
             return None
+    if _is_creator(session, org):
+        return roles.ROLE_OWNER
     return roles.role_of(session.slack_user, env_roles=org.legacy)
 
 
@@ -230,7 +265,7 @@ def _bearer(request: Request) -> str:
 
 def is_operator(request: Request) -> bool:
     presented = _bearer(request)
-    return bool(settings.brain_admin_token and presented and secrets.compare_digest(presented, settings.brain_admin_token))
+    return bool(settings.brain_admin_token and presented and csrf.same(presented, settings.brain_admin_token))
 
 
 def _operator_session(request: Request) -> Session:
@@ -270,11 +305,23 @@ async def console_session(request: Request) -> Session:
     return session
 
 
-async def console_user(request: Request) -> Session:
-    """A member of an org; the request runs in that org's context."""
+async def console_pending(request: Request) -> Session:
+    """An org's creator before its Slack install, or its owner: for the Add to Slack step."""
     session = await console_session(request)
     if not session.org:
         raise HTTPException(status_code=403, detail="no_org")
+    if session.role not in (ROLE_PENDING, roles.ROLE_OWNER):
+        raise HTTPException(status_code=403, detail="owner_only")
+    return session
+
+
+async def console_user(request: Request) -> Session:
+    """A verified member of an org; the request runs in that org's context."""
+    session = await console_session(request)
+    if not session.org:
+        raise HTTPException(status_code=403, detail="no_org")
+    if session.role == ROLE_PENDING:
+        raise HTTPException(status_code=403, detail="slack_install_pending")
     return session
 
 

@@ -17,6 +17,12 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 HEADER = "x-csrf-token"
 
 
+def same(a: str, b: str) -> bool:
+    """Constant-time string equality. Compares UTF-8 bytes: ``compare_digest`` raises on
+    non-ASCII ``str``, and header values can carry any latin-1 character."""
+    return secrets.compare_digest(a.encode(), b.encode())
+
+
 def new_token() -> str:
     return secrets.token_urlsafe(32)
 
@@ -37,7 +43,7 @@ def check(request: Request, session_token: str) -> None:
         return
     check_origin(request)
     presented = request.headers.get(HEADER, "")
-    if not presented or not session_token or not secrets.compare_digest(presented, session_token):
+    if not presented or not session_token or not same(presented, session_token):
         raise HTTPException(status_code=403, detail="bad_csrf_token")
     content_type = request.headers.get("content-type", "")
     has_body = request.headers.get("content-length", "0") not in ("", "0") or "transfer-encoding" in request.headers
