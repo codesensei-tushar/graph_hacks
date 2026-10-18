@@ -18,6 +18,13 @@ stops its backfill there: it keeps its cursor and is fetched again at its next p
 
 A signed webhook is written through the same ``graph.write_page`` (``handle_delivery``);
 it never moves a cursor, so the next poll fills in anything a delivery missed.
+
+Every install of every org has its own job, run by the scheduler inside the install's org,
+so it writes that org's graph. The legacy org's env install of a source keeps the job id
+``connector:sync:<source>`` (and its payload names the source only); any other install's is
+``connector:sync:<org>:<source>:<install>``. ``remove_install`` disconnects one: it stops the
+job, deletes everything the install wrote 500 nodes at a time (a job, so a restart resumes
+it), then its install node and its external account.
 """
 
 import hashlib
@@ -36,12 +43,14 @@ from src.connectors.base import (
     WebhookRequest,
     clamp_wait,
 )
-from src.core import scheduler
-from src.db.falkordb_client import kv
+from src.core import scheduler, tenancy
+from src.db.falkordb_client import connect, kv
 
 log = logging.getLogger(__name__)
 
 SYNC_JOB = "runConnectorSync"
+REMOVE_JOB = "runConnectorRemoval"
+REMOVE_BATCH = 500
 # A container keeps at most this many items; past it, new items are dropped and existing ones update.
 MAX_ITEMS_PER_CONTAINER = 1000
 MORE_DELAY_SECONDS = 2.0
@@ -51,12 +60,32 @@ FAILURE_BACKOFF_SECONDS = (60, 5 * 60, 15 * 60, 60 * 60)
 DELIVERY_DEDUP_TTL_SECONDS = 60 * 60 * 24
 ERROR_MAX_CHARS = 300
 
-# Container objects as the connector last listed them, by install key. Rebuilt after a restart.
-_containers: dict[str, tuple[float, list[Container]]] = {}
+# Container objects as the connector last listed them, by (org, install key). Rebuilt after a restart.
+_containers: dict[tuple[str, str], tuple[float, list[Container]]] = {}
 
 
-def job_id(source: str) -> str:
-    return f"connector:sync:{source}"
+def _is_legacy_env(install: Install) -> bool:
+    return install.auth == "env" and install.org == tenancy.LEGACY_ORG_ID
+
+
+def job_id(source: str, install: Install | None = None) -> str:
+    """``connector:sync:<source>`` for the legacy env install, else ``connector:sync:<org>:<source>:<install>``."""
+    if install is None or _is_legacy_env(install):
+        return f"connector:sync:{source}"
+    return f"connector:sync:{install.org}:{install.source}:{install.id}"
+
+
+def _cache_key(install: Install) -> tuple[str, str]:
+    return (install.org, install.key)
+
+
+def resolve(source: str, install_id: str | None = None) -> tuple[Connector | None, Install | None]:
+    """The connector and install a job or route names: the legacy env install of ``source`` when
+    ``install_id`` is None, else the org in context's install ``install_id``."""
+    connector = registry.get(source)
+    if install_id is None:
+        return connector, registry.install_for(source)
+    return connector, registry.get_install(tenancy.current_org_ref().id, source, install_id)
 
 
 def max_delay(source: str) -> float:
@@ -65,34 +94,55 @@ def max_delay(source: str) -> float:
     return float(max(MAX_RETRY_AFTER_SECONDS, CREDENTIALS_BACKOFF_SECONDS, *FAILURE_BACKOFF_SECONDS, connector.poll_seconds if connector else 0))
 
 
-def schedule(source: str, delay: float = 0.0) -> None:
+def _payload(install: Install | None, source: str) -> dict:
+    if install is None or _is_legacy_env(install):
+        return {"source": source}
+    return {"source": source, "install": install.id}
+
+
+def schedule(source: str, delay: float = 0.0, install: Install | None = None) -> None:
+    """Arm the step of ``install`` (default: the legacy env install of ``source``), in its org."""
     delay = min(max(0.0, float(delay)), max_delay(source))
-    scheduler.schedule(delay, SYNC_JOB, {"source": source}, job_id=job_id(source))
+    org = install.org if install is not None else tenancy.LEGACY_ORG_ID
+    with tenancy.org_context(org):
+        scheduler.schedule(delay, SYNC_JOB, _payload(install, source), job_id=job_id(source, install))
+
+
+def cancel(install: Install) -> None:
+    with tenancy.org_context(install.org):
+        scheduler.cancel(job_id(install.source, install))
 
 
 def schedule_all() -> list[str]:
-    """Arm every configured install that has no step pending, or one put off further than any
+    """Arm every install of every org that has no step pending, or one put off further than any
     step may be (written before the clamp, or by a clock that jumped). Startup."""
     armed = []
-    for connector, _install in registry.installs():
-        due = scheduler.due_at(job_id(connector.source))
+    for connector, install in registry.all_installs():
+        try:
+            with tenancy.org_context(install.org):
+                due = scheduler.due_at(job_id(connector.source, install))
+        except Exception:
+            log.exception("[connectors] cannot arm %s of org %s", install.key, install.org)
+            continue
         if due is None or due - time.time() > max_delay(connector.source):
-            schedule(connector.source, 0)
-            armed.append(connector.source)
+            schedule(connector.source, 0, install)
+            armed.append(connector.source if _is_legacy_env(install) else f"{install.org}:{install.key}")
     return armed
 
 
 def run_sync(payload: dict) -> None:
-    """The scheduler job: one step, then always the next one while the install is configured."""
+    """The scheduler job (in the install's org): one step, then always the next one while the install is configured."""
     source = (payload or {}).get("source") or ""
+    install_id = (payload or {}).get("install")
     delay = FAILURE_BACKOFF_SECONDS[0]
     try:
-        delay = sync_step(source).get("next_in", delay)
+        delay = sync_step(source, install_id).get("next_in", delay)
     except Exception:
         log.exception("[connectors] %s sync step failed", source)
     finally:
-        if registry.install_for(source) is not None:
-            schedule(source, delay)
+        _connector, install = resolve(source, install_id)
+        if install is not None:
+            schedule(source, delay, install)
 
 
 def _error(error: BaseException) -> str:
@@ -108,11 +158,39 @@ def _backoff(failures: int) -> float:
     return float(FAILURE_BACKOFF_SECONDS[min(max(failures, 1), len(FAILURE_BACKOFF_SECONDS)) - 1])
 
 
-def sync_step(source: str) -> dict:
-    """One step for ``source``. Returns what happened and ``next_in``, the seconds until the next step."""
-    connector, install = registry.get(source), registry.install_for(source)
+def sync_step(source: str, install_id: str | None = None) -> dict:
+    """One step for an install (default: the legacy env install of ``source``), in the org in
+    context. Returns what happened and ``next_in``, the seconds until the next step."""
+    connector, install = resolve(source, install_id)
     if connector is None or install is None:
         return {"status": "not_configured"}
+    if install.org != tenancy.current_org_ref().id:
+        log.warning("[connectors] %s of org %s refused in org %s", install.key, install.org, tenancy.current_org_ref().id)
+        return {"status": "not_configured"}
+    report = _step(connector, install)
+    _record_status(install, report)
+    return report
+
+
+def _record_status(install: Install, report: dict) -> None:
+    """A stored install's status for the console: active once a step works, error on rejected credentials."""
+    if install.auth == "env":
+        return
+    from src.connectors import store
+
+    status = report.get("status")
+    try:
+        if status == "credentials_rejected":
+            store.set_status(install.key, "error", "The credentials were rejected. Reconnect to fix it.")
+        elif status in ("synced", "idle", "no_containers"):
+            current = store.get(install.key)
+            if current is not None and (current.status != "active" or current.last_error):
+                store.set_status(install.key, "active")
+    except Exception:
+        log.exception("[connectors] status of %s not recorded", install.key)
+
+
+def _step(connector: Connector, install: Install) -> dict:
     state = graph.get_state(install.key)
     failures = int(state.get("failures") or 0)
     try:
@@ -132,7 +210,7 @@ def sync_step(source: str) -> dict:
         return {"status": "no_containers", "next_in": float(connector.poll_seconds)}
 
     now = _now_ms()
-    ceiling = max_delay(source)
+    ceiling = max_delay(install.source)
     states = {container.id: graph.get_state(container.id) for container in containers}
     container = _next_container(containers, states, now, ceiling)
     if container is None:
@@ -144,7 +222,7 @@ def sync_step(source: str) -> dict:
 
 
 def _current_containers(connector: Connector, install: Install) -> list[Container]:
-    cached = _containers.get(install.key)
+    cached = _containers.get(_cache_key(install))
     if cached and time.time() - cached[0] < CONTAINERS_REFRESH_SECONDS:
         return cached[1]
     info = connector.check_credentials(install)
@@ -159,7 +237,7 @@ def _current_containers(connector: Connector, install: Install) -> list[Containe
                 log.warning("[connectors] readers unavailable container=%s: %s; clearing access", container.id, _error(error))
                 readers = None
             graph.write_readers(install, container.id, readers)
-    _containers[install.key] = (time.time(), containers)
+    _containers[_cache_key(install)] = (time.time(), containers)
     graph.set_state(install.key, install, account=info.account, site=info.site, containers_at=_now_ms(), containers=len(containers), last_error=None)
     log.info("[connectors] %s containers=%d account=%s", install.key, len(containers), info.account)
     return containers
@@ -200,7 +278,7 @@ def _fetch_one(connector: Connector, install: Install, container: Container, sta
     except CredentialsRejected as error:
         graph.set_state(container.id, install, due_at=now + CREDENTIALS_BACKOFF_SECONDS * 1000, last_error=_error(error))
         graph.set_state(install.key, install, last_error=_error(error), failures=failures + 1)
-        _containers.pop(install.key, None)  # check the credentials again next time
+        _containers.pop(_cache_key(install), None)  # check the credentials again next time
         return {"status": "credentials_rejected", "container": container.id}
     except Exception as error:
         container_failures = int(state.get("failures") or 0) + 1
@@ -241,63 +319,137 @@ def _fetch_one(connector: Connector, install: Install, container: Container, sta
     return {"status": "synced", "container": container.id, **written}
 
 
-def sync_now(source: str, full: bool = False) -> bool:
-    """Make every container due and run a step on the next scheduler poll. ``full`` starts each one over."""
-    install = registry.install_for(source)
+def sync_now(source: str, full: bool = False, install_id: str | None = None) -> bool:
+    """Make every container due and run a step on the next scheduler poll. ``full`` starts each one over.
+    ``install_id`` names an install of the org in context; None is the legacy env install."""
+    _connector, install = resolve(source, install_id)
     if install is None:
         return False
-    _containers.pop(install.key, None)
-    for state in graph.list_states(install):
-        if state.get("id") == install.key:
-            continue
-        fields = {"due_at": 0, "failures": 0}
-        if full:
-            fields.update(cursor=None, poll_cursor=None, has_more=False, backfilled=False)
-        graph.set_state(state["id"], install, **fields)
-    schedule(source, 0)
+    with tenancy.org_context(install.org):
+        _containers.pop(_cache_key(install), None)
+        for state in graph.list_states(install):
+            if state.get("id") == install.key:
+                continue
+            fields = {"due_at": 0, "failures": 0}
+            if full:
+                fields.update(cursor=None, poll_cursor=None, has_more=False, backfilled=False)
+            graph.set_state(state["id"], install, **fields)
+    schedule(source, 0, install)
     return True
 
 
-def status() -> list[dict]:
-    """What the admin status route shows: nothing secret, no config values."""
-    rows = []
-    for connector, install in registry.installs():
-        state = graph.get_state(install.key)
-        names = {container.id: container.name for container in (_containers.get(install.key) or (0, []))[1]}
-        containers = []
-        for item in graph.list_states(install):
-            if item.get("id") == install.key:
-                continue
-            containers.append(
-                {
-                    "id": item["id"],
-                    "name": names.get(item["id"]),
-                    "items": graph.count_items(item["id"]),
-                    "backfilled": bool(item.get("backfilled")),
-                    "has_more": bool(item.get("has_more")),
-                    "capped": bool(item.get("capped")),
-                    "cursor": item.get("cursor"),
-                    "last_fetch_at": item.get("last_fetch_at"),
-                    "due_at": item.get("due_at"),
-                    "last_error": item.get("last_error"),
-                }
-            )
-        due = scheduler.due_at(job_id(connector.source))
-        rows.append(
+def install_status(connector: Connector, install: Install) -> dict:
+    """One install's sync status, read in the org in context: nothing secret, no config values."""
+    state = graph.get_state(install.key)
+    names = {container.id: container.name for container in (_containers.get(_cache_key(install)) or (0, []))[1]}
+    containers = []
+    for item in graph.list_states(install):
+        if item.get("id") == install.key:
+            continue
+        containers.append(
             {
-                "source": connector.source,
-                "install": install.id,
-                "account": state.get("account"),
-                "site": state.get("site"),
-                "webhooks": connector.accepts_webhooks,
-                "last_sync_at": state.get("last_sync_at"),
-                "last_error": state.get("last_error"),
-                "failures": int(state.get("failures") or 0),
-                "next_step_at": int(due * 1000) if due is not None else None,
-                "containers": containers,
+                "id": item["id"],
+                "name": names.get(item["id"]),
+                "items": graph.count_items(item["id"]),
+                "backfilled": bool(item.get("backfilled")),
+                "has_more": bool(item.get("has_more")),
+                "capped": bool(item.get("capped")),
+                "cursor": item.get("cursor"),
+                "last_fetch_at": item.get("last_fetch_at"),
+                "due_at": item.get("due_at"),
+                "last_error": item.get("last_error"),
             }
         )
-    return rows
+    due = scheduler.due_at(job_id(connector.source, install))
+    return {
+        "source": connector.source,
+        "install": install.id,
+        "account": state.get("account"),
+        "site": state.get("site"),
+        "webhooks": connector.accepts_webhooks,
+        "last_sync_at": state.get("last_sync_at"),
+        "last_error": state.get("last_error"),
+        "failures": int(state.get("failures") or 0),
+        "next_step_at": int(due * 1000) if due is not None else None,
+        "containers": containers,
+    }
+
+
+def status() -> list[dict]:
+    """What the admin status route shows (the legacy org's env installs): nothing secret, no config values."""
+    with tenancy.org_context(tenancy.LEGACY_ORG_ID):
+        return [install_status(connector, install) for connector, install in registry.installs()]
+
+
+# --- disconnect ---------------------------------------------------------------------------
+
+
+def remove_install(install_key: str, actor: str | None = None) -> bool:
+    """Disconnect a stored install of the org in context: mark it removing, stop its sync, and queue the
+    batched deletion of everything it wrote. False when there is no such install, or it is an env install."""
+    from src.connectors import store
+
+    stored = store.get(install_key)
+    if stored is None or stored.auth == "env":
+        return False
+    org = tenancy.current_org_ref().id
+    store.set_status(install_key, "removing")
+    install = registry.drop(org, stored.source, stored.install) or Install(source=stored.source, id=stored.install, org=org, auth=stored.auth)
+    cancel(install)
+    _containers.pop(_cache_key(install), None)
+    scheduler.schedule(0, REMOVE_JOB, {"install": install_key, "actor": actor}, job_id=f"connector:remove:{install_key}")
+    return True
+
+
+def delete_batch(install_key: str, limit: int = REMOVE_BATCH) -> int:
+    """Delete up to ``limit`` nodes the install wrote (items, users, containers, state); how many went."""
+    _, graph_ = connect()
+    rows = graph_.query(
+        "MATCH (n {install: $key}) WITH n LIMIT $limit DETACH DELETE n RETURN count(*)", {"key": install_key, "limit": limit}
+    ).result_set
+    return int(rows[0][0]) if rows else 0
+
+
+def run_removal(payload: dict) -> None:
+    """The removal job (in the install's org): one batch, then the next, then the install itself."""
+    from src.connectors import store
+    from src.domain import orgs
+
+    install_key = (payload or {}).get("install") or ""
+    stored = store.get(install_key)
+    if stored is None:
+        return
+    if stored.status != "removing":
+        log.warning("[connectors] removal of %s skipped: it is %s", install_key, stored.status)
+        return
+    try:
+        deleted = delete_batch(install_key)
+    except Exception:
+        log.exception("[connectors] removal batch failed install=%s; retrying in a minute", install_key)
+        scheduler.schedule(60, REMOVE_JOB, payload, job_id=f"connector:remove:{install_key}")
+        return
+    if deleted >= REMOVE_BATCH:
+        scheduler.schedule(0, REMOVE_JOB, payload, job_id=f"connector:remove:{install_key}")
+        return
+    org = tenancy.current_org_ref().id
+    store.delete(install_key)
+    if stored.external_account:
+        orgs.release_external_account(stored.external_account, org)
+    _audit(org, payload.get("actor"), "connector.disconnect", install_key, "ok")
+    log.info("[connectors] removed install=%s org=%s", install_key, org)
+
+
+def _audit(org: str, actor: str | None, action: str, target: str, result: str) -> None:
+    """Package A's audit log, when it is in this build; otherwise the application log."""
+    try:
+        from src.domain.console import audit
+    except ImportError:
+        log.info("[audit] org=%s actor=%s action=%s target=%s result=%s", org, actor, action, target, result)
+        return
+    try:
+        audit.record(org, actor, action, target, result)
+    except Exception:
+        log.exception("[audit] not recorded: %s %s", action, target)
 
 
 # --- webhooks -----------------------------------------------------------------------------
@@ -317,6 +469,12 @@ def handle_delivery(source: str, request: WebhookRequest, key: str) -> dict | No
     connector, install = registry.get(source), registry.install_for(source)
     if connector is None or install is None:
         return None
+    # Webhooks reach the legacy org's env install only.
+    with tenancy.org_context(tenancy.LEGACY_ORG_ID):
+        return _deliver(connector, install, source, request, key)
+
+
+def _deliver(connector: Connector, install: Install, source: str, request: WebhookRequest, key: str) -> dict | None:
     try:
         page = connector.parse_webhook(install, request)
         written = graph.write_page(install, page, MAX_ITEMS_PER_CONTAINER) if page is not None else {"ignored": True}
@@ -329,3 +487,4 @@ def handle_delivery(source: str, request: WebhookRequest, key: str) -> dict | No
 
 
 scheduler.register(SYNC_JOB, run_sync)
+scheduler.register(REMOVE_JOB, run_removal)

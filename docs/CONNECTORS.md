@@ -126,6 +126,24 @@ ExternalUser` is one of its `readers()` reads it. With readers unknown, nobody d
 - **Writes** (`src/connectors/graph.py`) MERGE on `id` only, so a page written twice changes
   nothing, and refuse any id outside the install.
 
+## Installs made in the console
+
+With `CONSOLE_ENABLED`, an org's admins connect a source from the console instead of env
+variables. The install is a `(:ConnectorInstall {id: '<source>:<install>', org, auth, status,
+external_account, site, config_json, secret_enc, key_id})` node in the org's own graph
+(`src/connectors/store.py`): `config_json` holds the selected projects and the site,
+`secret_enc` the credentials, MultiFernet-encrypted (`TOKEN_ENCRYPTION_KEYS`) over
+`{org, install, ...}` and refused if copied to another install or org. The registry is keyed
+`(org, source, install)`; `registry.load_from_graph(org)` loads each org's installs at startup.
+Each install has its own sync job, `connector:sync:<org>:<source>:<install>`, run in its org;
+the legacy org's env install keeps `connector:sync:<source>`. An external account
+(`jira:<cloudId>`, `hubspot:<hubId>`) feeds one org only.
+
+Disconnecting (`DELETE /console/api/connections/{id}`) marks the install `removing`, stops its
+job, deletes everything it wrote 500 nodes at a time (a scheduler job, so a restart resumes it),
+then the install node and its external account, and writes an audit entry. Env installs can only
+be turned off in the environment, as below.
+
 ## Operate it
 
 Both routes need `BRAIN_ADMIN_TOKEN`:
