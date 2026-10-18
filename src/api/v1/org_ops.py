@@ -8,7 +8,8 @@
 ``POST /ops/tokens/rewrap``  every stored Slack bot token and connector secret, in every org,
                              re-encrypted under the first ``TOKEN_ENCRYPTION_KEYS`` key: plaintext
                              legacy values get encrypted, values under an older key move to the
-                             new one. Run it after adding a key, before dropping the old one.
+                             new one, and so is the stored GitHub App (``app_config.rewrap``). Run it
+                             after adding a key, before dropping the old one.
 """
 
 import logging
@@ -90,7 +91,14 @@ async def create(request: Request):
 
 
 def rewrap_everything() -> dict:
-    counts = {"slack_tokens": 0, "connector_secrets": 0, "failed": 0}
+    from src.integrations.github import app_config
+
+    counts = {"slack_tokens": 0, "connector_secrets": 0, "github_app": 0, "failed": 0}
+    try:
+        counts["github_app"] = int(app_config.rewrap())
+    except Exception:
+        log.warning("[ops] the stored GitHub App secret could not be re-wrapped")
+        counts["failed"] += 1
     for org in _all_orgs():
         with tenancy.org_context(org):
             _, graph = connect()

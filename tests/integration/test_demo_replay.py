@@ -20,7 +20,7 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from src.api.v1 import github as github_routes  # noqa: E402
+from src.integrations.github import app_config as github_app_config  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
 from src.domain.github import backfill, webhooks  # noqa: E402
@@ -64,7 +64,7 @@ class DemoReplayTest(unittest.TestCase):
             mock.patch.object(falkordb_client, "graph_name", return_value=GRAPH),
             mock.patch.object(seed, "graph_name", return_value=GRAPH),
             mock.patch.object(slack_client_module, "settings", slack_settings),
-            mock.patch.object(github_routes, "settings", github_settings),
+            mock.patch.object(github_app_config, "settings", github_settings),
             mock.patch.object(backfill, "client_for", return_value=github_client),
             mock.patch.object(webhooks, "client_for", return_value=github_client),
         ]

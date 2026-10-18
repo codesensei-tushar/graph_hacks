@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitHub App · Company Brain operator</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/static/console/icon.svg" type="image/svg+xml">
+<script src="/static/theme.js?v=1"></script>
+<link rel="stylesheet" href="/static/style.css?v=15">
+<link rel="stylesheet" href="/static/console.css?v=1">
+</head>
+<body class="console">
+<main id="main" class="console-main">
+  <div class="wrap">
+    <section class="page-head" aria-labelledby="page-title">
+      <p class="eyebrow">Operator</p>
+      <h1 id="page-title">GitHub App</h1>
+      <p class="lede">Register this deployment's GitHub App with GitHub, then let companies connect it from their console. Read-only: pull requests, reviews and issues.</p>
+      <noscript><p class="note">This page needs JavaScript.</p></noscript>
+    </section>
+
+    <div class="banner" id="banner" role="status" hidden></div>
+
+    <section class="block" aria-labelledby="auth-title">
+      <h2 id="auth-title">Operator token</h2>
+      <form class="form" id="auth-form">
+        <div class="form-row">
+          <label for="token">BRAIN_ADMIN_TOKEN</label>
+          <input class="input mono" id="token" type="password" autocomplete="off" spellcheck="false" required>
+          <p class="hint">Kept in this tab's memory only, and sent to this server only.</p>
+        </div>
+        <div><button class="btn" type="submit">Continue</button></div>
+      </form>
+    </section>
+
+    <section class="block" id="status" aria-labelledby="status-title" hidden>
+      <h2 id="status-title">This deployment's app</h2>
+      <dl class="facts" id="facts"></dl>
+    </section>
+
+    <section class="block" id="register" aria-labelledby="register-title" hidden>
+      <h2 id="register-title">Register the app</h2>
+      <p class="sub">GitHub opens with the app filled in: its webhook, where people come back to, and read-only permissions. Click "Create GitHub App" there; GitHub sends you back here and the credentials are stored encrypted.</p>
+      <form class="form" id="register-form">
+        <div class="form-row">
+          <label for="name">App name</label>
+          <input class="input" id="name" type="text" value="Company Brain" maxlength="34" autocomplete="off">
+          <p class="hint">GitHub App names are unique across GitHub. If it is taken, pick another.</p>
+        </div>
+        <div class="form-row">
+          <label for="owner">Owner organization (optional)</label>
+          <input class="input mono" id="owner" type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="empty: your personal account">
+        </div>
+        <div><button class="btn" type="submit" id="register-go">Register on GitHub</button></div>
+      </form>
+    </section>
+  </div>
+</main>
+<script src="/static/ops/github-app.js?v=1"></script>
+</body>
+</html>

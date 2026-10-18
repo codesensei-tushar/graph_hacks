@@ -350,10 +350,10 @@ def _forget(asker: str, scope: SlackMemoryScope, write_tag: str | None, names: d
 
 
 def _link_github(request: TurnRequest) -> str:
-    from src.core.config import settings
     from src.domain.github.account_link import create_github_link_url
+    from src.integrations.github import app_config
 
-    if not settings.github_link_enabled:
+    if not app_config.link_enabled():
         return "GitHub linking isn't set up on this server yet."
     if not request.is_dm:
         # The link is personal; it belongs in a DM, not a channel.
