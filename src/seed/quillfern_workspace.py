@@ -149,7 +149,7 @@ ENGINEERING_STEPS = (
     DemoStep(
         "Blast radius, then two hops out",
         (
-            WorkspaceMessage(ENGINEERING, "USARA", "what breaks if auth goes down", "ask"),
+            WorkspaceMessage(ENGINEERING, "USARA", "what breaks if auth goes down, one hop", "ask"),
             WorkspaceMessage(ENGINEERING, "USARA", "and two hops out", "follow_up"),
         ),
     ),

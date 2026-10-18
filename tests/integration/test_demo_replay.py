@@ -213,17 +213,20 @@ class DemoReplayTest(unittest.TestCase):
         reply = self._only_reply(first)
         self.assert_cites_path(reply)
         self.assertIn("If Auth Service goes down", reply)
+        self.assertIn("depth 1", reply)
+        self.assertIn("1 more breaks further out (Invoice Worker at depth 2); ask with more hops.", reply)
         for line in (
             edge("API Gateway", "DEPENDS_ON", "Auth Service"),
             edge("Billing Service", "DEPENDS_ON", "Auth Service"),
-            edge("Invoice Worker", "DEPENDS_ON", "Billing Service"),
         ):
             self.assertIn(line, reply)
         self.assertEqual(deeper.status, 200)
         self.assertEqual(len(deeper.replies), 1, "a follow-up that mentions the bot in the thread is answered")
 
     def test_4b_two_hops_out_reaches_a_service_the_first_answer_missed(self):
-        reply = self._only_reply(self._rows("Blast radius, then two hops out")[1])
+        first, deeper = self._rows("Blast radius, then two hops out")
+        self.assertNotIn(edge("Invoice Worker", "DEPENDS_ON", "Billing Service"), self._only_reply(first))
+        reply = self._only_reply(deeper)
         self.assertIn(edge("Invoice Worker", "DEPENDS_ON", "Billing Service"), reply)
         self.assertIn("If Auth Service goes down", reply)
         self.assertIn("depth 2", reply)
