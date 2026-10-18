@@ -58,6 +58,10 @@ class BackupError(Exception):
     pass
 
 
+class BucketMissing(BackupError):
+    """The bucket does not exist (yet). The nightly run logs one line and exits 0 until it does."""
+
+
 # --- talking to a FalkorDB container -----------------------------------------------------
 
 
@@ -201,10 +205,25 @@ def upload(bucket: str, name: str, path: str, content_type: str, token: str) -> 
             with urllib.request.urlopen(request, timeout=SAVE_TIMEOUT_SECONDS) as response:
                 stored = json.load(response)
         except urllib.error.HTTPError as error:
-            raise BackupError(f"upload of {name} failed: HTTP {error.code} {error.read()[:300]!r}") from None
+            raise upload_error(bucket, name, error.code, error.read()) from None
     if stored.get("md5Hash") != base64.b64encode(md5.digest()).decode():
         raise BackupError(f"upload of {name}: GCS md5 {stored.get('md5Hash')} does not match the local file")
     log(f"uploaded gs://{bucket}/{name} ({size} bytes)")
+
+
+def upload_error(bucket: str, name: str, status: int, body: bytes) -> BackupError:
+    """One line saying what a failed upload means and what to do about it."""
+    if status == 404:
+        return BucketMissing(f"gs://{bucket} does not exist yet, so nothing was backed up; create it (docs/DEPLOY.md, Backups and restore)")
+    if status == 403:
+        return BackupError(
+            f"HTTP 403 writing to gs://{bucket}: grant brain-vm-sa roles/storage.objectCreator on it and check the VM's access scopes (docs/DEPLOY.md)"
+        )
+    try:
+        reason = json.loads(body)["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        reason = body[:200].decode(errors="replace")
+    return BackupError(f"upload of {name} failed: HTTP {status}: {' '.join(str(reason).split())}")
 
 
 def run_backup(args) -> int:
@@ -377,8 +396,11 @@ def main(argv=None) -> int:
                 parser.error("backup needs --bucket (or BRAIN_BACKUP_BUCKET) or --out-dir")
             return run_backup(args)
         return run_verify(args)
+    except BucketMissing as error:
+        log(f"skipped: {error}")
+        return 0
     except (BackupError, subprocess.TimeoutExpired, OSError) as error:
-        log(f"failed: {error}")
+        log(f"failed: {' '.join(str(error).split())}")
         return 1
 
 

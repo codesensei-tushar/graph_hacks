@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
-from src.api.v1 import auth, connectors, console_connectors, console_oauth, console_people, github, health, org_ops, proof, slack, slack_install
+from src.api.v1 import auth, connectors, console_connectors, console_oauth, console_people, console_teams, github, health, org_ops, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
 from src.connectors import store as connector_store
@@ -147,6 +147,7 @@ app.include_router(health.router)
 app.include_router(proof.router)
 app.include_router(org_ops.router)
 app.include_router(console_connectors.router)
+app.include_router(console_teams.router)
 app.include_router(console_people.router)
 app.include_router(auth.router)
 ops.install(app)
