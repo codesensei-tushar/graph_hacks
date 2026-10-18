@@ -63,6 +63,10 @@ class JudgeQuestionsTest(unittest.TestCase):
             "who collaborates with whom": ("working_groups", "Label propagation over who owns or worked on the same service"),
             "is the billing retries decision still valid?": ("decision_pressure", "*Retry renewal webhooks inside the billing service* is the standing decision"),
             "is the retries decision still current": ("decision_pressure", "*Retry renewal webhooks inside the billing service* is the standing decision"),
+            # Haiku picks the forward walk for these; the keyword path now does too.
+            "what does the invoice worker need to run": ("blast_radius", "Invoice Worker depends on Billing Service and Notification Service (1 hop)"),
+            "what does billing require": ("blast_radius", "Billing Service depends on Auth Service and Postgres (1 hop)"),
+            "what relies on billing": ("blast_radius", "If Billing Service goes down, these stop with it"),
         }
         for question, (tool, start) in cases.items():
             with self.subTest(question=question):

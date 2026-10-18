@@ -43,7 +43,7 @@ _RELATED_MEMORIES = re.compile(
 )
 _RECALL = re.compile(r"\b(?:remember|recall|what did .+ say|who said|said|discussed|talked about|mentioned)\b", re.IGNORECASE)
 _BLAST = re.compile(
-    r"\b(?:breaks?|goes down|outage|depends?|dependents?|blast|stops? if|stalls?|is down|happens if|affected if)\b", re.IGNORECASE
+    r"\b(?:breaks?|goes down|outage|depends?|dependents?|rel(?:y|ies) on|blast|stops? if|stalls?|is down|happens if|affected if)\b", re.IGNORECASE
 )
 _DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
 _PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|still valid|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
