@@ -168,6 +168,20 @@ An owner or admin clicks **Connect** in the console.
 | `account_claimed` | Another org already reads this Jira site or HubSpot portal |
 | `oauth_failed` | Anything else: the code exchange or the account lookup failed, the consent covers no Jira site on atlassian.net, or the app's client id or secret is missing. The backend logs the failure type, never its text. |
 
+## Teams
+
+A new org's graph starts with its Company node (`{id: <org slug>, name: <org name>}`); every team
+it imports or onboards from Slack joins it. `src/api/v1/console_teams.py`:
+
+- `POST /console/api/teams/import` (owners and admins; JSON, CSRF): `{"file": "<team file TOML>", "check": false}`.
+  The file is the one `/ops/import` takes (docs/ONBOARDING-TEAMS.md), with the same 256 KiB limit and
+  the same checks against the org's graph. `check: true` writes nothing.
+  - 200 check: `{mode: "check", company, team, contents, counts: {people, runs: {<kind>: n}, decisions}}`
+  - 200 merge: the same plus `mode: "merge"`, `nodes`, `nodes_created`, `edges_created`, `properties_set`
+  - 400 `{error: "refused", problems: [...]}` (nothing written); 413 `{error: "too_large", limit_bytes}`
+- `GET /console/api/teams` (members): `{teams: [{id, name, summary, members: [{id, name, role}],
+  runs: [{id, name, kind, owners: [{id, name}]}]}]}`, what the member could read in a Slack DM.
+
 ## Tokens at run time
 
 Connectors get their bearer token from `src/connectors/oauth.py`'s `bearer_for(install)`:
