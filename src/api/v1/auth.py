@@ -152,7 +152,7 @@ def logout(request: Request):
         sessions.destroy(sid)
     if session is not None:
         audit.record(session.org, session.actor, "signout")
-    response = RedirectResponse("/", status_code=303)
+    response = RedirectResponse(f"{SIGNIN_PATH}?signed_out", status_code=303)
     sessions.clear_cookie(response)
     return response
 

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
-from src.api import ops, web
+from src.api import console_web, ops, web
 from src.api.v1 import auth, connectors, github, health, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
@@ -101,4 +101,5 @@ app.include_router(proof.router)
 app.include_router(auth.router)
 ops.install(app)
 web.install(app)
+console_web.install(app)
 mcp_api.install(app)
