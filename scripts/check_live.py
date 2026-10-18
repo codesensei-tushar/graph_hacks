@@ -101,6 +101,11 @@ def http_fetch(base: str) -> Fetch:
             status, body = error.code, error.read()
         except urllib.error.URLError as error:
             return 0, {"error": str(error.reason)}
+        except TimeoutError:
+            # A slow read raises the socket's own timeout, not a URLError.
+            return 0, {"error": "timeout"}
+        except OSError as error:
+            return 0, {"error": str(error) or type(error).__name__}
         try:
             return status, json.loads(body)
         except ValueError:
