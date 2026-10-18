@@ -26,6 +26,7 @@ from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
 from src.db.falkordb_client import connect  # noqa: E402
 from src.domain import orgs  # noqa: E402
+from src.domain.knowledge import ask_api  # noqa: E402
 
 ORIGIN = "https://console.test"
 CSRF = "csrf-token-of-the-session"
@@ -332,8 +333,43 @@ class ConsoleConnectorsTest(unittest.TestCase):
         self.assertIn("org_internal", body["scopes"])
         self.assertIn("org_shared", body["scopes"])
         self.assertEqual(body["picked_by"], "keywords")  # no model in tests; members never get it
-        self.assertIn("user_p-ada", body["scopes"])  # the asker's own DM memory, as in Slack
+        # The asker's own DM memory, under the tag a Slack DM turn writes it to (keyed by the Slack user id).
+        from src.domain.memory.writeback import slack_memory_container_tag, slack_memory_scope_for_turn
+
+        dm_tag = slack_memory_container_tag(slack_memory_scope_for_turn(is_dm=True, channel="D1", channel_type="im", user_id="UADA", slack_user_id="UADA"))
+        self.assertEqual(dm_tag, "user_UADA")
+        self.assertIn(dm_tag, body["scopes"])
+        self.assertNotIn("user_p-ada", body["scopes"])
         self.assertEqual(self.client.post("/console/api/ask", json={"q": " "}, headers=self.headers).status_code, 400)
+
+    def test_after_a_disconnect_an_answer_shows_none_of_its_data(self):
+        key = self.install.key
+        self.client.put(f"/console/api/connections/{key}/containers", json={"selected": ["10"]}, headers=self.headers)
+        self._run_scheduler()
+
+        def ask() -> str:
+            response = self.client.post("/console/api/ask", json={"q": "what is the status of ALPHA-1"}, headers=self.headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            return str(response.json())
+
+        self.assertIn("Issue 1", ask())
+        self.assertIn("Issue 1", ask())  # asked twice: the second is not a stale copy either way
+        with mock.patch.object(sync, "_audit"):
+            self.assertEqual(self.client.delete(f"/console/api/connections/{key}", headers=self.headers).status_code, 202)
+            self._run_scheduler(10)
+        self.assertEqual(self._count_in(self.x, "MATCH (n {install: $k}) RETURN count(n)", {"k": key}), 0)
+        self.assertNotIn("Issue 1", ask())
+
+    def test_a_write_to_the_graph_changes_the_public_cache_key(self):
+        with tenancy.org_context(self.x.id):
+            before = ask_api.cache_key("q")
+            self.assertEqual(ask_api.cache_key("q"), before)
+            _, graph = connect()
+            graph.query("CREATE (:Note {id: 'cache-key-probe'})")
+            after = ask_api.cache_key("q")
+            graph.query("MATCH (n:Note {id: 'cache-key-probe'}) DELETE n")
+        self.assertNotEqual(after, before)
+        self.assertEqual(after[0], self.x.graph)
 
     def tearDown(self):
         with tenancy.org_context(self.x.id):

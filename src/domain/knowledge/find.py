@@ -220,7 +220,7 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
         passing: dict[str, list[list]] = {}
         params = {
             "value": entity.id, "value_name": entity.name, "value_label": entity.label, "scopes": scopes,
-            "accounts": _accounts(graph, entity) if entity.label in ("Person", people.ACCOUNT) else [],
+            "accounts": _accounts(graph, entity) if entity.label == "Person" else people.identity_ids(graph, entity, scopes) if people.is_account(entity) else [],
         }
         for node_id, cited in graph.ro_query(allowed[key].query, params).result_set:
             passing.setdefault(node_id, []).extend(cited)
@@ -438,6 +438,8 @@ _IN_TEAM = re.compile(r"\bin\s+(?:the\s+)?(.+?)(?:\s+team)?\s*\??\s*$", re.IGNOR
 # Whose list it is: "tickets assigned to Om Sherikar", "accounts owned by Yash", "which accounts does Yash own".
 _BY_PERSON = re.compile(r"\b(?:assigned to|worked on by|owned by|opened by|held by)\s+(.+?)\s*\??\s*$", re.IGNORECASE)
 _DOES_PERSON = re.compile(r"\b(?:does|do)\s+(.+?)\s+(?:own|have|hold|handle|work on)\b", re.IGNORECASE)
+# "my tickets", "which of my accounts": the asker, as "me"; Slack swaps in their person.
+_MY = re.compile(r"\b(my)\b", re.IGNORECASE)
 # The filter a person fills, per label.
 _PERSON_FILTER = {"Ticket": "person", "Service": "owner", "Document": "author", "PullRequest": "author"}
 # The filter "about X" fills, per label. Services and teams have none.
@@ -480,7 +482,7 @@ def parse(question: str) -> dict:
             # "open deals": an open deal, whatever the account's own state.
             args.pop("state")
             args["stage"] = "open"
-    who = _BY_PERSON.search(text) or _DOES_PERSON.search(text)
+    who = _BY_PERSON.search(text) or _DOES_PERSON.search(text) or _MY.search(text)
     person_filter = _PERSON_FILTER.get(label)
     if who and re.search(r"\bteam$", who.group(1), re.IGNORECASE) and "team" in allowed:
         # "which services does the payments team own": the team, not a person.

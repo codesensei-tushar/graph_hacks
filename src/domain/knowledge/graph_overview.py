@@ -14,10 +14,9 @@ PageRank is not sampled, and every order is fixed.
 
 from dataclasses import dataclass, field
 
-from src.db import falkordb_client
 from src.db.falkordb_client import connect
 from src.domain.knowledge import kinds
-from src.domain.knowledge.ask_api import ANSWERS, GraphEdge, read_tools
+from src.domain.knowledge.ask_api import ANSWERS, cache_key, GraphEdge, read_tools
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED
 
 DEFAULT_SCOPES = (ORG_SHARED,)
@@ -88,12 +87,12 @@ def clamp_sample(value) -> int:
 
 
 def public_stats() -> GraphStats:
-    return ANSWERS.get_or_compute(("graph_stats", falkordb_client.graph_name()), graph_stats)
+    return ANSWERS.get_or_compute(cache_key("graph_stats"), graph_stats)
 
 
 def public_sample(limit=DEFAULT_SAMPLE) -> GraphSample:
     size = clamp_sample(limit)
-    return ANSWERS.get_or_compute(("graph_sample", falkordb_client.graph_name(), size), lambda: graph_sample(size))
+    return ANSWERS.get_or_compute(cache_key("graph_sample", size), lambda: graph_sample(size))
 
 
 def graph_stats(scopes=DEFAULT_SCOPES) -> GraphStats:

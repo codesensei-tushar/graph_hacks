@@ -197,6 +197,30 @@ class McpServerTest(unittest.TestCase):
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers), error.read()
 
+    def _call(self, body: bytes) -> int:
+        request = urllib.request.Request(f"http://127.0.0.1:{self.port}/mcp/", data=body, method="POST")
+        request.add_header("Content-Type", "application/json")
+        request.add_header("Accept", "application/json, text/event-stream")
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                response.read()
+                return response.status
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    def test_a_heavy_tool_call_spends_more_of_the_budget_and_the_body_still_reaches_the_server(self):
+        def call(name, arguments):
+            return json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}}).encode()
+
+        with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(ask_api.HEAVY_COST + 1, 3600.0)):
+            self.assertEqual(self._call(call("path_between", {"source": "maya", "target": "invoice worker"})), 200)
+            self.assertEqual(self._call(call("risk_map", {})), 429)
+            self.assertEqual(self._call(call("who_owns", {"name": "billing"})), 200)
+            self.assertEqual(self._call(call("who_owns", {"name": "billing"})), 429)
+
+    def test_a_body_over_the_cap_is_413_before_it_is_parsed(self):
+        self.assertEqual(self._call(b" " * (mcp_api.MAX_BODY_BYTES + 1)), 413)
+
     def test_get_and_delete_are_405_at_once_not_a_held_stream(self):
         for method in ("GET", "DELETE"):
             for path in ("/mcp", "/mcp/"):

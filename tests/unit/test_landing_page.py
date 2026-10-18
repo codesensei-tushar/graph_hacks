@@ -179,6 +179,7 @@ class TeamPageTest(unittest.TestCase):
         for asset in ("/static/style.css", "/static/shell.js", "/static/graph.js", "/static/team.js"):
             self.assertIn(asset, page.text)
             self.assertEqual(http.get(asset).status_code, 200, asset)
+        self.assertIn('<header class="top" data-shell="site" data-here="team">', page.text)
         self.assertIn('id="theme-toggle"', page.text)
 
     def test_an_unknown_team_is_the_same_page_with_a_404(self):

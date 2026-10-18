@@ -16,7 +16,6 @@
 
 /* --- Header --------------------------------------------------------------------------------- */
 
-.top nav a[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
 .top-org {
   max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: 500 var(--fs-xs)/1 var(--mono); color: var(--ink-2); letter-spacing: 0.02em;

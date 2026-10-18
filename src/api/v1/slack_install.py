@@ -251,6 +251,7 @@ def oauth_callback(request: Request, background: BackgroundTasks, code: str | No
             confirm_workspace(oauth.team_id)
     if not tenancy.is_legacy(ref):
         orgs.route_team(oauth.team_id, ref.id)
+        _promote_pending_creator(request, ref, oauth.team_id)
 
     def after_install() -> None:
         try:
@@ -267,6 +268,21 @@ def oauth_callback(request: Request, background: BackgroundTasks, code: str | No
     background.add_task(tenancy.in_org, ref, after_install)
     team = html.escape(oauth.team_name or "your workspace")
     return HTMLResponse(f"<!doctype html><title>Company Brain</title><p>Company Brain is connected to <b>{team}</b>. You can close this tab and DM the bot in Slack.</p>")
+
+
+def _promote_pending_creator(request: Request, ref: tenancy.OrgRef, team_id: str) -> None:
+    """The installer's console session (its SameSite=Lax cookie arrives on this navigation back from
+    Slack): a pending creator becomes owner now, so the console they return to shows Slack done and
+    lets them connect tools, instead of waiting out the minute between role checks."""
+    sid = request.cookies.get(console_session.COOKIE)
+    if not sid:
+        return
+    try:
+        session = console_session.load(sid)
+        if session is not None and session.org == ref.id and session.team == team_id and session.role == console_session.ROLE_PENDING:
+            console_session.refresh(session)
+    except Exception:
+        log.warning("[slack] console session of the installer not refreshed", exc_info=True)
 
 
 _STATUS_CODES = {"invalid": 404, "expired": 410, "used": 410, "not_in_org": 403, "claimed": 409}

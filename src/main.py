@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
-from src.api.v1 import auth, connectors, console_connectors, console_oauth, github, health, org_ops, proof, slack, slack_install
+from src.api.v1 import auth, connectors, console_connectors, console_oauth, console_teams, github, health, org_ops, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
 from src.connectors import store as connector_store
@@ -46,12 +46,17 @@ def _seed_if_empty() -> None:
     connector_store.ensure_indexes()
     # Never raises: a failure is logged and the tools that would search keep their refusal.
     ensure_search_indexes()
-    # The other orgs' graphs got their indexes when they were created; this adds any added since.
+    # The other orgs' graphs got their indexes and Company node when they were created; this adds
+    # any index added since, and the Company node to orgs made before create_org wrote one.
     for org in _other_orgs():
         try:
             orgs.build_org_indexes(org)
         except Exception:
             log.exception("index build failed org=%s", org.id)
+        try:
+            orgs.ensure_company(org)
+        except Exception:
+            log.exception("company node migration failed org=%s", org.id)
 
 
 def _other_orgs() -> list[tenancy.OrgRef]:
@@ -142,6 +147,7 @@ app.include_router(health.router)
 app.include_router(proof.router)
 app.include_router(org_ops.router)
 app.include_router(console_connectors.router)
+app.include_router(console_teams.router)
 app.include_router(auth.router)
 ops.install(app)
 web.install(app)

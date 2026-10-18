@@ -185,6 +185,17 @@ class WebAskTest(unittest.TestCase):
             # Another address has its own budget.
             self.assertEqual(self.http.get("/api/ask?q=who+owns+billing", headers={"X-Real-IP": "198.51.100.9"}).status_code, 200)
 
+    def test_heavy_questions_and_deep_walks_spend_more_of_the_budget(self):
+        here = {"X-Real-IP": "203.0.113.60"}
+        cost = ask_api.HEAVY_COST
+        with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=2 * cost + 1, window=3600)):
+            self.assertEqual(self.http.get("/api/ask", params={"q": "how is maya connected to the invoice worker"}, headers=here).status_code, 200)
+            self.assertEqual(self.http.get("/api/explore", params={"node": "billing", "depth": 2}, headers=here).status_code, 200)
+            # One token left: a light call passes, a heavy one is refused.
+            self.assertEqual(self.http.get("/api/ask", params={"q": "what are our riskiest services"}, headers=here).status_code, 429)
+            self.assertEqual(self.http.get("/api/ask", params={"q": "who owns billing"}, headers=here).status_code, 200)
+            self.assertEqual(self.http.get("/api/explore", params={"node": "billing"}, headers=here).status_code, 429)
+
     def test_the_cacheable_reads_say_so_and_questions_do_not(self):
         for path in CACHED_READS:
             response = self.http.get(path)

@@ -34,6 +34,9 @@ MAX_FILE_BYTES = 256 * 1024
 ORG_SHARED = "org_shared"
 _MAX_TEXT = 200
 _MAX_SUMMARY = 1000
+# The one thing said when the org's graph has no Company node: to a Slack user, a console
+# admin and the operator alike, so no setting name (SEED_COMPANY) ever reaches a user.
+NO_COMPANY = "Your company isn't set up in Company Brain yet; an admin can finish setup in the console."
 
 # What each section may say. Anything else is refused by name, so a typo is a message, not a silent drop.
 FIELDS: dict[str, tuple[str, ...]] = {
@@ -173,11 +176,23 @@ def parse_team_data(data: dict, company_id: str, lookup: GraphLookup | None = No
 
 
 def default_company_id() -> str:
-    """The id of the company this instance runs (``SEED_COMPANY``), which a new team joins."""
+    """The id of the legacy org's company (``SEED_COMPANY``), which a team imported there joins."""
     from src.core.config import settings
     from src.seed.seed import company_module
 
     return company_module(settings.seed_company).COMPANY["id"]
+
+
+def company_id() -> str:
+    """The id of the Company a new team joins: the org in context's (its slug; see
+    ``orgs.ensure_company``), or ``SEED_COMPANY``'s in the legacy org. Never another org's."""
+    from src.core import tenancy
+    from src.domain import orgs
+
+    org = tenancy.current_org_ref()
+    if tenancy.is_legacy(org):
+        return default_company_id()
+    return orgs.company_id(org)
 
 
 @dataclass
@@ -289,7 +304,7 @@ class _Reader:
     def read(self) -> SimpleNamespace:
         # Merging the team onto a company the graph lacks would create a nameless one.
         if self.lookup is not None and not self.lookup.has_company(self.company_id):
-            self.problems.append(f"the graph has no company '{self.company_id}' to add the team to; check SEED_COMPANY")
+            self.problems.append(NO_COMPANY)
         for key in self.data:
             if key not in FIELDS:
                 self._unknown(key, "the file", tuple(FIELDS))
