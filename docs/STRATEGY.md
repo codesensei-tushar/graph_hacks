@@ -10,14 +10,14 @@ From the [rules](https://www.wemakedevs.org/hackathons/falkordb/rules) and [over
 
 | Required | Status |
 | --- | --- |
-| Public source repository | Done |
-| README with setup instructions **and the graph data model** | Done. README, "Graph data model". Update it as the Decision edges and the vector index land. |
-| **The Cypher queries or graph algorithms the product depends on**, in the README | Done. README, "Cypher queries the product depends on". Update it as the tool catalogue PRs land. |
-| Demo video of the working project | Not yet. Script below. |
-| Live deployment, or complete local setup | Deployed at `brain.noobsurd.space` (DEPLOY.md). Keep it up through judging. |
+| Public source repository | **Not yet.** The repository is private (`gh repo view` on 18 Oct, 14:20 IST). The user makes it public before submitting; step 6 of "18 Oct, in order" |
+| README with setup instructions **and the graph data model** | Done. README, "Graph data model". Vector recall was cut (round 2), so no vector index is documented |
+| **The Cypher queries or graph algorithms the product depends on**, in the README | Done. README, "Cypher queries the product depends on", with the injection audit |
+| Demo video of the working project | Not yet. Record to "Recording script, Quillfern on production (primary)", with the Sales beat from round 6 on the local replay |
+| Live deployment, or complete local setup | Both. `brain.noobsurd.space` serves Quillfern (DEPLOY.md), and `scripts/replay_workspace.py` is the local setup. Every merge to `main` redeploys and drops connections for a few seconds; keep it up through judging |
 | Tracks named at submission | Enter 01, 02 and 03. Each has its own prize. |
-| FalkorDB is the primary database and "supports a central part of the product" | Yes. It is the only store, including the Redis keys. |
-| Only public, synthetic or your own data | The demo workspace must be a synthetic company. Never load a real customer workspace. |
+| FalkorDB is the primary database and "supports a central part of the product" | Yes. It is the only store, including the Redis keys. The ask page's proof shows 5 of 6 capabilities collapsing without it |
+| Only public, synthetic or your own data | Done. Production and the replay serve Quillfern, a synthetic company. Never load a real customer workspace |
 | AI assistance disclosed, and every query explainable by the team | README has the disclosure. Each of us must be able to walk through the tool queries. |
 | Main FalkorDB work new during the event | Yes. First commit is 15 Oct. |
 
@@ -50,7 +50,20 @@ What is missing, and what judges will notice first:
 - Nothing renders or cites the path as a path.
 - No proof that the product collapses without the graph.
 
-Visible Track 03 competitors on GitHub as of 17 Oct:
+Status on 18 Oct: all six are closed or cut on purpose.
+- In Slack the model picks from a fixed catalogue of read tools when `LLM_API_KEY` is set, and keywords pick otherwise; the public page always uses keywords.
+- Decisions supersede each other with dates.
+- `load_bearing`, `path_between` and `working_groups` call `algo.pageRank`, `algo.SPpaths` and `algo.labelPropagation`.
+- Every reply prints its path, and the page draws it.
+- The proof runs on the ask page.
+- Semantic recall was cut in favour of `related_memories` over `MENTIONS` edges (round 2).
+
+What is still open is listed in "18 Oct, in order".
+
+Visible Track 03 competitors on GitHub as of 17 Oct. Re-checked 18 Oct, 14:30 IST:
+- MERIDIAN pushed a ReAct agent loop, a multi-agent debate and centrality algorithms on 17 Oct.
+- The Axon and Minutes repositories now answer 404.
+- Atlas has had no commit since 12 Oct.
 
 | Entry | What it does | Threat |
 | --- | --- | --- |
@@ -106,7 +119,7 @@ Cut line: if time runs out, ship items 1, 2 and 5 plus the video. Those are the 
 
 ## Demo script
 
-Superseded by round 6's "Storyboard, consolidated" and, for production, "Recording script, Quillfern on production (draft)".
+Superseded by round 6's "Storyboard, consolidated" and, for production, "Recording script, Quillfern on production (primary)".
 
 Run against the synthetic company, in Slack, in this order:
 
@@ -207,21 +220,24 @@ The submit page renders only in a browser, so the exact fields are unknown until
 
 ### 18 Oct, in order
 
-| When (IST) | What | Owner |
-| --- | --- | --- |
-| Morning | Last code PRs merge: agent loop, decisions, replay. Seed Quillfern and replay the history on the dev instance | coders, coordinator |
-| First thing in the morning | Production answers 503 on `/api/proof`, `/mcp` and `POST /ops/seed` because `BRAIN_ADMIN_TOKEN` and `MCP_TOKEN` are not in Secret Manager yet. Create both and redeploy: `read -rs V && printf '%s' "$V" \| gcloud secrets create BRAIN_ADMIN_TOKEN --data-file=- --configuration=graphhacks; unset V`, the same for `MCP_TOKEN` (use `openssl rand -hex 32` for each value), then `gh workflow run deploy.yml`. Verify: `curl -s -o /dev/null -w '%{http_code}' https://brain.noobsurd.space/api/proof` prints 401, not 503, and the same for a POST to `/mcp`. Keep both tokens out of the repo; the MCP token goes to the judges in the private submission notes | user |
-| Morning, before recording | Production's graph predates the new decisions and the app only seeds an empty graph. Refresh the seed in place, never the reset: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. Expect `{"company": "company_brain", "mode": "merge", ...}` with `nodes_created` 3 (the two decisions and the strategy document) and a handful of `edges_created`; a second call returns 0/0/0. Then confirm in Slack that `why did we cut vector recall` answers with both dates. While production serves Quillfern, follow step 3 of "Recording script, Quillfern on production (draft)" instead: the response must say `quillfern` | user |
-| Late morning | Record the video to the storyboard above. Redo once if a step stumbles | team |
-| Early afternoon | Publish the blog from docs/BLOG.md; link it from the README | coder B |
-| Afternoon | Final merge. CI deploys main. Run the seven steps against production once | coordinator |
-| Before 22:00 | Submit: repo, README, video link, live link, tracks, description above. Leave two hours for the form | user |
+Rewritten 18 Oct, 14:45 IST. **Code freeze 20:00 IST; submit by 22:00** (the form closes 23:59). Every merge to `main` redeploys production and drops connections for a few seconds, so the lead holds merges during a take. Checked on production at 14:20 IST, before #115 and #116: `/api/proof` and `/mcp` answered 503, the graph holds 1 decision (the refresh adds the rest), and the repository is private.
 
-Nothing merges after the production run except the README link to the video and the blog.
+| # | When (IST) | What | Owner |
+| --- | --- | --- | --- |
+| 1 | Now | **Tokens.** `/api/proof` and `POST /ops/seed` answer 503 because `BRAIN_ADMIN_TOKEN` is not in Secret Manager. Create it with `read -rs V && printf '%s' "$V" \| gcloud secrets create BRAIN_ADMIN_TOKEN --data-file=- --configuration=graphhacks; unset V` (value from `openssl rand -hex 32`). `MCP_TOKEN` is optional since #115: `/mcp` is public and rate-limited, and a token only lifts the limit. Keep every token out of the repo | user |
+| 2 | Right after 1 | **Redeploy**: `gh workflow run deploy.yml`, or let the next merge do it. Verify `curl -s -o /dev/null -w '%{http_code}' https://brain.noobsurd.space/api/proof` prints 401, not 503 | user |
+| 3 | Before 4 | **SEED_COMPANY: done in #116.** `POST /ops/seed` merges whatever `SEED_COMPANY` names, and it defaults to `company_brain`. `deploy.sh` writes only the listed secrets into the VM's `.env`, so #116 sets `SEED_COMPANY: quillfern` in `deploy/docker-compose.yml`. Step 4's response proves it | done |
+| 4 | After 3 | **Seed refresh, then the CITES cleanup.** `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. The response must say `"company": "quillfern"`; stop if it says anything else. Then in the Browser at https://gdb.noobsurd.space: `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c`. Details in step 3 of "Recording script, Quillfern on production (primary)" | user |
+| 5 | A minute after 4 | **`python scripts/check_live.py`: 16 passed, 0 failed.** Before the refresh it reads 15 of 15, because the page hides the billing-retries chip until that decision exists | user or critic |
+| 6 | Before recording | **Make the repository public** (rule 10): `gh repo edit codesensei-tushar/graph_hacks --visibility public --accept-visibility-change-consequences`. Secrets live only in Secret Manager (DEPLOY.md) | user |
+| 7 | After 5, ideally after the 20:00 freeze | **Record** to "Recording script, Quillfern on production (primary)", plus the Sales beat on the local replay (round 6). 1080p. Redo once if a step stumbles | user, team |
+| 8 | After 7 | **Blog**: publish from docs/BLOG.md, then link it and the video from the README (the only merges allowed after the freeze) | user, coordinator |
+| 9 | After 7 | **Deck**: put the video link in place of `[video link]` on the deck's last slide and in docs/PITCH.md | user |
+| 10 | By 22:00 | **Submit** with the copy in "Form fields": repo, live link, video, tracks 03, 01 and 02, blog. `/mcp` needs no token since #115 | user |
 
-## Production demo steps
+## Production demo steps, self-seed (superseded)
 
-Written for the self-seed. Production serves Quillfern, and while it does, "Recording script, Quillfern on production (draft)" replaces this.
+**Superseded.** Written for the self-seed. Production serves Quillfern, so record to "Recording script, Quillfern on production (primary)" instead.
 
 Production keeps the Company Brain self-seed plus the real workspace and GitHub data; nobody reseeds it. The final check runs these seven moves against production after the last merge. They are the same seven moves as the Quillfern script, on this project's own graph.
 
@@ -237,9 +253,9 @@ Production keeps the Company Brain self-seed plus the real workspace and GitHub 
 
 Step 4 depends on `blast_radius` taking a depth; until then ask once and read the full set. Step 5 depends on the approval card showing the resolved service. Step 7 needs the private test repo and one `link github` done the day before.
 
-## Recording script, production
+## Recording script, self-seed (superseded)
 
-Written for the self-seed. Production serves Quillfern, and while it does, "Recording script, Quillfern on production (draft)" replaces this.
+**Superseded.** Written for the self-seed. Production serves Quillfern, so record to "Recording script, Quillfern on production (primary)" instead.
 
 Type these exactly, in this order, in the dev Slack workspace connected to production. Each step says the tool that should answer and the edges to read aloud. Hold every reply on screen for three seconds. If a step answers differently, stop and fix before recording on; do not improvise.
 
@@ -272,17 +288,17 @@ Type these exactly, in this order, in the dev Slack workspace connected to produ
 
 Ticket numbers (`TKT-106`, `graph_hacks#N`) depend on the day's graph; read whatever the reply shows. The ticket in step 5 is new each take; delete it between takes with `MATCH (t:Ticket {title: 'scheduler jobs run twice after a restart'}) DETACH DELETE t` in the Browser, or use a new title.
 
-## Recording script, Quillfern on production (draft)
+## Recording script, Quillfern on production (primary)
 
-**Draft, pending the user's decision.** On 18 Oct at 12:50 IST production, deployed at `45f6b00` (#86), still serves Quillfern, not the self-seed: `/api/ask/tools` reports company `quillfern`, and the teams are Data, Payments and Platform. If that stays, this script replaces the one above, which is kept until the user decides. It follows the Quillfern replay, whose replies `tests/integration/test_demo_replay.py` pins. Steps 1 and 6 and the bus-factor reply were checked on production read-only that morning; step 2 answers there too, but without dates or the decision it replaced until the refresh. Steps 1 to 8 were rechecked word for word on 18 Oct at `1ecb932`, on a fresh Quillfern seed (production after the refresh) through the replay's fake Slack, with and without the Sales import: every quoted line reads as written, and the import changes none of them.
+**This is the script to record.** Production serves Quillfern, not the self-seed: `/api/ask/tools` reports company `quillfern`, and the teams are Data, Payments and Platform (rechecked 18 Oct, 14:20 IST). The two self-seed scripts above are superseded. It follows the Quillfern replay, whose replies `tests/integration/test_demo_replay.py` pins. Steps 1 and 6 and the bus-factor reply were checked on production read-only that morning; step 2 answers there too, but without dates or the decision it replaced until the refresh. Steps 1 to 8 were rechecked word for word on 18 Oct at `1ecb932`, on a fresh Quillfern seed (production after the refresh) through the replay's fake Slack, with and without the Sales import: every quoted line reads as written, and the import changes none of them.
 
 **Before the first take, in this order**
 
-1. `BRAIN_ADMIN_TOKEN` in Secret Manager, then redeploy; the refresh, the import and step 8 need it. Without a token `/api/proof` answers 503 while the secret is unset (still so on 18 Oct at `7ede9c6`) and 401 once it is set. Since #115 `/mcp` needs no token: it is public and rate-limited, and `MCP_TOKEN` only lifts the limit.
+1. `BRAIN_ADMIN_TOKEN` in Secret Manager, then redeploy (steps 1 and 2 of "18 Oct, in order"); the refresh, the import and step 8 need it. Without a token `/api/proof` answers 503 while the secret is unset (still so on 18 Oct at `7ede9c6`) and 401 once it is set. Since #115 `/mcp` needs no token: it is public and rate-limited, and `MCP_TOKEN` only lifts the limit.
 2. **`SEED_COMPANY` is `quillfern` on production since #116** (`deploy/docker-compose.yml`), so `POST /ops/seed`, `/ops/import` and `onboard team:` all join Quillfern. Before #116 it was unset and defaulted to `company_brain`, and a refresh would have merged the self-seed into Quillfern. Step 3's response still confirms it.
 3. Refresh the seed: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. The response must say `"company": "quillfern"`. Production's Quillfern predates the current seed: its one decision cites through `CITES`, with no date and no `SUPERSEDES`, and the billing retries decision that step 3 replaces is missing. The refresh adds both missing decisions, the dates, `BASED_ON` and `SUPERSEDES`. It also leaves the old `CITES` edges, so step 2 then lists the RFC and TKT-101 twice, in "Based on:" and in the path. Remove them in the Browser: `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c`. All of this was checked on a scratch graph trimmed to look like production's (the refresh reported 2 nodes and 12 edges created). The ask page caches each answer for a minute, so wait a minute before checking there.
 4. Optional, so the whole video stays on production: import Sales with `curl -X POST https://brain.noobsurd.space/ops/import -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" --data-binary @examples/teams/quillfern-sales.toml`, as the recording's Sales beat (13 nodes, 32 edges on a fresh Quillfern), then `/team/sales`, S2 and `what if priya shah leaves` as in round 6. Otherwise the Sales beat stays on the local replay.
-5. A minute after the refresh, and after any redeploy, `python scripts/check_live.py` passes. It sends only public GETs and checks every page chip, the README's four questions, `/team/payments` and the `/?q=` deep link. Since #114 the page lists a chip only when it answers on the live graph: before the refresh production lists 8, without `is the billing retries decision still the last word` (that decision is missing; checked 18 Oct at `7ede9c6`), and a minute after the refresh it lists 9 again. Before #114 that chip was `check_live`'s one failure.
+5. A minute after the refresh, and after any redeploy, `python scripts/check_live.py` passes. It sends only public GETs and checks every page chip, the README's four questions, `/team/payments` and the `/?q=` deep link. Since #114 the page lists a chip only when it answers on the live graph: before the refresh production lists 8, without `is the billing retries decision still the last word` (that decision is missing; checked 18 Oct at `7ede9c6`), and a minute after the refresh it lists 9 again. Before #114 that chip was `check_live`'s one failure. So the run reads 15 of 15 before the refresh and 16 of 16 after it.
 
 | Step | Type in the dev Slack workspace | Tool | Read aloud |
 | --- | --- | --- | --- |
@@ -376,6 +392,8 @@ Short version: record steps 1 to 8 in Slack on production as scripted, then cut 
 
 The dev Slack workspace is wired to production, and production holds this project's own graph. Onboarding a synthetic Sales team there would write invented people into the real graph, and re-pointing the Slack app's event URL mid-recording is fragile. So the Sales beat runs in the terminal and the browser against a local replay of the synthetic company, the same setup the blog images were taken with. Production stays clean.
 
+18 Oct: production now serves Quillfern, so the reason above no longer holds. Importing Sales there is optional step 4 of "Recording script, Quillfern on production (primary)", which works since #116 set `SEED_COMPANY`. Before #116 the import failed with "the graph has no company 'company-brain'".
+
 The `onboard team:` Slack command stays on coder B's list straight after the importer and the Sales seed. Onboarding more teams is a product feature; the importer alone needs a terminal and an admin token. The video just does not depend on it.
 
 ### The one new move: `if_person_leaves`
@@ -414,7 +432,7 @@ Hard cap three and a half minutes. This table replaces the round 2 storyboard an
 
 3:26 with every step in; 3:16 without step 7.
 
-The step numbers above are the self-seed script's. On Quillfern production, use "Recording script, Quillfern on production (draft)": step 4 is one hop, then two (say "Two hops. A search box could not."), step 5 is the card, the write and `who should look at it` in one, and step 7 is the replay's two DM replies in the terminal.
+The step numbers above are the self-seed script's. On Quillfern production, use "Recording script, Quillfern on production (primary)": step 4 is one hop, then two (say "Two hops. A search box could not."), step 5 is the card, the write and `who should look at it` in one, and step 7 is the replay's two DM replies in the terminal.
 
 ### The Sales beat, literal
 
