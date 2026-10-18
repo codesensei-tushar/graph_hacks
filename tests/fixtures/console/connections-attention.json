@@ -1,0 +1,356 @@
+[
+ {
+  "id": "jira:01JB7Q2K9W",
+  "source": "jira",
+  "status": "active",
+  "account": "Quillfern",
+  "site": "https://quillfern.atlassian.net",
+  "auth": "oauth",
+  "created_by": "Arjun Mehta",
+  "created_at": "-518400s",
+  "items": 3169,
+  "last_sync_at": "-180s",
+  "last_error": null,
+  "containers": [
+   {
+    "id": "jira:01JB7Q2K9W:container:10001",
+    "name": "Payments",
+    "items": 123,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-60s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10002",
+    "name": "Billing",
+    "items": 160,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-67s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10003",
+    "name": "Identity and Auth",
+    "items": 197,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-74s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10004",
+    "name": "Platform",
+    "items": 234,
+    "backfilled": true,
+    "capped": true,
+    "last_fetch_at": "-81s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10005",
+    "name": "Web App",
+    "items": 271,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-88s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10006",
+    "name": "Mobile",
+    "items": 308,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-95s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10007",
+    "name": "Public API",
+    "items": 345,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-102s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10008",
+    "name": "Data Platform",
+    "items": 382,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-109s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10009",
+    "name": "Recommendations",
+    "items": 419,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-116s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10010",
+    "name": "Search",
+    "items": 46,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-123s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10011",
+    "name": "Operations",
+    "items": 83,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-130s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10012",
+    "name": "Security",
+    "items": 120,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-137s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10013",
+    "name": "Infrastructure",
+    "items": 28,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-144s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10014",
+    "name": "Observability",
+    "items": 37,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-151s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10015",
+    "name": "Release Engineering",
+    "items": 6,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-158s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10016",
+    "name": "Support",
+    "items": 15,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-165s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10017",
+    "name": "Customer Success",
+    "items": 24,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-172s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10018",
+    "name": "Sales Ops",
+    "items": 33,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-179s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10019",
+    "name": "Marketing Site",
+    "items": 2,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-186s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10020",
+    "name": "Documentation",
+    "items": 11,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-193s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10021",
+    "name": "People Ops",
+    "items": 20,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-200s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10022",
+    "name": "Finance Systems",
+    "items": 29,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-207s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10023",
+    "name": "Legal Requests",
+    "items": 38,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-214s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10024",
+    "name": "IT Helpdesk",
+    "items": 7,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-221s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10025",
+    "name": "Design System",
+    "items": 16,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-228s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10026",
+    "name": "Growth",
+    "items": 25,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-235s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10027",
+    "name": "Onboarding",
+    "items": 34,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-242s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10028",
+    "name": "Notifications",
+    "items": 3,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-249s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10029",
+    "name": "Invoicing",
+    "items": 12,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-256s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10030",
+    "name": "Tax Engine",
+    "items": 21,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-263s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10031",
+    "name": "Fraud",
+    "items": 30,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-270s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10032",
+    "name": "Risk",
+    "items": 39,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-277s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10033",
+    "name": "Partner Integrations",
+    "items": 8,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-284s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10034",
+    "name": "Experiments",
+    "items": 17,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-291s",
+    "last_error": null
+   },
+   {
+    "id": "jira:01JB7Q2K9W:container:10035",
+    "name": "Localisation",
+    "items": 26,
+    "backfilled": false,
+    "capped": false,
+    "last_fetch_at": "-298s",
+    "last_error": null
+   }
+  ]
+ },
+ {
+  "id": "hubspot:01JB7Q8M3R",
+  "source": "hubspot",
+  "status": "error",
+  "account": "Quillfern",
+  "site": "quillfern.com",
+  "auth": "oauth",
+  "created_by": "Lena Fischer",
+  "created_at": "-1209600s",
+  "items": 1284,
+  "last_sync_at": "-93600s",
+  "last_error": "HubSpot refused the token: the app was uninstalled from the portal.",
+  "containers": [
+   {
+    "id": "hubspot:01JB7Q8M3R:container:44012345",
+    "name": "HubSpot portal 44012345",
+    "items": 1284,
+    "backfilled": true,
+    "capped": false,
+    "last_fetch_at": "-240s",
+    "last_error": "401 from HubSpot"
+   }
+  ]
+ }
+]
