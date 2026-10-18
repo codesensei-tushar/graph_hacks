@@ -148,6 +148,15 @@ QUESTIONS = [
     ("compound 1", "who owns billing and what breaks if auth goes down", "who_owns", None),
     ("compound 2", "I am new on payments and need to fix a bug, who should I talk to about the invoice worker", "who_knows", None),
     ("compound 3", "open tickets about billing", "find", None),
+    # People insights, several things, and sales phrasings.
+    ("people 4", "who are the most important people", "people_ranking", None),
+    ("people 5", "who is the bus factor", "people_ranking", None),
+    ("people 6", "which accounts have no owner", "find", None),
+    ("objects 1", "who knows auth and postgres", "who_knows", None),
+    ("sales 1", "what's in the pipeline", "find", None),
+    ("sales 2", "which deals did we lose", "find", None),
+    ("sales 3", "customers in healthcare", "find", None),
+    ("sales 4", "when does Larkspur renew", "who_owns", None),
 ]
 
 

@@ -231,6 +231,34 @@ _CRM_LIST = (
     r"|^\s*(?:(?:show|list)(?: me)?\s+|(?:which|what)\s+)?(?:all |the |our )?deals? (?:(?:that )?are (?:in |at )?|in |at )"
     r"(?:the )?(?:stage )?(?!.*\b(?:depend|depends|if|why|who|how|risk|scale|tier|because)\b)[a-z][a-z ]*?(?: stage)?\s*[?.!]*\s*$)"
 )
+# Sales questions in the words people use, each a whole question, each one find over accounts.
+_ACCOUNT = {"label": "Service", "kind": "account"}
+_SALES = (
+    (re.compile(r"^\s*(?:what|which) accounts are (?:open )?opportunit(?:y|ies)\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "state": "open", "status": "opportunity"}),
+    (re.compile(r"^\s*what(?:'s|s| is) in (?:the |our )?(?:sales |deal )?pipeline\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "stage": "open"}),
+    (re.compile(r"^\s*(?:which|what) deals did we lose(?: this (?:quarter|month|year))?\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "stage": "closed lost"}),
+    (re.compile(r"^\s*(?:which|what) deals did we win(?: this (?:quarter|month|year))?\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "stage": "closed won"}),
+    (re.compile(r"^\s*how many customers (?:do we have|are there|have we got)\s*[?.!]*\s*$", re.IGNORECASE), {**_ACCOUNT, "status": "customer"}),
+)
+# "customers in healthcare", "accounts in logistics": by the industry the CRM syncs.
+_IN_INDUSTRY = re.compile(r"^\s*(?:(?:show|list)(?: me)?\s+|(?:which|what) are (?:our )?)?(?P<what>customers|accounts) in (?P<industry>[a-z][a-z &-]{2,30}?)\s*[?.!]*\s*$", re.IGNORECASE)
+# "when does Larkspur renew": an account's renewal, which the CRM sync does not carry.
+_RENEW = re.compile(r"^\s*when (?:does|is|will) .+? (?:renew|up for renewal|due for renewal|renewing)\b", re.IGNORECASE)
+# A deal window the sync cannot apply: deal edges carry a stage, not a date.
+_DEAL_WINDOW = re.compile(r"\bthis (quarter|month|year)\b", re.IGNORECASE)
+
+
+def sales_route(text: str) -> tuple[str, dict] | None:
+    """The find a sales question asks for, or None."""
+    for pattern, args in _SALES:
+        if pattern.match(text):
+            return "find", dict(args)
+    if (industry := _IN_INDUSTRY.match(text)) is not None:
+        status = {"status": "customer"} if industry.group("what").lower() == "customers" else {}
+        return "find", {**_ACCOUNT, **status, "industry": industry.group("industry")}
+    return None
+
+
 # A list by filter: "which tickets are open", "list the services in payments", "what decisions have we
 # made". Before decisions, which shares "decisions"; "what decisions have we made about billing" names
 # one thing and stays on decision_trace, as does any "list ... about X".
@@ -346,6 +374,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     if _SEARCH.search(text):
         # Before decisions and memories: "search for decisions about refunds" wants every hit, not one decision.
         return "search", {"text": text}
+    if (sales := sales_route(text)) is not None:
+        return sales
+    if _RENEW.match(text):
+        return "who_owns", {"name": text}
     if _FIND.search(text):
         return "find", find.parse(text) or {"label": "Decision"}
     if EXPLORE.search(text):
@@ -428,6 +460,14 @@ def ask(question: str, scopes: list[str]) -> ToolResult:
         result = _ROUTED[tool](args, scopes)
     if result.found and taken:
         result.answer = resolve.taken_note(taken, result.answer) + result.answer
+    return deal_window_note(question, tool, args, result)
+
+
+def deal_window_note(question: str, tool: str, args: dict, result: ToolResult) -> ToolResult:
+    """"which deals did we win this quarter": deals carry a stage, not a date, so the window is said, not applied."""
+    window = _DEAL_WINDOW.search(question or "")
+    if window and tool == "find" and args.get("stage") and result.found:
+        result.answer += f" (Deal dates are not synced, so these are every deal at that stage, not only this {window.group(1).lower()}'s.)"
     return result
 
 
@@ -537,6 +577,9 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
         if teams:
             parts.append(f"Run by {run_by}.")
     parts.append(account_line(graph, service, scopes))
+    if _RENEW.match(question) and kinds.kind_or_default(service.kind) == "account":
+        # The sync carries the lifecycle stage and the deals, never a renewal date: said, not guessed.
+        parts.insert(0, f"No renewal date is synced from the CRM for {service.name}; here is what is.")
     if kinds.kind_or_default(service.kind) in ("policy", "playbook"):
         summary = graph.ro_query("MATCH (s:Service {id: $id}) RETURN coalesce(s.summary, '')", {"id": service.id}).result_set
         if summary and summary[0][0].strip():

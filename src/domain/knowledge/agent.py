@@ -432,7 +432,7 @@ def _run_noted(
     if result.found and taken:
         # A name taken from part of it ("billing" for Billing Service) is said, so a wrong guess shows.
         result.answer = resolve.taken_note(taken, result.answer) + result.answer
-    return result, ran
+    return ask_service.deal_window_note(question, ran.tool, ran.args, result), ran
 
 
 def _run_tool(name: str, args: dict, scopes: list[str]) -> ToolResult:
