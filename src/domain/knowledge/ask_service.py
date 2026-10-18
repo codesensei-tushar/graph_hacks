@@ -179,6 +179,8 @@ _FIND = re.compile(
     r"|^\s*(?:what|which) (?:are|is) (?:the |our )?open (?:tickets|issues|pull requests|prs)\b"
     r"|^\s*which (?:tickets|issues|pull requests|prs) are open\b"
     r"|^\s*(?:what|which) (?:tickets|issues) are (?:still )?blocked\b|\bblocked (?:tickets|issues)\b"
+    # "open tickets about billing" lists like "what are the open tickets about billing".
+    r"|^\s*(?:(?:list|show)(?: me)?\s+)?(?:all |the |our )?(?:open|closed) (?:tickets|issues|pull requests|prs)\b"
     # Whose list: "what tickets are assigned to Om Sherikar", "which accounts does Yash Patil own".
     rf"|^\s*(?:what|which|list|show(?: me)?) (?:all |the )?(?:open |closed )?{_LISTED} (?:are |is )?(?:assigned to|worked on by|owned by|opened by)\b"
     rf"|^\s*(?:what|which) {_LISTED} (?:does|do) .+ (?:own|have|hold|handle|work on)\b"
@@ -207,6 +209,15 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     text = question.strip()
     if not text:
         return "none", {}
+    first, rest = split_compound(text)
+    if rest:
+        # "who owns billing and what breaks if auth goes down": the first question; the reply offers the second.
+        return route(first, tickets)
+    ask_who = _ASK_WHO.search(text)
+    if ask_who and ask_who.start() > 0 and not coordination.pr_reference(text):
+        # "I am new on payments ... who should I talk to about the invoice worker": the person to go to, about
+        # what follows; the preamble is context, not the subject, and not a request for a brief.
+        return "who_knows", {"name": text[ask_who.start() :]}
     if _GROUPS.search(text):
         return "working_groups", {}
     if _RISK.search(text):
@@ -279,12 +290,40 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     return "who_knows", {"name": text}
 
 
+# A second question joined to the first: "..., and what breaks if auth goes down", "...; who knows X".
+# One that refers back ("and who else has worked on it") is the same question, and is not split.
+_COMPOUND = re.compile(
+    r"^(?P<first>\S+(?:\s+\S+)+?)\s*(?:,?\s+and\s+(?:also\s+)?|;\s*|\?\s+(?:and\s+)?|,\s+(?:also\s+)?)"
+    r"(?P<rest>(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should)\b.+)$",
+    re.IGNORECASE,
+)
+_QUESTION_START = re.compile(r"^\s*(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should|list|show|tell|explain|explore)\b", re.IGNORECASE)
+_REFERS_BACK = re.compile(r"\b(?:it|its|they|them|their|that|this|those|these|else|there|he|she|him|her)\b", re.IGNORECASE)
+
+
+def split_compound(question: str) -> tuple[str, str | None]:
+    """The first question and the one joined after it, or the question and None."""
+    match = _COMPOUND.match((question or "").strip())
+    if match is None or _REFERS_BACK.search(match.group("rest")) or not _QUESTION_START.match(match.group("first")):
+        # "billing is failing, what changed" is one question with its context first.
+        return question, None
+    return match.group("first").strip().rstrip(",;"), match.group("rest").strip()
+
+
+def offer_rest(question: str, result: ToolResult) -> ToolResult:
+    """A compound question answered in its first part offers the second as the next question."""
+    _first, rest = split_compound(question)
+    if rest and result.found:
+        result.answer = f"{result.answer} You also asked “{rest.rstrip('?')}”: ask it on its own for that answer."
+    return result
+
+
 def ask(question: str, scopes: list[str]) -> ToolResult:
     """Route by keywords and run the tool. The whole no-model path in one call."""
     tool, args = route(question)
     if tool == "none":
         return ToolResult(tool="none", answer="Ask a question about the company graph.")
-    return _ROUTED[tool](args, scopes)
+    return offer_rest(question, _ROUTED[tool](args, scopes))
 
 
 def ticket_target(title: str, about: str, graph=None) -> Entity | None:

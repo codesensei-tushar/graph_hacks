@@ -90,6 +90,62 @@ def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResul
     return result
 
 
+ATTACHED = 3
+
+
+def subject_of(result: ToolResult) -> str | None:
+    """The node an answer is about: the mentionable node its path names most often, the first on a tie."""
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for step in result.path:
+        for node_id, label in ((step.from_id, step.from_label), (step.to_id, step.to_label)):
+            if node_id and label in MENTIONABLE:
+                if node_id not in counts:
+                    order.append(node_id)
+                counts[node_id] = counts.get(node_id, 0) + 1
+    if not counts:
+        return None
+    return max(order, key=lambda node_id: (counts[node_id], -order.index(node_id)))
+
+
+def attached(result: ToolResult, scopes: list[str], k: int = ATTACHED) -> list[MemoryLine]:
+    """The memories shown under an answer: those with a MENTIONS edge to what it is about, or to a
+    node one hop from it, the direct ones first, then the newest. Never a text match and never the
+    latest memories at large: an answer about a HubSpot account shows nothing said about anything else.
+    None for a refusal or an answer about no mentionable node."""
+    subject = subject_of(result) if result.found else None
+    if subject is None:
+        return []
+    _, graph = connect()
+    rows = graph.ro_query(
+        f"""
+        MATCH (m:Memory)-[:MENTIONS]->(e {{id: $id}})
+        WHERE m.scope IN $scopes AND {LIVE}
+        OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
+        RETURN m.id AS id, m.text AS text, m.scope AS scope, m.channel_id AS channel_id, m.created_at AS created, m.ts AS ts,
+               coalesce(a.name, a.id) AS author, 0 AS hops
+        UNION
+        MATCH (e {{id: $id}})-[]-(n)
+        WHERE (n:Service OR n:Document OR n:Ticket OR n:Decision) AND {resolve.SCOPED.format(var="n")}
+        MATCH (m:Memory)-[:MENTIONS]->(n)
+        WHERE m.scope IN $scopes AND {LIVE}
+        OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
+        RETURN m.id AS id, m.text AS text, m.scope AS scope, m.channel_id AS channel_id, m.created_at AS created, m.ts AS ts,
+               coalesce(a.name, a.id) AS author, 1 AS hops
+        """,
+        {"id": subject, "scopes": list(scopes)},
+    ).result_set
+    best: dict[str, tuple] = {}
+    for row in rows:
+        if row[0] not in best or row[7] < best[row[0]][7]:
+            best[row[0]] = row
+    ordered = sorted(best.values(), key=lambda row: (row[7], -(row[4] or 0)))
+    return [
+        MemoryLine(text=text or "", learned_at=day_from(created, ts), author=author or "someone", scope=scope, channel_id=channel_id)
+        for _id, text, scope, channel_id, created, ts, author, _hops in ordered[:k]
+    ]
+
+
 def recall(query: str, scopes: list[str], k=DEFAULT_K) -> ToolResult:
     """Memories whose text matches the question, across the asker's read set. Dated lines, no path."""
     limit = _clamp(k)
