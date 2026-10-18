@@ -11,7 +11,7 @@ from unittest import mock
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_api  # noqa: E402
+from src.domain.knowledge import ask_api, what_changed  # noqa: E402
 from src.seed import company_brain, quillfern, seed  # noqa: E402
 
 
@@ -24,6 +24,8 @@ class _ChipsOnTheSeed:
         cls._patches = [
             mock.patch.object(falkordb_client, "graph_name", return_value=graph),
             mock.patch.object(seed, "graph_name", return_value=graph),
+            # "what changed this week" reads the seed's dates against a fixed day, not the day CI runs.
+            mock.patch.object(what_changed, "now_millis", return_value=1_792_324_800_000),
         ]
         for patch in cls._patches:
             patch.start()

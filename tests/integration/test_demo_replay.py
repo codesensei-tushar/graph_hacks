@@ -224,6 +224,20 @@ class DemoReplayTest(unittest.TestCase):
         ):
             self.assertIn(line, reply)
 
+    def test_3c_what_changed_this_week_starts_with_the_decision_just_recorded(self):
+        this_week, decisions = self._rows("What changed this week, then only decisions")
+        new, old = "Move billing retries to the invoice worker", "Retry renewal webhooks inside the billing service"
+        reply = self._only_reply(this_week)
+        self.assertTrue(reply.startswith("In the last 7 days, 2 changes across the company. By thing: Billing Service: 2 changes; Invoice Worker: 2. Newest first: "), reply)
+        self.assertRegex(reply, rf"Newest first: \d{{1,2}} \w{{3}}: decided \*{new}\* \(Billing Service, Invoice Worker\), proposed by Arjun Mehta, replacing \*{old}\*\.")
+        self.assertIn("Arjun Mehta said “we're moving billing retries to the invoice worker, decided in today's sync”", reply)
+        self.assertIn(edge(new, "SUPERSEDES", old), reply)
+        # The follow-up keeps the week and the company, and keeps one kind.
+        only = self._only_reply(decisions)
+        self.assertTrue(only.startswith("In the last 7 days, 1 decision across the company, newest first: "), only)
+        self.assertNotIn("said “", only)
+        self.assertIn("Tool `what_changed`, picked by keywords. Subject from this thread.", only)
+
     def test_4_blast_radius_then_two_hops_out(self):
         first, deeper = self._rows("Blast radius, then two hops out")
         reply = self._only_reply(first)

@@ -28,13 +28,12 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 
 ### 2.1 Hero
 
-- Eyebrow: `Graph Hacks · Track 03 · Company Brain on FalkorDB`
-- Headline, two tones: **Ask how your company works.** then, muted, *Every answer shows the path it walked.*
-- Subline: "People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used."
-- The ask box sits in the hero, with the example chips from `/api/ask/tools` under it: the product is the demo. Asking renders the answer and the walk directly below the hero (2.2). A ghost link **How it works** scrolls to 2.5. Add **Watch the demo** only once the video link exists.
-- Under the box, one quiet line: "It never writes Cypher, never guesses, and never shows you what you cannot read."
-- Live counts from `/api/graph/stats`, in mono with tabular numerals and reserved width: for example **{people}** people · **{services}** things teams run · **{decisions}** decisions · **{edges}** edges. Only counts the API returns; if the call fails, the row is not shown.
-- Right side on desktop, below on mobile: a live slice of the graph from `/api/graph/sample`, laid out deterministically (the same input gives the same picture), with node names on hover and focus. Pulses travel along real edges in their true direction (see 3.4). It is real data from the public scope, never a decorative fake graph.
+The whole first screen (between 640 and 940 px tall), on a curved horizon: navy at the top in both themes, a vivid indigo band behind the headline, then lavender to near-white (light) or deep indigo (dark) at the fold. The hero pulls up under the header, which is transparent with light ink while the hero's dark top is under it and solid once it leaves, so a deep link lands under a solid header.
+
+- A centred 760 px block, left-aligned inside: the eyebrow `Graph Hacks · Track 03 · Company Brain on FalkorDB`; the headline in a light weight, **Ask how your company works.** then, muted, *Every answer shows the path it walked.*, with *path* and *walked* heavy, slanted and dotted-underlined; the composer; the example chips from `/api/ask/tools`.
+- The composer is the centre of the page: a wide frosted card with the question on top, a "Public channels only" status pill (true: the page reads `org_shared`) and a round send button named "Ask". The product is the demo: asking renders the answer and the walk in 2.2.
+- At the foot of the screen: the subline as a small caption at the bottom-left ("People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.") and **How it works ↗** at the bottom-right. Add **Watch the demo** only once the video link exists.
+- The nav is sparse, uppercase and spread across the top, with **Graph** after **Ask**.
 
 ### 2.2 Live proof: ask the graph
 
@@ -44,7 +43,42 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 - Footer under each answer, from the response: "Tool `{tool}` · picked by keywords · read from public channels".
 - Small print: "Public and read-only: public channels only, no model, answers cached for a minute."
 
+#### Explore from any answer
+
+Every answer is a place to go next, and every next click lands on an answer.
+
+- **Ask next.** Up to three follow-up questions under every answer that was found, after the `A -[REL]-> B` lines and before the footer, so the answer text, the drawing and its head stay where the recording frames them. They come from the tool and the path: after `who owns billing` they are what breaks if Billing Service goes down, what if Arjun Mehta (its owner) leaves, and what Billing Service depends on. The tool's own steps live in `app.js`'s `NEXT`; the rest are the first question of each node drawn. The question just asked is never offered again.
+- **Try instead.** A refusal keeps the server's sentence word for word and turns its nearest names into questions: "who knows the payments gateway" offers `who knows Billing Service` and `who knows API Gateway`.
+- **Click a node.** Every node in an answer's drawing asks its first question on click, Enter or Space, and its tooltip says which ("Click to ask: what if Arjun Mehta leaves"). The hero graph asks the same question, from the same mapping. Team pages keep their drawings passive.
+- **Walk with the keys.** On a focused node of any drawing, the arrow keys move along its edges: Right to what it points at, Left to what points at it, Up and Down to its neighbours in the column. Focus moves; nothing is asked until Enter.
+- **Your walk.** Every question asked from the page is a step in the browser's history. Back and Forward show each step's answer again from memory, with no new ask and no scrolling, and a row after "Ask next" lists the earlier steps; a click goes back to one. A deep link starts the walk without adding an entry, and a reload starts a new walk.
+- **A refusal with no near name** still offers two questions: the first example chips, which `/api/ask/tools` lists only when they answer on the graph in use.
+- **The proof's questions** are buttons: each asks its question in the answer above.
+- **Team pages** link each person, thing, decision and ticket to its first question on the ask page (`/?q=what if Arjun Mehta leaves`), from the same mapping. Their drawings stay passive.
+
+One mapping, `BrainGraph.questionsFor(node)` in `graph.js` (its `QUESTIONS` table), says what to ask about a node by its label and, for a `Service`, its kind:
+
+| Node | Questions |
+| --- | --- |
+| Service (service, system, process, product, policy, playbook) | `who knows {name}`, `what breaks if {name} goes down`, `what does {name} depend on` |
+| Service, kind account | `who knows {name}` |
+| Person | `what if {name} leaves` |
+| Team | `who is on the {name} team` |
+| Decision | `why did we {name, first letter lowercased}` |
+| Ticket | `what is {name} about` |
+| Document, or a name with no label | `who knows {name}` |
+
+Pull requests, chats and memories offer nothing. Two tests hold the guarantee: `tests/unit/test_explore.py` routes every template to its tool and holds every `NEXT` step to a template, and `tests/integration/test_explore_questions.py` asks every question offered by every node of every example chip's answer and of the hero's sample, on a fresh Quillfern seed with and without its Sales team, and requires each to be found. A question that fails is fixed in the mapping, never in the test. Nothing is asked ahead: each click is one ask, inside the page's 30 a minute.
+
+### 2.2b The graph behind every answer
+
+- Eyebrow: `The graph`. Heading: **The graph behind every answer.**
+- A live slice of the graph from `/api/graph/sample`, laid out deterministically (the same input gives the same picture), with node names on hover and focus; clicking a node asks about it. Pulses travel along real edges in their true direction (see 3.4). It is real data from the public scope, never a decorative fake graph.
+- Under it, the live counts from `/api/graph/stats`, in mono with tabular numerals and reserved width: for example **{people}** people · **{services}** things teams run · **{decisions}** decisions · **{edges}** edges. Only counts the API returns; if the call fails, the row is not shown.
+
 ### 2.3 Why the graph matters
+
+A full-width dark band in both themes, entered and left through blurred indigo waves; the proof table takes the band's own tokens.
 
 - Heading: **Take FalkorDB out, and the answers go with it.**
 - Body: "The same questions run twice: once against FalkorDB, once with every graph read returning nothing."
@@ -90,6 +124,17 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 - "Synthetic data and this project's own only."
 - Links: repository, README, blog and video when they exist, `/healthz` (status, deployed commit, FalkorDB; `/api/health` counts every node, system ones too, so it would disagree with the page's public counts).
 
+### 2.8 Team pages
+
+`/team/<id>` reads one team the way the ask page reads the company, and never shows an empty box.
+
+- The head: the team's name, its people and what it runs, then one line from the page's own rows ("Payments depends on Platform (3 edges). Platform (1 edge) depends on Payments. 1 of the 2 things it runs rests on one person: Invoice Worker."). The other teams are linked above the name, so a reader can walk from team to team.
+- People, then what the team runs grouped by kind.
+- **Across teams**: the `DEPENDS_ON` edges into things other teams run, and from them, grouped by team, each team linked to its page. The team graph draws them, with the other team's `RUNS` edge.
+- **Where risk sits**: the team's rows of the risk map, from the same query and ranking as the `risk_map` tool, drawn by the same grid as the ask page.
+- Decisions that stand, open tickets, what was said, the team graph, and questions to ask.
+- A section with no rows is not rendered; one line names them instead ("Not in the graph yet for this team: chat.").
+
 ## 3. Visual direction
 
 ### 3.1 Palette
@@ -98,18 +143,24 @@ Dark is the design target; light is fully supported. The node families keep thei
 
 | Token | Dark | Light |
 | --- | --- | --- |
-| `--bg` | `#0B0D12` | `#F6F4EF` |
-| `--surface` | `#11141B` | `#FCFCFB` |
-| `--surface-2` | `#171B24` | `#F0EEE8` |
-| `--line` | `#252A36` | `#D9D7CF` |
-| `--ink` | `#ECEEF3` | `#14181F` |
-| `--ink-2` | `#A7AEBE` | `#52514E` |
-| `--ink-3` | `#7D8597` | `#6E6C66` |
+| `--bg` | `#08091A` | `#F6F7FB` |
+| `--surface` | `#0F1122` | `#FFFFFF` |
+| `--surface-2` | `#15182B` | `#EFF1F8` |
+| `--line` | `rgba(200, 205, 255, 0.09)` | `rgba(18, 22, 48, 0.10)` |
+| `--line-2` | `rgba(200, 205, 255, 0.16)` | `rgba(18, 22, 48, 0.18)` |
+| `--ink` | `#EEF0FB` | `#11142A` |
+| `--ink-2` | `#AAB0CF` | `#484D68` |
+| `--ink-3` | `#8288AB` | `#62678A` |
 | `--path` (accent) | `#2DD4E6` | `#0E8FA6` |
+| `--horizon` | `#4B50E6` | `#5257E8` |
+| `--horizon-glow` | `rgba(75, 80, 230, 0.44)` | `rgba(82, 87, 232, 0.26)` |
+| `--horizon-haze` | `rgba(38, 43, 143, 0.45)` | `rgba(223, 225, 251, 0.85)` |
 | `--person` | `#7C8CFF` | `#3B5BDB` |
 | `--service` | `#F0703A` | `#D9541F` |
 | `--knowledge` | `#2EC48C` | `#16946A` |
 | `--other` | `#8B93A7` | `#807E77` |
+
+Neutrals are cool and borders are alpha hairlines. The indigo horizon (`--horizon*`) glows behind the ask box only; it is never an accent. Text that sits over the glow uses `--ink-2` or stronger, because `--ink-3` drops under 4.5:1 at its peak.
 
 The values are a starting point; the UI session may tune them.
 
@@ -117,7 +168,8 @@ Check every text pair against WCAG AA (4.5:1 for body, 3:1 for large text) and a
 
 ### 3.2 Type
 
-- Geist Sans for headings and body: headings at weight 600, tight tracking (-0.02em).
+- Geist Sans for headings and body. Weights are 400, 500 and 600 only, plus 420 for the hero headline, whose one heavy word (*path*, 600) carries a dotted underline because Geist has no italic. Section headings are 500.
+- One type scale: `--fs-xs` 12 px, `--fs-sm` 13, `--fs-md` 15, `--fs-base` 16, `--fs-lg` 18 (the answer text), `--fs-xl` 24. Every font size in `style.css` is one of these, an `em` value or a heading clamp; `test_landing_page` checks it.
 - Geist Mono for the graph's vocabulary: `A -[REL]-> B`, tool names, counts and eyebrow labels.
 - Vendor both as `woff2` in `src/static/fonts/` (SIL Open Font License; add the licence file), about 115 KB together, preloaded. Use `font-display: swap` with a size-adjusted fallback so the swap does not shift the layout. When the deck is republished in phase 5, it moves to the same two faces.
 - Scale: hero 56 to 64 px on desktop and 36 to 40 px at 390 px; section headings 32 to 40 px; body 16 to 18 px with a line height of 1.6.
@@ -151,6 +203,8 @@ Default to the operating system's setting, with a toggle in the header that reme
 - Every interactive element is reachable by keyboard and has a visible focus ring in the accent colour.
 - The answer region is an `aria-live="polite"` region.
 - The SVG drawing has a `<title>` and `<desc>`. The `A -[REL]-> B` list stays as the accessible text version of the path.
+- "Ask next" and "Try instead" are buttons in a list named by its `aria-label`. A node that asks is named "{name}, {kind}. Click to ask: {question}" and asks on Enter or Space as well as on click. The arrow keys move focus along a drawing's edges.
+- "Your walk" is a `nav` holding an ordered list; the step on screen carries `aria-current="step"`.
 - Never use colour as the only signal: node labels name the label ("Service", "Person").
 - Headings run in order, `h1` once. Landmarks: `header`, `main`, `footer`.
 - Tap targets are at least 44 px at 390 px.

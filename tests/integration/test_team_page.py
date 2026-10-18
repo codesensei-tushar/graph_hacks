@@ -8,7 +8,7 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 from fastapi.testclient import TestClient  # noqa: E402
 
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_api, team_page  # noqa: E402
+from src.domain.knowledge import ask_api, risk_map, team_page  # noqa: E402
 from src.main import app  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
 
@@ -79,6 +79,45 @@ class TeamPageTest(unittest.TestCase):
         self.assertIn({"from": "Data", "rel": "RUNS", "to": "Graph Store"}, page["path"])
         self.assertIn({"from": "Sara Lindqvist", "rel": "OWNS", "to": "Graph Store"}, page["path"])
         self.assertEqual(len(page["edges"]), len(page["path"]))
+
+    def test_a_team_page_names_the_teams_it_depends_on_and_the_ones_that_depend_on_it(self):
+        page = self.get("/api/team/payments")
+        self.assertEqual(
+            page["depends_on"],
+            [{"id": "platform", "name": "Platform", "pairs": [["Billing Service", "Auth Service"], ["Billing Service", "Postgres"], ["Invoice Worker", "Notification Service"]]}],
+        )
+        self.assertEqual(page["depended_on_by"], [{"id": "platform", "name": "Platform", "pairs": [["API Gateway", "Billing Service"]]}])
+        for step in (
+            {"from": "Billing Service", "rel": "DEPENDS_ON", "to": "Auth Service"},
+            {"from": "Platform", "rel": "RUNS", "to": "Auth Service"},
+            {"from": "API Gateway", "rel": "DEPENDS_ON", "to": "Billing Service"},
+            {"from": "Platform", "rel": "RUNS", "to": "API Gateway"},
+        ):
+            self.assertIn(step, page["path"])
+        self.assertEqual(len(page["edges"]), len(page["path"]))
+        self.assertEqual(len({node["name"] for node in page["nodes"]}), len(page["nodes"]))
+
+    def test_a_team_page_carries_its_rows_of_the_risk_map_ranked_as_the_tool_ranks_them(self):
+        page = self.get("/api/team/payments")
+        whole = risk_map.risk_map(["org_shared"]).grid
+        ours = {"Billing Service", "Invoice Worker"}
+        self.assertEqual(page["risk"]["rows"], [row for row in whole["rows"] if row["name"] in ours])
+        self.assertEqual((page["risk"]["columns"], page["risk"]["scoring"]), (whole["columns"], whole["scoring"]))
+        self.assertEqual([row["name"] for row in page["risk"]["rows"]], ["Invoice Worker", "Billing Service"])
+        self.assertEqual(
+            page["glance"],
+            "Payments depends on Platform (3 edges). Platform (1 edge) depends on Payments. 1 of the 2 things it runs rests on one person: Invoice Worker.",
+        )
+
+    def test_a_team_with_nothing_yet_says_so_in_one_line_instead_of_empty_sections(self):
+        self.graph.query("MATCH (c:Company) CREATE (:Team {id: 'ops', name: 'Ops', scope: 'org_shared'})-[:PART_OF]->(c)")
+        page = self.get("/api/team/ops")
+        self.assertEqual(page["empty"], ["links to other teams", "decisions", "open tickets", "chat"])
+        self.assertIsNone(page["risk"])
+        self.assertEqual((page["depends_on"], page["depended_on_by"]), ([], []))
+        payments = self.get("/api/team/payments")
+        self.assertNotIn("links to other teams", payments["empty"])
+        self.assertNotIn("decisions", payments["empty"])
 
     def test_things_are_grouped_by_kind_once_kind_is_set(self):
         self.graph.query("MATCH (s:Service {id: 'invoice-worker'}) SET s.kind = 'process'")

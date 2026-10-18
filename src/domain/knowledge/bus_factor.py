@@ -55,17 +55,11 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
     if not resolution.found:
         return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "person"), found=False, candidates=resolution.candidate_names())
     person = resolution.entity
-    params = {"id": person.id, "scopes": scopes}
-    reach: dict[str, int] = {}
-
-    things, held = _things(graph, person, params, reach)
-    decisions, decided = _decisions(graph, person, params, reach)
-    tickets, worked = _tickets(graph, person, params, reach)
-    items = sorted([*things, *decisions, *tickets], key=lambda item: (-item.dependents, item.order, item.name))
+    items, linked = _gather(graph, person, scopes)
 
     result = ToolResult(tool=TOOL, answer="", candidates=resolution.candidate_names())
     if not items:
-        if held or decided or worked:
+        if linked:
             result.answer = f"If {person.name} leaves, nothing rests on them alone: everything they own, work on, or decided has someone else on it."
         else:
             result.answer = f"{person.name} is in the graph, and nothing is linked to them yet."
@@ -85,6 +79,23 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
         parts.append(f"And {len(rest)} more: {join_names([item.name for item in rest])}.")
     result.answer = " ".join(parts)
     return result
+
+
+def at_risk(graph, person: Entity, scopes: list[str]) -> list[AtRisk]:
+    """What rests on this person alone, the furthest-reaching first: what ``if_person_leaves`` tells."""
+    items, _linked = _gather(graph, person, scopes)
+    return items
+
+
+def _gather(graph, person: Entity, scopes: list[str]) -> tuple[list[AtRisk], bool]:
+    """The items resting on the person alone, and whether anything at all is linked to them."""
+    params = {"id": person.id, "scopes": scopes}
+    reach: dict[str, int] = {}
+    things, held = _things(graph, person, params, reach)
+    decisions, decided = _decisions(graph, person, params, reach)
+    tickets, worked = _tickets(graph, person, params, reach)
+    items = sorted([*things, *decisions, *tickets], key=lambda item: (-item.dependents, item.order, item.name))
+    return items, bool(held or decided or worked)
 
 
 def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple[list[AtRisk], int]:

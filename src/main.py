@@ -14,6 +14,7 @@ from src.core import scheduler
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
+from src.domain.knowledge.search import ensure_search_indexes
 from src.domain.memory.memory_service import ensure_indexes
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
 from src.domain.slack import token_install
@@ -40,6 +41,8 @@ def _seed_if_empty() -> None:
             reset_and_seed(company_module(settings.seed_company))
     ensure_indexes()
     connector_graph.ensure_indexes()
+    # Never raises: a failure is logged and the tools that would search keep their refusal.
+    ensure_search_indexes()
 
 
 def _recover() -> None:

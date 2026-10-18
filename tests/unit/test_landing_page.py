@@ -20,6 +20,7 @@ from src.domain.knowledge.algorithms import depth_in  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
 PAGE_SCRIPTS = ("shell.js", "graph.js", "hero.js", "riskmap.js", "app.js")
+STYLESHEETS = ("style.css", "riskmap.css", "explore.css")
 ALLOWED_ROUTES = {"/api/ask", "/api/ask/tools", "/api/ask/proof", "/api/teams", "/api/team/", "/api/graph/stats", "/api/graph/sample"}
 VOID = {"meta", "link", "input", "br", "img", "hr", "source", "path", "circle", "rect", "polygon", "line"}
 
@@ -96,6 +97,7 @@ class SectionsTest(unittest.TestCase):
             [
                 ("h1", "Ask how your company works. Every answer shows the path it walked."),
                 ("h2", "Ask the graph behind this project."),
+                ("h2", "The graph behind every answer."),
                 ("h2", "Take FalkorDB out, and the answers go with it."),
                 ("h2", "Not only engineering."),
                 ("h2", "How an answer is made."),
@@ -104,7 +106,7 @@ class SectionsTest(unittest.TestCase):
         )
         for landmark in ("header", "main", "footer"):
             self.assertEqual(page.tags.count(landmark), 1, landmark)
-        for section in ("ask", "live-answer", "proof", "teams", "how", "builders"):
+        for section in ("ask", "live-answer", "graph", "proof", "teams", "how", "builders"):
             self.assertIn(section, page.text_by_id)
 
     def test_the_footer_carries_the_readme_ai_disclosure_word_for_word(self):
@@ -150,8 +152,9 @@ class WeightTest(unittest.TestCase):
         self.assertEqual(fonts, ["Geist-Variable.woff2", "GeistMono-Variable.woff2"])
         self.assertTrue((STATIC / "fonts" / "OFL.txt").exists())
         own_js = sum((STATIC / name).stat().st_size for name in PAGE_SCRIPTS)
-        self.assertLess(own_js, 80 * 1024)
-        page = own_js + sum((STATIC / name).stat().st_size for name in ("index.html", "style.css", "riskmap.css")) + sum(
+        # Raised from 80 KB with the risk grid and the explore affordances; the page total below is the real cap.
+        self.assertLess(own_js, 96 * 1024)
+        page = own_js + sum((STATIC / name).stat().st_size for name in ("index.html", *STYLESHEETS)) + sum(
             (STATIC / "fonts" / name).stat().st_size for name in fonts
         )
         self.assertLess(page, 300 * 1024)
@@ -239,7 +242,10 @@ class CopyLinkTest(unittest.TestCase):
     def test_the_copied_link_is_the_one_the_page_reads_on_load(self):
         self.assertIn("new URL(`/?q=${encodeURIComponent(question)}`, location.origin).href", self.app_js)
         self.assertIn('new URLSearchParams(location.search).get("q")', self.app_js)
-        self.assertIn('history.replaceState(null, "", `?q=${encodeURIComponent(q)}`)', self.app_js)
+        # Every history entry the page writes (the walk) is that same address.
+        self.assertIn("const address = `?q=${encodeURIComponent(q)}`;", self.app_js)
+        self.assertIn('history.replaceState({ q, step: 0 }, "", address);', self.app_js)
+        self.assertIn('history.pushState({ q, step: walk.at }, "", address);', self.app_js)
 
     def test_every_answer_with_a_path_gets_the_button_beside_replay(self):
         self.assertEqual(len(re.findall(r"addCopyLink\(", self.app_js)), 2, "defined once, called once")
@@ -250,12 +256,12 @@ class CopyLinkTest(unittest.TestCase):
 
 
 class RiskMapTest(unittest.TestCase):
-    """The risk_map grid (riskmap.js) renders only when the answer carries a risk_map grid."""
+    """The grid table (riskmap.js) renders only when the answer carries a risk_map or person_profile grid."""
 
     def test_the_hook_is_guarded_and_sits_between_the_answer_text_and_the_path(self):
         app_js = (STATIC / "app.js").read_text()
         render = app_js[app_js.index("function render(data, question)"):]
-        hook = 'if (data.grid && data.grid.kind === "risk_map" && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });'
+        hook = 'if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });'
         self.assertEqual(app_js.count("RiskMap.render("), 1)
         self.assertLess(render.index("data.answer));"), render.index(hook))
         self.assertLess(render.index(hook), render.index("BrainGraph.renderPath("))
@@ -266,3 +272,34 @@ class RiskMapTest(unittest.TestCase):
         self.assertLess(scripts.index("/static/riskmap.js"), scripts.index("/static/app.js"))
         self.assertIn("/static/riskmap.css", [resource.split("?")[0] for resource in resources])
         self.assertIn("window.RiskMap = { render };", (STATIC / "riskmap.js").read_text())
+
+
+class TypeScaleTest(unittest.TestCase):
+    """One type scale and three weights: every size in the page's stylesheets is a token, an em value or a clamp."""
+
+    def setUp(self):
+        self.css = "\n".join((STATIC / name).read_text() for name in STYLESHEETS)
+
+    def test_every_font_size_is_a_token_an_em_value_or_a_clamp(self):
+        stray = []
+        for declaration in re.findall(r"font(?:-size)?:\s*([^;}]*)", self.css):
+            if declaration.startswith(('"Geist', "inherit")) or "clamp(" in declaration or "var(--fs-" in declaration:
+                continue
+            if re.search(r"\d(?:px|rem)\b", declaration) and declaration != "16px/1.6 var(--font)":
+                stray.append(declaration)
+        self.assertEqual(stray, [])
+        for token in ("--fs-xs", "--fs-sm", "--fs-md", "--fs-base", "--fs-lg", "--fs-xl"):
+            self.assertIn(f"{token}:", self.css)
+
+    def test_the_page_links_every_stylesheet_these_checks_read(self):
+        linked = [resource.split("?")[0] for resource in _parse("index.html").resources if ".css" in resource]
+        self.assertEqual(linked, [f"/static/{name}" for name in STYLESHEETS])
+
+    def test_weights_are_400_500_and_600_plus_the_hero_headline(self):
+        weights = set(re.findall(r"font-weight:\s*(\d{3})\b", self.css)) | set(re.findall(r"font:\s*(\d{3})\s", self.css))
+        self.assertLessEqual(weights, {"100", "300", "400", "500", "600", "700"})  # 100 is the @font-face range
+        # 300 and 700 belong to the hero alone: the light headline and its two heavy words.
+        for weight in ("300", "700"):
+            css = re.sub(r"/\*.*?\*/", "", self.css, flags=re.S)
+            rules = [rule for rule in re.findall(r"([^{}]+)\{([^{}]*)\}", css) if re.search(rf"font-weight:\s*{weight}\b|font:\s*{weight}\s", rule[1])]
+            self.assertTrue(rules and all(selector.strip().startswith(".hero h1") for selector, _ in rules), weight)

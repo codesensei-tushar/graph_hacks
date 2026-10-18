@@ -8,6 +8,7 @@ SLACK_OWNER_ID before importing src.
 import os
 import unittest
 import uuid
+from unittest import mock
 
 os.environ["FALKORDB_GRAPH"] = "memory_test" + os.environ.get("TEST_GRAPH_SUFFIX", "")
 
@@ -36,12 +37,19 @@ def doc(content, tags, title=None, buckets=None):
 class MemoryLayerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # The reset epoch is one Redis key that every checkout's suite shares; another run's reset
+        # advancing it between a read and a write made those writes refuse. This class gets its own.
+        cls._epoch = mock.patch.object(tree, "_RESET_EPOCH_KEY", f"brain:memory:reset_epoch:test{os.environ.get('TEST_GRAPH_SUFFIX', '')}")
+        cls._epoch.start()
         memory_service.ensure_indexes()
 
     @classmethod
     def tearDownClass(cls):
-        _, graph = connect()
-        graph.delete()
+        try:
+            _, graph = connect()
+            graph.delete()
+        finally:
+            cls._epoch.stop()
 
     def setUp(self):
         _, graph = connect()
