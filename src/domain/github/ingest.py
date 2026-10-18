@@ -15,12 +15,15 @@ Every node carries its repo's ``scope``. Only facts are kept: titles, descriptio
 people, file paths, and states. Code and diffs are never stored.
 """
 
+import logging
 import re
 
 from src.connectors import graph as connector_graph
 from src.db.falkordb_client import connect
 from src.domain.github.repos import repo_scope
 from src.domain.knowledge import ask_service
+
+log = logging.getLogger(__name__)
 
 SUMMARY_MAX_CHARS = 2000
 _CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b", re.IGNORECASE)
@@ -165,15 +168,22 @@ def jira_keys(pr: dict, projects: set[str]) -> tuple[list[str], list[str]]:
 
 def link_jira_tickets(pull_request_id: str, pr: dict) -> None:
     """``REFERENCES`` (or ``CLOSES``, for "fixes PAY-12") the Jira tickets a pull request names, kept in step
-    with its text. A ticket not synced yet links when it is (``connector_graph.link_references`` keeps the keys)."""
-    _, graph = connect()
-    urls = graph.query("MATCH (c:Container {source: 'jira'}) RETURN c.url").result_set
-    projects = {match.group(1) for (url,) in urls if (match := _JIRA_PROJECT_URL.search(url or ""))}
-    if not projects:
-        return
-    referenced, closed = jira_keys(pr, projects)
-    connector_graph.link_references(pull_request_id, referenced, "jira", "REFERENCES")
-    connector_graph.link_references(pull_request_id, closed, "jira", "CLOSES")
+    with its text. A ticket not synced yet links when it is (``connector_graph.link_references`` keeps the keys).
+
+    Never in the way of GitHub ingest: a failure here is logged by the pull request's id and the
+    error's type only (never its text, which may quote the description), and the pull request and
+    its reviews are still written."""
+    try:
+        _, graph = connect()
+        urls = graph.query("MATCH (c:Container {source: 'jira'}) RETURN c.url").result_set
+        projects = {match.group(1) for (url,) in urls if (match := _JIRA_PROJECT_URL.search(url or ""))}
+        if not projects:
+            return
+        referenced, closed = jira_keys(pr, projects)
+        connector_graph.link_references(pull_request_id, referenced, "jira", "REFERENCES")
+        connector_graph.link_references(pull_request_id, closed, "jira", "CLOSES")
+    except Exception as error:
+        log.warning("[github] jira links failed pr=%s error=%s; the pull request is ingested without them", pull_request_id, type(error).__name__)
 
 
 def upsert_review(repo: dict, pr_number: int, review: dict) -> None:

@@ -1,6 +1,7 @@
 """Pull requests that name Jira tickets: REFERENCES, CLOSES for "fixes KEY", and only for synced projects."""
 
 import unittest
+from unittest import mock
 
 from tests.fixtures.jira import CONFIG, FakeJiraClient, load
 from tests.integration.test_jira_sync import _rows, _sync
@@ -64,6 +65,23 @@ class JiraPullRequestLinksTest(unittest.TestCase):
         ingest.upsert_pull_request(REPO, _pr(44, "PAY-2: retries"))
         self.assertEqual(_links(44), [])
         self.assertEqual(_rows("MATCH (p:PullRequest {id: $id}) RETURN p.ticket_references", {"id": ingest.pull_request_id(REPO["id"], 44)}), [[None]])
+
+    def test_a_failed_jira_link_never_stops_the_pull_request_or_its_reviews(self):
+        _sync(self.connector, self.install)
+        reviewer = {"id": 12, "login": "lena-fischer"}
+        body = "Fixes PAY-3. secret-looking description text"
+        refused = mock.patch.object(connector_graph, "link_references", side_effect=ValueError(f"refused handle from: {body}"))
+        with refused, self.assertLogs("src.domain.github.ingest", level="WARNING") as logs:
+            ingest.upsert_pull_request(REPO, _pr(45, "PAY-2: retries", body), reviews=[{"user": reviewer, "state": "APPROVED"}])
+        node_id = ingest.pull_request_id(REPO["id"], 45)
+        self.assertEqual(_rows("MATCH (p:PullRequest {id: $id}) RETURN p.title", {"id": node_id}), [["PAY-2: retries"]])
+        self.assertEqual(_rows("MATCH (:GitHubUser {login: 'lena-fischer'})-[r:REVIEWED]->(:PullRequest {id: $id}) RETURN r.state", {"id": node_id}), [["approved"]])
+        self.assertEqual(_links(45), [])
+        # The log names the pull request and the error's type, never the description or the error's text.
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn(node_id, logs.output[0])
+        self.assertIn("ValueError", logs.output[0])
+        self.assertNotIn("secret-looking", logs.output[0])
 
     def test_keys_count_only_for_synced_projects(self):
         referenced, closed = ingest.jira_keys(_pr(1, "OPS-4 and PAY-12", "fixes: PLAT-3", "pay-9_hotfix"), {"PAY", "PLAT"})
