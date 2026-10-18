@@ -253,6 +253,19 @@ class AlgorithmToolsTest(unittest.TestCase):
         self.assertEqual(ask_service.route("who actually works together"), ("working_groups", {}))
         self.assertEqual(catalogue.get_tool("working_groups").run({}, ORG).tool, "working_groups")
 
+    def test_working_groups_scratch_graph_is_built_in_one_query_through_the_proxy_and_deleted(self):
+        calls = []
+        hook = calls.append
+        falkordb_client.add_query_hook(after=hook)
+        try:
+            algorithms.working_groups(ORG)
+        finally:
+            falkordb_client.remove_query_hook(hook)
+        scratch = [call for call in calls if call.graph.startswith("brain_lp_")]
+        self.assertEqual([call.method for call in scratch], ["query", "ro_query"])
+        names = {name.decode() if isinstance(name, bytes) else name for name in falkordb_client.client().list_graphs()}
+        self.assertNotIn(scratch[0].graph, names)
+
     def test_decision_pressure_names_uncited_work_and_hides_private_pull_requests(self):
         quiet = ask_service.decision_pressure("is the billing retries decision still the last word", ORG)
         self.assertIn("*Retry renewal webhooks inside the billing service* is the standing decision about Billing Service.", quiet.answer)
