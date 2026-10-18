@@ -158,4 +158,4 @@ class WordingTest(unittest.TestCase):
 
 class FallbackOrderTest(unittest.TestCase):
     def test_explore_sits_between_person_and_search(self):
-        self.assertEqual(fallback.STEPS, (fallback._person, fallback._explore, fallback._search))
+        self.assertEqual(fallback.STEPS, (fallback._person, fallback._explore, fallback._search, fallback._recall))

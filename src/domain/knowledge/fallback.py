@@ -56,7 +56,8 @@ def _recall(question: str, scopes: list[str]) -> ToolResult | None:
 
     from src.domain.knowledge import resolve
 
-    found = memories.recall(question, scopes, memories.FALLBACK_K)
+    # Not ``memories.recall`` itself: the tool that fell back owns these queries on /ops/metrics.
+    found = memories.recalled(question, scopes, memories.FALLBACK_K)
     # Every word the question names must be in the memory: a loose match would answer a question
     # about something else ("who owns Larkspur" with a note about the memory layer).
     words = [word for word in resolve.core(question).split() if len(word) >= 3 and word not in _ASKING]
@@ -78,11 +79,10 @@ _ASKING = frozenset({"when", "does", "time", "run", "runs", "happen", "happens",
 
 
 def _said(word: str, text: str) -> bool:
-    """The word, or its stem (four letters), is a word of the text: "runs" for "run", "batches" for "batch"."""
+    """The word, or its plural or singular, is a word of the text: "batches" for "batch". Never a misspelling."""
     from src.domain.knowledge import resolve
 
-    stem = word[:4] if len(word) > 4 else word
-    return any(token == word or token.startswith(stem) for token in resolve.tokens(text))
+    return any(resolve.same_word(word, token) for token in resolve.tokens(text))
 
 
 # Person first, then explore (see the module docstring); search, then what was said in chat, last.

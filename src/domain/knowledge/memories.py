@@ -163,6 +163,11 @@ def attached(result: ToolResult, scopes: list[str], k: int = ATTACHED) -> list[M
 
 def recall(query: str, scopes: list[str], k=DEFAULT_K) -> ToolResult:
     """Memories whose text matches the question, across the asker's read set. Dated lines, no path."""
+    return recalled(query, scopes, k)
+
+
+def recalled(query: str, scopes: list[str], k=DEFAULT_K) -> ToolResult:
+    """``recall``'s work, under its own name so a tool that falls back to it keeps its queries on /ops/metrics."""
     limit = _clamp(k)
     found = search_brain(query, None, container_tags_override=scopes)
     rows = (found.get("results") or [])[:limit]

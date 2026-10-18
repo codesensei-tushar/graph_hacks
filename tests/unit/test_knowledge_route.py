@@ -15,7 +15,7 @@ class RouteTest(unittest.TestCase):
             "what breaks if auth goes down, two hops out": ("blast_radius", {"name": "what breaks if auth goes down, two hops out", "depth": 2}),
             "which services are load bearing": ("load_bearing", {"limit": algorithms.DEFAULT_LOAD_BEARING}),
             "how is maya connected to the invoice worker": ("path_between", {"source": "how is maya connected to the invoice worker", "target": ""}),
-            "what have we said about billing": ("related_memories", {"name": "what have we said about billing"}),
+            "what have we said about billing": ("related_memories", {"name": "billing"}),
             "who said the retries were flaky": ("recall", {"query": "who said the retries were flaky"}),
             "why did we cut vector recall": ("decision_trace", {"topic": "why did we cut vector recall"}),
             "is the billing retries decision still the last word": (
