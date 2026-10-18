@@ -83,6 +83,7 @@ def tools():
         {
             "company": examples.company_id,
             "company_name": examples.company_name,
+            "also": examples.also,
             "examples": examples.questions,
             "demo": ask_api.demo_steps(examples.company_id),
             "tools": [tool.to_dict() for tool in ask_api.read_tools()],
