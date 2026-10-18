@@ -263,6 +263,19 @@ sudo docker compose exec falkordb redis-cli GRAPH.CONFIG GET MAX_QUEUED_QUERIES 
 (`REDISCLI_AUTH` is set in the container, so no password is typed.) Locally, recreate the dev
 container with `docker compose up -d falkordb` to pick up the same values.
 
+### The client side
+
+The app's connection (`src/db/falkordb_client.py`) is bounded too, so a stuck or restarted
+FalkorDB costs a request seconds, never a worker:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `socket_connect_timeout` | 2 s | An unreachable host failed after 135 s with the redis-py default (measured); now 2 s. |
+| `socket_timeout` | 15 s (`FALKORDB_SOCKET_TIMEOUT`) | A few seconds past the server's 10 s read `TIMEOUT`, so "Query timed out" arrives first; this catches a server that stopped answering. A write still running at 15 s raises here while the server finishes it. |
+| `health_check_interval` | 30 s | A connection idle that long is PINGed before reuse, and replaced if it went stale. |
+| Pool | `BlockingConnectionPool(max_connections=64, timeout=5)` | At most 64 connections; a caller past that waits up to 5 s, then gets an error. |
+| Retries | none on commands | A write whose reply was lost may have been applied; sending it again could apply it twice. Only the health-check PING and the socket connect get a second try. |
+
 ## Query metrics
 
 Every graph query that goes through `connect()` is timed by `src/core/query_metrics.py`. Each
