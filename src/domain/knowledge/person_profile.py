@@ -14,6 +14,10 @@
 - how many things rest on them alone (``bus_factor.at_risk``, what ``if_person_leaves`` tells);
 - what they said, from the memories their Slack account ``SAID``, newest first.
 
+Someone only a connected tool knows (an unlinked Jira or HubSpot account, ``people.py``) gets
+``account_profile``: what the account owns or works on, its open tickets, what rests on it
+alone, and how an admin links it to a person.
+
 It is also the fallback where ``who_knows``, ``who_owns``, ``onboarding_brief`` and
 ``decision_trace`` would refuse: "who is arjun" or "what does sara own" names a person, not a
 service or a team, so ``profile_if_person`` answers it instead of the refusal.
@@ -22,7 +26,7 @@ service or a team, so ``profile_if_person`` answers it instead of the refusal.
 from dataclasses import dataclass, field
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import ask_service, bus_factor, decisions, kinds, resolve
+from src.domain.knowledge import ask_service, bus_factor, decisions, kinds, people, resolve
 from src.domain.knowledge.dto import MemoryLine, PathStep, ToolResult, day_from
 from src.domain.knowledge.memories import LIVE as _LIVE
 from src.domain.knowledge.resolve import SCOPED, Entity, join_names
@@ -81,7 +85,7 @@ class _Collaborator:
 def person_profile(question: str, scopes: list[str]) -> ToolResult:
     """Who the person the question names is, and what they hold."""
     _, graph = connect()
-    resolution = resolve.resolve_name(question, ("Person",), scopes, graph=graph)
+    resolution = people.resolve_person(question, scopes, graph)
     if not resolution.found:
         return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "person"), found=False, candidates=resolution.candidate_names())
     result = profile_of(graph, resolution.entity, scopes)
@@ -102,14 +106,16 @@ def profile_or_none(question: str, scopes: list[str]) -> ToolResult | None:
     """The profile of the person the question names, or None when it names no one: the
     first step of ``fallback.before_refusing``."""
     _, graph = connect()
-    resolution = resolve.resolve_name(question, ("Person",), scopes, graph=graph)
+    resolution = people.resolve_person(question, scopes, graph)
     if not resolution.found:
         return None
     return profile_of(graph, resolution.entity, scopes)
 
 
 def profile_of(graph, person: Entity, scopes: list[str]) -> ToolResult:
-    """The profile of a person already resolved."""
+    """The profile of a person already resolved, or of an unlinked connector account."""
+    if people.is_account(person):
+        return account_profile(graph, person, scopes)
     result = ToolResult(tool=TOOL, answer="")
     params = {"id": person.id, "scopes": scopes}
     parts = [_lead(graph, person, params, result)]
@@ -146,6 +152,91 @@ def profile_of(graph, person: Entity, scopes: list[str]) -> ToolResult:
     result.memories = _said(graph, person, params)
     result.answer = " ".join(parts)
     return result
+
+
+# --- an account a connected tool knows -------------------------------------------------------
+
+MAX_ACCOUNT_THINGS = 6
+MAX_ACCOUNT_CITES = 25
+
+
+def account_profile(graph, account: Entity, scopes: list[str]) -> ToolResult:
+    """What an unlinked Jira or HubSpot account holds: what it owns or works on, its open tickets,
+    what rests on it alone, and how an admin links it to a person. Every fact an edge."""
+    result = ToolResult(tool=TOOL, answer="")
+    params = {"id": account.id, "scopes": scopes}
+    rows = graph.ro_query(
+        f"""
+        MATCH (:ExternalUser {{id: $id}})-[rel:OWNS|WORKED_ON]->(s:Service)
+        WHERE {SCOPED.format(var="s")}
+        RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, collect(DISTINCT type(rel))
+        ORDER BY s.name
+        """,
+        params,
+    ).result_set
+    held: list[_Held] = []
+    reach: dict[str, int] = {}
+    for service_id, name, kind, rels in rows:
+        rel = "OWNS" if "OWNS" in rels else "WORKED_ON"
+        held.append(_Held(service_id, name, kinds.kind_or_default(kind), rel, bus_factor._dependents(graph, service_id, params, reach)))
+    parts = [f"{account.name} is an account in {account.kind or 'a connected tool'}."]
+    cited = 0
+    for verb, rel in (("Owns", "OWNS"), ("Works on", "WORKED_ON")):
+        things = [thing for thing in held if thing.rel == rel]
+        if not things:
+            continue
+        for thing in things:
+            if cited < MAX_ACCOUNT_CITES:
+                result.add(PathStep(account.name, rel, thing.name, from_id=account.id, to_id=thing.id, from_label=account.label, to_label="Service"))
+                cited += 1
+        named = [kinds.listed(thing.name, thing.kind) if len({t.kind for t in things}) > 1 else thing.name for thing in things[:MAX_ACCOUNT_THINGS]]
+        if len(things) > MAX_ACCOUNT_THINGS:
+            named.append(f"{len(things) - MAX_ACCOUNT_THINGS} more")
+        noun = _things_noun(things)
+        parts.append(f"{verb} {len(things)} {noun}: {join_names(named)}.")
+    tickets = graph.ro_query(
+        f"""
+        MATCH (:ExternalUser {{id: $id}})-[rel:ASSIGNED|OPENED|WORKED_ON]->(t:Ticket)
+        WHERE {SCOPED.format(var="t")} AND coalesce(t.state, 'open') <> 'closed'
+        RETURN t.id, t.name, coalesce(t.title, t.name), collect(DISTINCT type(rel))
+        ORDER BY t.name
+        """,
+        params,
+    ).result_set
+    for verb, rel in (("Assigned", "ASSIGNED"), ("Opened", "OPENED")):
+        mine = [row for row in tickets if rel in row[3] and (rel == "ASSIGNED" or "ASSIGNED" not in row[3])]
+        if not mine:
+            continue
+        named = []
+        for ticket_id, name, title, _rels in mine[:MAX_TICKETS]:
+            result.add(PathStep(account.name, rel, name, from_id=account.id, to_id=ticket_id, from_label=account.label, to_label="Ticket"))
+            named.append(f"{name} (“{title}”)" if title and title != name else name)
+        if len(mine) > MAX_TICKETS:
+            named.append(f"{len(mine) - MAX_TICKETS} more")
+        parts.append(f"{verb} {len(mine)} open ticket{'s' if len(mine) != 1 else ''}: {join_names(named)}.")
+    if held or tickets:
+        at_risk = bus_factor.at_risk(graph, account, scopes)
+        if held:
+            alone_ids = {item.steps[0].to_id for item in at_risk if item.order == 0}
+            result.grid = _grid(graph, account, held, alone_ids, scopes)
+        alone = len(at_risk)
+        parts.append(f"{'1 thing rests' if alone == 1 else f'{alone} things rest'} on this account alone." if alone else "Nothing rests on this account alone.")
+    else:
+        parts.append("Nothing else is linked to it yet.")
+    parts.append(people.unlinked_hint(account))
+    result.answer = " ".join(parts)
+    return result
+
+
+def _things_noun(things: list[_Held]) -> str:
+    """"accounts" when every thing is an account, "things" when the kinds differ."""
+    found = {thing.kind for thing in things}
+    if len(found) != 1:
+        return "thing" if len(things) == 1 else "things"
+    kind = found.pop()
+    if len(things) == 1:
+        return kind
+    return {"process": "processes", "policy": "policies"}.get(kind, kind + "s")
 
 
 # --- who they are --------------------------------------------------------------------------
@@ -210,7 +301,7 @@ def _grid(graph, person: Entity, held: list[_Held], alone_ids: set[str], scopes:
         entity = Entity(thing.id, thing.name, "Service", thing.kind)
         known = ask_service.knowers(graph, entity, scopes)
         # Told apart by id: an unlinked account with their name is someone else.
-        others = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, entity) if who != ("Person", person.id)]
+        others = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, entity) if who != (person.label, person.id)]
         alone = thing.id in alone_ids
         rows.append(
             {
@@ -416,10 +507,10 @@ def _decisions_sentence(graph, person: Entity, rows: list[_DecisionRow], scopes:
 
 def _collaborators(graph, person: Entity, params: dict, held: list[_Held], rows: list[_DecisionRow], result: ToolResult) -> str:
     """The two people they share the most with: things, review pairs, decision pairs."""
-    people: dict[str, _Collaborator] = {}
+    collaborators: dict[str, _Collaborator] = {}
 
     def of(other_id: str, other: str) -> _Collaborator:
-        return people.setdefault(other_id, _Collaborator(other_id, other))
+        return collaborators.setdefault(other_id, _Collaborator(other_id, other))
 
     order = {thing.id: index for index, thing in enumerate(held)}
     names = {thing.id: kinds.listed(thing.name, thing.kind) for thing in held}
@@ -452,7 +543,7 @@ def _collaborators(graph, person: Entity, params: dict, held: list[_Held], rows:
             if role not in row.roles:
                 of(other_id, other).share(row.short, PathStep(other, role, row.name, from_id=other_id, to_id=row.id, from_label="Person", to_label="Decision"))
 
-    top = sorted(people.values(), key=lambda collaborator: (-collaborator.score, collaborator.name))[:MAX_COLLABORATORS]
+    top = sorted(collaborators.values(), key=lambda collaborator: (-collaborator.score, collaborator.name))[:MAX_COLLABORATORS]
     if not top:
         return ""
     named = []

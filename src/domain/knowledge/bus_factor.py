@@ -1,6 +1,7 @@
 """What a person leaving takes with them: the bus-factor answer, for any team.
 
-``if_person_leaves`` resolves a person, then finds what rests on them alone:
+``if_person_leaves`` resolves a person (or, through ``people.resolve_person``, a Jira or HubSpot
+account no person is linked to yet, named with its tool), then finds what rests on them alone:
 
 - things of any kind they are the only owner of, or that no one else knows. "Knows" is
   ``who_knows`` itself (``ask_service.knowers``): the same edges and weights, so the people
@@ -19,7 +20,7 @@ that put each successor next in line, and the ``ABOUT`` edge from a decision or 
 from dataclasses import dataclass
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import ask_service, kinds, resolve
+from src.domain.knowledge import ask_service, kinds, people, resolve
 from src.domain.knowledge.algorithms import MAX_DEPTH
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import SCOPED, Entity, join_names
@@ -51,18 +52,19 @@ class AtRisk:
 def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
     """What only this person owns, knows, decided, or is working on, the furthest-reaching first."""
     _, graph = connect()
-    resolution = resolve.resolve_name(question, ("Person",), scopes, graph=graph)
+    resolution = people.resolve_person(question, scopes, graph)
     if not resolution.found:
         return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "person"), found=False, candidates=resolution.candidate_names())
     person = resolution.entity
     items, linked = _gather(graph, person, scopes)
+    hint = f" {people.unlinked_hint(person)}" if people.is_account(person) else ""
 
     result = ToolResult(tool=TOOL, answer="", candidates=resolution.candidate_names())
     if not items:
         if linked:
-            result.answer = f"If {person.name} leaves, nothing rests on them alone: everything they own, work on, or decided has someone else on it."
+            result.answer = f"If {person.name} leaves, nothing rests on them alone: everything they own, work on, or decided has someone else on it.{hint}"
         else:
-            result.answer = f"{person.name} is in the graph, and nothing is linked to them yet."
+            result.answer = f"{person.name} is in the graph, and nothing is linked to them yet.{hint}"
         return result
 
     listed, rest = items[:MAX_LISTED], items[MAX_LISTED:]
@@ -77,7 +79,7 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
     parts.extend(item.sentence for item in listed)
     if rest:
         parts.append(f"And {len(rest)} more: {join_names([item.name for item in rest])}.")
-    result.answer = " ".join(parts)
+    result.answer = " ".join(parts) + hint
     return result
 
 
@@ -100,13 +102,15 @@ def _gather(graph, person: Entity, scopes: list[str]) -> tuple[list[AtRisk], boo
 
 def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple[list[AtRisk], int]:
     """Things only this person owns, or that no one else knows. Also how many things they hold at all."""
+    # A person's co-owners are people; an unlinked account's are anyone else who owns it.
+    others = "other:Person" if person.label == "Person" else "other"
     rows = graph.ro_query(
         f"""
-        MATCH (:Person {{id: $id}})-[mine:OWNS|WORKED_ON|KNOWS]->(s:Service)
+        MATCH {_me(person)}-[mine:OWNS|WORKED_ON|KNOWS]->(s:Service)
         WHERE {SCOPED.format(var="s")}
         WITH s, collect(DISTINCT type(mine)) AS mine
-        OPTIONAL MATCH (other:Person)-[:OWNS]->(s)
-        WHERE other.id <> $id
+        OPTIONAL MATCH ({others})-[:OWNS]->(s)
+        WHERE other.id <> $id AND labels(other)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="other")}
         RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, mine, count(other)
         ORDER BY s.name
         """,
@@ -117,7 +121,7 @@ def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple
         thing = Entity(service_id, name, "Service", kind)
         known = ask_service.knowers(graph, thing, params["scopes"])
         # The person leaving is told apart by id: an unlinked account with their name is someone else.
-        ranked = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, thing) if who != ("Person", person.id)]
+        ranked = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, thing) if who != (person.label, person.id)]
         owns = "OWNS" in mine
         alone = not ranked
         if not alone and not (owns and not other_owners):
@@ -132,7 +136,7 @@ def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple
         if successors:
             sentence += f"; next in line: {successors[0]}" + (f", then {join_names(successors[1:])}" if successors[1:] else "")
         dependents = _dependents(graph, service_id, params, reach)
-        own = PathStep(person.name, min(mine, key=_HELD_BY.get), name, from_id=person.id, to_id=service_id, from_label="Person", to_label="Service")
+        own = PathStep(person.name, min(mine, key=_HELD_BY.get), name, from_id=person.id, to_id=service_id, from_label=person.label, to_label="Service")
         steps = (own, *ask_service.edges_of(known.path, successors))
         items.append(AtRisk(kinds.listed(name, kind), sentence + _reach_clause(dependents, "it") + ".", dependents, 0, steps))
     return items, len(rows)
@@ -142,7 +146,7 @@ def _decisions(graph, person: Entity, params: dict, reach: dict[str, int]) -> tu
     """Standing decisions no one else proposed or approved. Also how many standing decisions they are on."""
     rows = graph.ro_query(
         f"""
-        MATCH (:Person {{id: $id}})-[mine:PROPOSED|APPROVED]->(d:Decision)
+        MATCH {_me(person)}-[mine:PROPOSED|APPROVED]->(d:Decision)
         WHERE {SCOPED.format(var="d")}
         OPTIONAL MATCH (newer:Decision)-[:SUPERSEDES]->(d)
         WHERE {SCOPED.format(var="newer")}
@@ -179,16 +183,28 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
     """
     accounts = {**params, "accounts": list(ask_service.ACCOUNT_LABELS)}
     mine: dict[str, str] = {}
-    for ticket_id, rel in graph.ro_query(
+    # An unlinked account's tickets are its own: it is assigned them, or worked on them.
+    assigned = (
         f"""
-        MATCH (:Person {{id: $id}})-[:WORKED_ON]->(k:Ticket)
+        MATCH {_me(person)}-[:ASSIGNED]->(k:Ticket)
         WHERE {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
-        RETURN k.id AS ticket, 'WORKED_ON' AS rel
-        UNION
+        RETURN k.id AS ticket, 'ASSIGNED' AS rel
+        """
+        if people.is_account(person)
+        else f"""
         MATCH (:Person {{id: $id}})<-[:IS]-(account)-[:ASSIGNED]->(k:Ticket)
         WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")} AND {SCOPED.format(var="k")}
           AND coalesce(k.state, 'open') <> 'closed'
         RETURN k.id AS ticket, 'ASSIGNED' AS rel
+        """
+    )
+    for ticket_id, rel in graph.ro_query(
+        f"""
+        MATCH {_me(person)}-[:WORKED_ON]->(k:Ticket)
+        WHERE {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
+        RETURN k.id AS ticket, 'WORKED_ON' AS rel
+        UNION
+        {assigned}
         """,
         accounts,
     ).result_set:
@@ -201,7 +217,7 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
         WHERE k.id IN $tickets
         OPTIONAL MATCH (other)-[:WORKED_ON|ASSIGNED]->(k)
         WHERE {SCOPED.format(var="other")}
-          AND ((labels(other)[0] = 'Person' AND other.id <> $id) OR (labels(other)[0] IN $accounts AND NOT (other)-[:IS]->(:Person {{id: $id}})))
+          AND ((labels(other)[0] = 'Person' AND other.id <> $id) OR (labels(other)[0] IN $accounts AND other.id <> $id AND NOT (other)-[:IS]->(:Person {{id: $id}})))
         WITH k, count(DISTINCT other) AS others
         OPTIONAL MATCH (k)-[:ABOUT]->(s:Service)
         WHERE {SCOPED.format(var="s")}
@@ -215,7 +231,7 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
         if others:
             continue
         rel = mine[ticket_id]
-        step = PathStep(person.name, rel, name, from_id=person.id, to_id=ticket_id, from_label="Person", to_label="Ticket")
+        step = PathStep(person.name, rel, name, from_id=person.id, to_id=ticket_id, from_label=person.label, to_label="Ticket")
         about_clause, dependents, about_steps = _about(graph, name, ticket_id, "Ticket", about, params, reach)
         titled = f" (“{title}”)" if title and title != name else ""
         holds = "worked on it" if rel == "WORKED_ON" else "is assigned it"
@@ -238,6 +254,12 @@ def _subject_of(about: list) -> str:
     """What the reach clause of a decision or ticket names: the one thing it is about, else "it"."""
     about = [(service, kind) for service_id, service, kind in about if service_id is not None]
     return kinds.listed(*about[0]) if len(about) == 1 else "it"
+
+
+def _me(person: Entity) -> str:
+    """The node leaving, by its label: a person, or an unlinked connector account. Never text from a question."""
+    label = "ExternalUser" if people.is_account(person) else "Person"
+    return f"(:{label} {{id: $id}})"
 
 
 def _reach_clause(dependents: int, subject: str) -> str:

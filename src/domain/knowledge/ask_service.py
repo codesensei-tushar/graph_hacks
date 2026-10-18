@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, coordination, fallback, find, kinds, memories, resolve
+from src.domain.knowledge import algorithms, bridges, coordination, fallback, find, kinds, memories, resolve, ticket_status
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -168,6 +168,7 @@ EXPLORE = re.compile(
     r"\bexplore\b|\bwhat do (?:we|you) know about\b|\beverything (?:we know )?(?:about|on)\b|\bneighbou?rhood of\b|\bwhat(?:'s| is) around\b",
     re.IGNORECASE,
 )
+_LISTED = r"(?:tickets|issues|accounts|services|systems|processes|documents|docs|pull requests|prs)"
 # A list by filter: "which tickets are open", "list the services in payments", "what decisions have we
 # made". Before decisions, which shares "decisions"; "what decisions have we made about billing" names
 # one thing and stays on decision_trace, as does any "list ... about X".
@@ -176,7 +177,11 @@ _FIND = re.compile(
     r"|\b(?:list|show)(?: me)? (?:all |the |our )?(?:open |closed |merged |standing )?"
     r"(?:decisions|tickets|issues|pull requests|prs|services|systems|processes|playbooks|documents|docs|people|teams)\b(?!.*\babout\b)"
     r"|^\s*(?:what|which) (?:are|is) (?:the |our )?open (?:tickets|issues|pull requests|prs)\b"
-    r"|^\s*which (?:tickets|issues|pull requests|prs) are open\b",
+    r"|^\s*which (?:tickets|issues|pull requests|prs) are open\b"
+    r"|^\s*(?:what|which) (?:tickets|issues) are (?:still )?blocked\b|\bblocked (?:tickets|issues)\b"
+    # Whose list: "what tickets are assigned to Om Sherikar", "which accounts does Yash Patil own".
+    rf"|^\s*(?:what|which|list|show(?: me)?) (?:all |the )?(?:open |closed )?{_LISTED} (?:are |is )?(?:assigned to|worked on by|owned by|opened by)\b"
+    rf"|^\s*(?:what|which) {_LISTED} (?:does|do) .+ (?:own|have|hold|handle|work on)\b",
     re.IGNORECASE,
 )
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:
@@ -190,8 +195,11 @@ READING_LIST = re.compile(
 )
 
 
-def route(question: str) -> tuple[str, dict]:
-    """Pick a tool and its arguments from the question's words. The fallback when no model is configured."""
+def route(question: str, tickets: bool = True) -> tuple[str, dict]:
+    """Pick a tool and its arguments from the question's words. The fallback when no model is configured.
+
+    ``tickets=False`` skips the single-ticket route: ``ticket_status`` asks again that way when the
+    key it was given ("q3-2026", "utf-8") is no ticket the asker can read."""
     text = question.strip()
     if not text:
         return "none", {}
@@ -234,6 +242,11 @@ def route(question: str) -> tuple[str, dict]:
         if depth is not None:
             args["depth"] = min(depth, 2)
         return "explore", args
+    if tickets and ticket_status.asks_about_one_ticket(text):
+        # "what is PAY-12", "is PAY-12 fixed", "who is working on PAY-11", "what blocks PAY-11": the
+        # ticket itself, before the people and decision routes that would only list who knows it. A key
+        # that is no readable ticket ("billing for q3-2026") falls through to the route below it.
+        return "ticket_status", {"name": text}
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
@@ -519,11 +532,21 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
             result.add(PathStep(document, "DESCRIBES", service, from_id=document_id, to_id=target.id, from_label="Document", to_label="Service"))
 
     if not result.path:
-        result.answer = f"{target.name} is in the graph, and no person is linked to it yet."
+        if target.label == "Ticket":
+            ticket = ticket_status.read(graph, target, scopes, ToolResult(tool="who_knows", answer=""))
+            result.answer = f"{ticket_status.lead_line(ticket)} No person is linked to it yet."
+        else:
+            result.answer = f"{target.name} is in the graph, and no person is linked to it yet."
         return result
 
     owners = _unique(step.from_name for step in result.path if step.rel == "OWNS" and step.to_name == target.name)
-    if target.label != "Service":
+    if target.label == "Ticket":
+        # A ticket leads with what its tracker shows: title, status, priority and assignee.
+        ticket = ticket_status.read(graph, target, scopes, ToolResult(tool="who_knows", answer=""))
+        parts = [ticket_status.lead_line(ticket)]
+        if about:
+            parts.append(f"About {join_names(_unique(about))}.")
+    elif target.label != "Service":
         parts = [f"{target.name} is about {join_names(_unique(about))}." if about else f"{target.name} is in the graph."]
     else:
         named = kinds.capitalized(kinds.subject(target.name, target.kind))
@@ -719,6 +742,7 @@ _ROUTED = {
     "related_memories": lambda args, scopes: memories.related_memories(args["name"], scopes, args.get("k")),
     "recall": lambda args, scopes: memories.recall(args["query"], scopes, args.get("k")),
     "explore": lambda args, scopes: _explore().explore(args["name"], scopes, args.get("depth")),
+    "ticket_status": lambda args, scopes: ticket_status.ticket_status(args["name"], scopes),
     "find": lambda args, scopes: find.find(args.get("label"), {key: value for key, value in args.items() if key != "label"}, scopes),
     "search": lambda args, scopes: _search(args["text"], scopes),
 }

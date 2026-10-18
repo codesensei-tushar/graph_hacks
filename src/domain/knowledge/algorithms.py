@@ -17,7 +17,7 @@ import uuid
 from collections import defaultdict
 
 from src.db.falkordb_client import client, connect, graph_reads_disabled
-from src.domain.knowledge import fallback, kinds, resolve
+from src.domain.knowledge import fallback, kinds, people, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import Entity, join_names
 
@@ -313,6 +313,9 @@ def path_between(source: str, target: str, scopes: list[str]) -> ToolResult:
 
     hops_list = [hops for hops, _length in rows]
     best = max(hops_list, key=lambda hops: sum(1 for hop in hops if hop[3] in STRONG_RELS))
+    renamed = _account_names(graph, best)
+    if renamed:
+        best = [[*hop[:1], renamed.get(hop[0], hop[1]), *hop[2:5], renamed.get(hop[4], hop[5]), *hop[6:]] for hop in best]
     result = ToolResult(tool="path_between", answer="", depth=len(best))
     for from_id, from_name, from_label, rel, to_id, to_name, to_label, forward in best:
         if forward:
@@ -324,31 +327,54 @@ def path_between(source: str, target: str, scopes: list[str]) -> ToolResult:
     answer = f"{start.name} reaches {end.name} in {len(best)} hop{'s' if len(best) > 1 else ''}: {chain}."
     if others:
         answer += f" {others} other route{'s' if others > 1 else ''} of the same length."
+    for side in (start, end):
+        if people.is_account(side):
+            answer += f" {people.unlinked_hint(side)}"
     result.answer = answer
     return result
 
 
 def _ends(graph, source: str, target: str, scopes: list[str]):
+    # Someone a connected tool knows (Jira, HubSpot) is an end too, after every other label: a
+    # linked account is its person, an unlinked one is named with its tool. Scoped like the rest.
+    labels = (*PATH_LABELS, people.ACCOUNT)
     if not target or target.strip().lower() == source.strip().lower():
         # The keyword router passes the whole question: both names are in it, in order.
-        named = resolve.resolve_all(source, PATH_LABELS, scopes, graph=graph)
+        named = [_shown(graph, entity, scopes) for entity in resolve.resolve_all(source, labels, scopes, graph=graph)]
+        named = list(dict.fromkeys(named))
         if len(named) < 2:
-            resolution = resolve.resolve_name(source, PATH_LABELS, scopes, graph=graph)
+            resolution = resolve.resolve_name(source, labels, scopes, graph=graph)
             answer = "Name two things in the graph to find the route between them."
             if not resolution.found:
                 answer = resolve.describe_miss(resolution, "service, person, team, document, ticket, or decision")
             elif resolution.entity is not None:
-                answer = f"I found {resolution.entity.name}; name a second thing to find the route between them."
+                answer = f"I found {_shown(graph, resolution.entity, scopes).name}; name a second thing to find the route between them."
             return ToolResult(tool="path_between", answer=answer, found=resolution.found, candidates=resolution.candidate_names())
         return named[0], named[1]
     ends = []
     for text in (source, target):
         resolution = resolve.resolve_name(text, PATH_LABELS, scopes, graph=graph)
         if not resolution.found:
+            resolution = people.resolve_person(text, scopes, graph)
+        if not resolution.found:
             kind = "service, person, team, document, ticket, or decision"
             return ToolResult(tool="path_between", answer=resolve.describe_miss(resolution, kind), found=False, candidates=resolution.candidate_names())
         ends.append(resolution.entity)
     return ends[0], ends[1]
+
+
+def _shown(graph, entity: Entity, scopes: list[str]) -> Entity:
+    """A connector account as its person, or named with its tool; anything else as it is."""
+    return people.shown(graph, entity, scopes) if people.is_account(entity) else entity
+
+
+def _account_names(graph, hops: list) -> dict[str, str]:
+    """How each connector account on a route is named: "Yash Patil (HubSpot)", never a bare name or an email."""
+    ids = sorted({hop[index] for hop in hops for index, label in ((0, hop[2]), (4, hop[6])) if label == people.ACCOUNT})
+    if not ids:
+        return {}
+    rows = graph.ro_query("MATCH (a:ExternalUser) WHERE a.id IN $ids RETURN a.id, a.name, a.source", {"ids": ids}).result_set
+    return {account_id: people.account_label(name, source) for account_id, name, source in rows}
 
 
 def _node(var: str, entity: Entity) -> str:
