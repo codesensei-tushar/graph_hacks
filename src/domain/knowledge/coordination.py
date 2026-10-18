@@ -157,15 +157,37 @@ def who_should_know(question: str, scopes: list[str]) -> ToolResult:
     if isinstance(named, ToolResult):
         return named
     entity, candidates = named
+    return _report(graph, entity, candidates, scopes)[0]
+
+
+def pull_request_report(pr_id: str, scopes: list[str]) -> tuple[ToolResult, list[str]] | None:
+    """``who_should_know`` for one pull request by id, and the names of the people it flags. None when it is not readable.
+
+    For callers that act on the answer rather than show it, such as the Slack heads-up on a
+    new pull request (``src/domain/github/alerts.py``).
+    """
+    _, graph = connect()
+    rows = graph.ro_query(
+        f"MATCH (pr:PullRequest {{id: $id}}) WHERE {SCOPED.format(var='pr')} RETURN pr.name",
+        {"id": pr_id, "scopes": scopes},
+    ).result_set
+    if not rows:
+        return None
+    result, missing = _report(graph, Entity(pr_id, rows[0][0], "PullRequest"), [], scopes)
+    return result, [owner.name for owner in missing]
+
+
+def _report(graph, entity: Entity, candidates: list[str], scopes: list[str]) -> tuple[ToolResult, list[Owner]]:
+    """The answer for a pull request or service already resolved, and the owners it flags."""
     if entity.label == "Service" and kinds.kind_or_default(entity.kind) in kinds.NOT_DEPENDABLE:
         answer = f"{entity.name} is an {entity.kind}: nothing depends on it. Ask who owns it or who knows it instead."
-        return ToolResult(tool=TOOL, answer=answer, candidates=candidates)
+        return ToolResult(tool=TOOL, answer=answer, candidates=candidates), []
     change = _pull_request(graph, entity, scopes) if entity.label == "PullRequest" else _service(graph, entity, scopes)
     result = ToolResult(tool=TOOL, answer="", candidates=candidates)
     result.extend(change.lead)
     if not change.changed:
         result.answer = f"{entity.name} touches no service in the graph, so nothing depends on what it changes."
-        return result
+        return result, []
 
     result.depth = MAX_HOPS
     dependents = _dependents(graph, [thing.id for thing in change.changed], scopes)
@@ -177,7 +199,7 @@ def who_should_know(question: str, scopes: list[str]) -> ToolResult:
     _shared_work(graph, change, missing[:MAX_LISTED], scopes)
     result.answer = _answer(change, dependents, missing, covered, unowned)
     _cite(result, change, missing, covered, unowned)
-    return result
+    return result, missing
 
 
 def pr_reference(text: str) -> tuple[str | None, int] | None:
