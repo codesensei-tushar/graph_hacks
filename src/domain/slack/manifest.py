@@ -2,8 +2,9 @@
 
 Scopes follow company-brain's bot scope list (`SLACK_SCOPES`), minus the
 Slack-assistant and file scopes nothing here uses yet, plus the read scopes this
-build needs for group DMs. User scopes (Slack search on the user's behalf) and
-MCP are not used.
+build needs for group DMs. The only user scopes are OpenID Connect's
+(``openid email profile``), for signing in to the console with Slack; nothing
+searches Slack on a user's behalf, and MCP is not used.
 """
 
 SLACK_APP_NAME = "Company Brain"
@@ -46,12 +47,20 @@ SLACK_BOT_EVENTS = [
     "user_change",
 ]
 
+# Sign in with Slack (OpenID Connect) for the console. Must stay in sync with both YAML manifests.
+SLACK_USER_SCOPES = ["openid", "email", "profile"]
+
 # The OAuth `scope` parameter for /slack/oauth/install.
 SLACK_SCOPES = ",".join(SLACK_BOT_SCOPES)
 
 
 def oauth_callback_url(origin: str) -> str:
     return f"{origin.rstrip('/')}/slack/oauth/callback"
+
+
+def signin_callback_url(origin: str) -> str:
+    """Where Slack returns after Sign in with Slack (src/api/v1/auth.py)."""
+    return f"{origin.rstrip('/')}/auth/slack/callback"
 
 
 def slack_app_manifest(origin: str, app_name: str = SLACK_APP_NAME) -> dict:
@@ -71,8 +80,8 @@ def slack_app_manifest(origin: str, app_name: str = SLACK_APP_NAME) -> dict:
             "bot_user": {"display_name": "company-brain", "always_online": True},
         },
         "oauth_config": {
-            "redirect_urls": [oauth_callback_url(origin)],
-            "scopes": {"bot": list(SLACK_BOT_SCOPES)},
+            "redirect_urls": [oauth_callback_url(origin), signin_callback_url(origin)],
+            "scopes": {"bot": list(SLACK_BOT_SCOPES), "user": list(SLACK_USER_SCOPES)},
             "pkce_enabled": False,
         },
         "settings": {

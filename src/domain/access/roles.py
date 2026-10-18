@@ -28,12 +28,17 @@ def role_at_least(role: str | None, minimum: MemberRole) -> bool:
     return _RANK.get(role, 0) >= _RANK[minimum]
 
 
-def role_of(slack_user_id: str) -> MemberRole:
-    if settings.slack_owner_id and slack_user_id == settings.slack_owner_id:
+def role_of(slack_user_id: str, *, env_roles: bool = True) -> MemberRole:
+    """The role in the current org's graph.
+
+    ``SLACK_OWNER_ID`` and ``SLACK_ADMIN_IDS`` describe the deployment's own (legacy)
+    workspace, so callers acting for any other org pass ``env_roles=False``.
+    """
+    if env_roles and settings.slack_owner_id and slack_user_id == settings.slack_owner_id:
         return ROLE_OWNER
     if _is_installer_of_record(slack_user_id):
         return ROLE_OWNER
-    if slack_user_id in settings.slack_admin_ids:
+    if env_roles and slack_user_id in settings.slack_admin_ids:
         return ROLE_ADMIN
     _, graph = connect()
     rows = graph.query("MATCH (u:SlackUser {id: $id}) RETURN u.role", {"id": slack_user_id}).result_set

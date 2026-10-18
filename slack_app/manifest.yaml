@@ -20,9 +20,10 @@ features:
     display_name: company-brain
     always_online: true
 oauth_config:
-  # Only needed for multi-workspace install through /slack/oauth/install.
+  # Multi-workspace install (/slack/oauth/install) and Sign in with Slack for the console.
   redirect_urls:
     - https://sharpie-iodine-girdle.ngrok-free.dev/slack/oauth/callback
+    - https://sharpie-iodine-girdle.ngrok-free.dev/auth/slack/callback
   scopes:
     # Every extra scope is another line on the install consent screen.
     # channels:manage / channels:join / channels:write.invites create the #company-brain home
@@ -48,6 +49,11 @@ oauth_config:
       - usergroups:read
       - users:read
       - users:read.email
+    # Sign in with Slack (OpenID Connect) for the console. Never used to read Slack.
+    user:
+      - openid
+      - email
+      - profile
 settings:
   event_subscriptions:
     # Server-to-server POST from Slack, must be your public tunnel.

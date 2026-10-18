@@ -3,7 +3,8 @@
 What comes in, and nothing else:
 
 - an owner (an active HubSpot user who can own records) becomes an ``ExternalUser``: name and
-  email. A deactivated user owns and works on nothing here: a company whose owner has left
+  email. A user with no name is named by their email's local part, never the whole address.
+  A deactivated user owns and works on nothing here: a company whose owner has left
   reads as having no owner, which is the gap to see;
 - a company that is a customer, or has any deal, becomes a ``Service`` of kind ``account``,
   with ``OWNS`` from its company owner;
@@ -111,7 +112,16 @@ def owner_user(install: Install, owner: dict, email: str | None = None) -> Exter
     owner_id = str(owner["id"])
     email = (email or owner.get("email") or "").strip().lower()
     name = " ".join(part for part in ((owner.get("firstName") or "").strip(), (owner.get("lastName") or "").strip()) if part)
-    return ExternalUser(id=install.user_id(owner_id), source=install.source, external_id=owner_id, name=name or email or f"HubSpot owner {owner_id}", email=email)
+    return ExternalUser(id=install.user_id(owner_id), source=install.source, external_id=owner_id, name=name or display_name(email, owner_id), email=email)
+
+
+def display_name(email: str, owner_id: str) -> str:
+    """What a user with no name in HubSpot is called: their email's local part, else ``HubSpot owner <id>``.
+
+    Never the whole address: the name is shown in answers, and the email is contact data the
+    graph keeps only to link the account to a person."""
+    local = (email or "").split("@", 1)[0].strip()
+    return local or f"HubSpot owner {owner_id}"
 
 
 def company_name(company: dict) -> str:

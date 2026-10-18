@@ -98,8 +98,12 @@ class EdgesAndUsersTest(unittest.TestCase):
             mapping.owner_user(INSTALL, owners["103"]),
             ExternalUser("hubspot:default:user:103", "hubspot", "103", "Noor Haddad", "noor@quillfern.example.com"),
         )
-        # A user with no name reads as their email.
-        self.assertEqual(mapping.owner_user(INSTALL, owners["105"]).name, "sam@quillfern.example.com")
+        # A user with no name reads as their email's local part, never the whole address; the
+        # email is kept for linking only.
+        nameless = mapping.owner_user(INSTALL, owners["105"])
+        self.assertEqual((nameless.name, nameless.email), ("sam", "sam@quillfern.example.com"))
+        self.assertEqual(mapping.owner_user(INSTALL, {"id": 77, "email": "", "firstName": "", "lastName": ""}).name, "HubSpot owner 77")
+        self.assertEqual(mapping.owner_user(INSTALL, {"id": 78, "email": "@odd.example"}).name, "HubSpot owner 78")
 
     def test_an_admin_can_say_which_email_an_owner_goes_by(self):
         pairs = ["104=Riley.Chen@Quillfern.example.com", " 101 = priya@quillfern.example.com ", "nobody=x@y.example", "105", "106=not-an-email"]

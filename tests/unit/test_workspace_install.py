@@ -18,7 +18,7 @@ from src.domain.slack.farewell import (
 from src.domain.slack.greet import first_name_of, install_greeting, member_greeting
 from src.domain.slack.home_welcome import company_brain_disconnect_message, company_brain_home_welcome_messages
 from src.domain.slack.lifecycle_api import SlackConversation, SlackMember, SlackPostResult, map_slack_member
-from src.domain.slack.manifest import SLACK_BOT_EVENTS, SLACK_BOT_SCOPES, slack_app_manifest
+from src.domain.slack.manifest import SLACK_BOT_EVENTS, SLACK_BOT_SCOPES, SLACK_USER_SCOPES, slack_app_manifest
 from src.domain.slack.membership_provenance import SlackMembershipMapping, provisioned_membership_to_revoke
 from src.domain.slack.team_invite import parse_team_invite_interaction_payload
 from src.domain.slack.team_invite_card import (
@@ -234,7 +234,11 @@ class CopyAndCardsTest(unittest.TestCase):
 class ManifestAndTokensTest(unittest.TestCase):
     def test_generated_manifest_urls(self):
         manifest = slack_app_manifest("https://brain.example.com/")
-        self.assertEqual(manifest["oauth_config"]["redirect_urls"], ["https://brain.example.com/slack/oauth/callback"])
+        self.assertEqual(
+            manifest["oauth_config"]["redirect_urls"],
+            ["https://brain.example.com/slack/oauth/callback", "https://brain.example.com/auth/slack/callback"],
+        )
+        self.assertEqual(manifest["oauth_config"]["scopes"]["user"], ["openid", "email", "profile"])
         self.assertEqual(manifest["settings"]["event_subscriptions"]["request_url"], "https://brain.example.com/slack/events")
 
     def test_yaml_manifest_matches_generator(self):
@@ -243,6 +247,17 @@ class ManifestAndTokensTest(unittest.TestCase):
         events = re.search(r"    bot_events:\n((?:      - .+\n)+)", text).group(1)
         self.assertEqual(re.findall(r"- (\S+)", bot), SLACK_BOT_SCOPES)
         self.assertEqual(re.findall(r"- (\S+)", events), SLACK_BOT_EVENTS)
+
+    def test_yaml_manifests_carry_sign_in_with_slack(self):
+        root = Path(__file__).resolve().parents[2] / "slack_app"
+        for name in ("manifest.yaml", "manifest.prod.yaml"):
+            with self.subTest(name):
+                text = (root / name).read_text()
+                user = re.search(r"    user:\n((?:      - .+\n)+)", text).group(1)
+                self.assertEqual(re.findall(r"- (\S+)", user), SLACK_USER_SCOPES)
+                self.assertRegex(text, r"redirect_urls:\n(?:    - .+\n)*    - https://\S+/auth/slack/callback\n")
+        prod = (root / "manifest.prod.yaml").read_text()
+        self.assertIn("- https://brain.noobsurd.space/auth/slack/callback\n", prod)
 
     def test_token_round_trip_without_encryption(self):
         with mock.patch("src.domain.slack.token_crypto._fernet", return_value=None):
