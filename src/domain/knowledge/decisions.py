@@ -426,6 +426,8 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
         return result
 
     tickets, pull_requests, total = uncited_work(graph, current.id, service_ids, scopes)
+    # The few most on topic, then a count: a synced tracker can hold hundreds about one service.
+    tickets, pull_requests = tickets[:PRESSURE_SHOWN], pull_requests[: max(0, PRESSURE_SHOWN - len(tickets[:PRESSURE_SHOWN]))]
     for ticket_id, ticket, service_id, service in tickets:
         result.add(PathStep(ticket, "ABOUT", service, from_id=ticket_id, to_id=service_id, from_label="Ticket", to_label="Service"))
     for pr_id, pr, service_id, service in pull_requests:
@@ -443,6 +445,8 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
 
 # Uncited tickets, and uncited pull requests, named per decision before "and N more".
 MAX_UNCITED = 8
+# Uncited work decision_pressure names before "and N more", most on topic first.
+PRESSURE_SHOWN = 3
 
 
 def uncited_work(graph, decision_id: str, service_ids: list[str], scopes: list[str]) -> tuple[list, list, int]:
@@ -451,12 +455,16 @@ def uncited_work(graph, decision_id: str, service_ids: list[str], scopes: list[s
     ``MAX_UNCITED`` of each, and how many there are in all. Open and recently updated tickets come
     first (a synced tracker can hold hundreds about one service), then pull requests by name. What
     ``decision_pressure`` tells for one decision and ``decision_health`` checks for every one."""
+    decision = _decision(graph, decision_id)
+    decided_at = to_millis(decision.decided_at) if decision else None
+    words = _tokens(f"{decision.name} {decision.summary}") if decision else set()
     tickets = graph.ro_query(
         f"""
         MATCH (ticket:Ticket)-[:ABOUT]->(service:Service)
         WHERE service.id IN $services AND {SCOPED.format(var="ticket")}
           AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(ticket)
-        RETURN ticket.id, ticket.name, service.id, service.name
+        RETURN ticket.id, ticket.name, service.id, service.name, coalesce(ticket.title, '') + ' ' + coalesce(ticket.summary, ''),
+               [ticket.created_at, ticket.source_updated_at, ticket.updated_at]
         ORDER BY CASE WHEN coalesce(ticket.state, 'open') = 'closed' THEN 1 ELSE 0 END,
                  coalesce(ticket.source_updated_at, ticket.updated_at, '') DESC, ticket.name
         """,
@@ -467,12 +475,45 @@ def uncited_work(graph, decision_id: str, service_ids: list[str], scopes: list[s
         MATCH (pr:PullRequest)-[:TOUCHES]->(service:Service)
         WHERE service.id IN $services AND {SCOPED.format(var="pr")}
           AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(pr)
-        RETURN pr.id, pr.name, service.id, service.name
+        RETURN pr.id, pr.name, service.id, service.name, coalesce(pr.title, '') + ' ' + coalesce(pr.summary, ''),
+               [pr.created_at, pr.merged_at, pr.updated_at]
         ORDER BY pr.name
         """,
         {"services": service_ids, "scopes": scopes, "id": decision_id},
     ).result_set
+    tickets = _pressing(tickets, decided_at, words)
+    pull_requests = _pressing(pull_requests, decided_at, words)
     return tickets[:MAX_UNCITED], pull_requests[:MAX_UNCITED], len(tickets) + len(pull_requests)
+
+
+def _pressing(rows: list, decided_at: int | None, words: set[str]) -> list[tuple]:
+    """The rows that can press on a decision, most on topic first: only work that landed or changed
+    after it was decided (work with no date at all is kept), ranked by the words it shares with the
+    decision's title and summary, then in the order given. Rows come back as (id, name, service id, service)."""
+    kept = []
+    for index, (node_id, name, service_id, service, text, stamps) in enumerate(rows):
+        times = [when for when in (_when(stamp) for stamp in stamps or []) if when is not None]
+        if decided_at is not None and times and max(times) <= decided_at:
+            continue
+        overlap = len(words & _tokens(f"{name} {text}"))
+        kept.append((-overlap, index, (node_id, name, service_id, service)))
+    return [row for _overlap, _index, row in sorted(kept)]
+
+
+def _when(stamp) -> int | None:
+    """Epoch milliseconds from a stored time: epoch seconds or milliseconds, or ISO 8601 text (Jira, GitHub)."""
+    if stamp is None or stamp == "":
+        return None
+    millis = to_millis(stamp)
+    if millis is not None:
+        return millis
+    try:
+        when = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return int(when.timestamp() * 1000)
 
 
 # --- record --------------------------------------------------------------------------------

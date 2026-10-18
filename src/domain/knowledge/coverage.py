@@ -19,6 +19,8 @@ SOURCE_NAMES = {"jira": "Jira", "hubspot": "HubSpot"}
 # The item each source holds, for the cap sentence.
 _ITEMS = {"jira": "issues", "hubspot": "records"}
 _KEY_NUMBER = re.compile(r"-(\d+)$")
+# The labels a connector writes IN_CONTAINER a container (connectors/base.ITEM_LABELS).
+ITEM_LABELS = ("Ticket", "Service", "Document")
 
 
 def _cap() -> int:
@@ -79,18 +81,22 @@ def capped_note(graph, scopes: list[str], node_ids: list[str]) -> str:
     ids = [node_id for node_id in dict.fromkeys(node_ids) if node_id]
     if not ids:
         return ""
-    rows = graph.ro_query(
-        f"""
-        MATCH (n)-[:IN_CONTAINER]->(c:Container)
-        WHERE n.id IN $ids AND {SCOPED.format(var="c")}
-        WITH DISTINCT c
-        MATCH (state:ConnectorState {{id: c.id}})
-        WHERE state.capped = true
-        RETURN coalesce(c.external_id, c.name, c.id), coalesce(c.source, '')
-        ORDER BY coalesce(c.external_id, c.name, c.id)
-        """,
-        {"ids": ids, "scopes": list(scopes)},
-    ).result_set
+    found: dict[str, tuple[str, str]] = {}
+    # One labelled lookup per item label, so each uses the id index instead of scanning every node.
+    for label in ITEM_LABELS:
+        for container_id, key, source in graph.ro_query(
+            f"""
+            MATCH (n:{label})-[:IN_CONTAINER]->(c:Container)
+            WHERE n.id IN $ids AND {SCOPED.format(var="c")}
+            WITH DISTINCT c
+            MATCH (state:ConnectorState {{id: c.id}})
+            WHERE state.capped = true
+            RETURN c.id, coalesce(c.external_id, c.name, c.id), coalesce(c.source, '')
+            """,
+            {"ids": ids, "scopes": list(scopes)},
+        ).result_set:
+            found[container_id] = (key, source)
+    rows = sorted(found.values())
     if not rows:
         return ""
     cap = f"{_cap():,}"
