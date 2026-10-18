@@ -37,7 +37,14 @@ const [base, shots] = process.argv.slice(2);
     assert.equal(await page.getAttribute("#step-org", "data-state"), "done");
     assert.equal(await page.textContent("#top-org"), "Acme Robotics");
     await page.screenshot({ path: `${shots}/start-step2-light-desktop.png`, fullPage: true });
-    step("start: company created, step 2 open");
+    step("start: company created (pending), step 2 open");
+    await page.click("#step-slack .btn-slack");
+    await page.waitForSelector("#step-tool[data-state=current]");
+    assert.equal(await page.getAttribute("#step-slack", "data-state"), "done");
+    await page.click("#step-tool .btn >> text=Connect HubSpot");
+    await page.waitForURL(/\/console\/connectors\/hubspot/);
+    await page.waitForSelector("#banner.ok");
+    step("start: Slack install confirms the owner; Connect HubSpot lands on its page");
     await ctx.close();
   }
 

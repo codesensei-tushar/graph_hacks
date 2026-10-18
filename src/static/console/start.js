@@ -11,7 +11,9 @@
   let me = null;
 
   function show(connections) {
-    const done = { org: Boolean(me.org), slack: Boolean(me.org && me.slack_connected), tool: connections.length > 0 };
+    // A new company's creator is "pending" until the Slack install confirms them; then owner.
+    const pending = me.role === "pending";
+    const done = { org: Boolean(me.org), slack: Boolean(me.org && me.slack_connected && !pending), tool: connections.length > 0 };
     let open = false;
     for (const name of ["org", "slack", "tool"]) {
       const state = done[name] ? "done" : open ? "todo" : "current";
@@ -20,7 +22,11 @@
       steps[name].toggleAttribute("aria-current", state === "current");
     }
     $("#setup").removeAttribute("aria-busy");
-    if (me.org) $("#org-done").textContent = `${me.org.name} is set up, with you as its ${me.role || "member"}.`;
+    if (me.org) {
+      $("#org-done").textContent = pending
+        ? `${me.org.name} is created. Adding the Slack app confirms you as its owner.`
+        : `${me.org.name} is set up, with you as its ${me.role || "member"}.`;
+    }
     if (done.tool) {
       const line = $("#tool-done");
       const names = [...new Set(connections.map((c) => C.sourceOf(c).name))].join(" and ");
@@ -53,7 +59,7 @@
   }
 
   async function connections() {
-    if (!me.org) return [];
+    if (!me.org || me.role === "pending") return [];
     try { return (await C.api("GET", "/console/api/connections")) || []; } catch (error) { return []; }
   }
 
@@ -81,22 +87,28 @@
       submit.setAttribute("aria-busy", "true");
       submit.textContent = "Creating…";
       try {
-        const org = await C.api("POST", "/console/api/orgs", { name: name.value.trim(), invite_code: code.value.trim() });
-        me.org = org;
-        me.role = me.role || "owner";
-        $("#top-org").textContent = org.name;
+        // The answer is the whole session again, rotated, with a new CSRF token.
+        me = C.remember(await C.api("POST", "/console/api/orgs", { name: name.value.trim(), invite_code: code.value.trim() }));
+        $("#top-org").textContent = me.org.name;
         $("#top-org").hidden = false;
         show(await connections());
         $("#step-slack h2").focus();
       } catch (error) {
-        if (error.status === 400 && /invite/i.test(error.message)) {
+        if (error.code === "invalid_invite") {
           code.setAttribute("aria-invalid", "true");
           fieldError.textContent = "That invite code is not valid, or it has already been used.";
           code.focus();
+        } else if (error.code === "bad_name") {
+          name.setAttribute("aria-invalid", "true");
+          C.banner(bannerBox, "Give the company a name of at least 2 characters, in plain text.", "error");
+          name.focus();
+        } else if (error.code === "already_in_org") {
+          C.banner(bannerBox, "Your Slack workspace already belongs to a company. Reload to continue its setup.", "error");
         } else if (error.status !== 401) {
           C.banner(bannerBox, error.message, "error");
         }
       } finally {
+
         submit.disabled = false;
         submit.removeAttribute("aria-busy");
         submit.textContent = "Create company";

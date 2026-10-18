@@ -83,11 +83,14 @@ def _now() -> str:
 
 def _denied(request: Request, state: dict, admin: bool = False, mutation: bool = False) -> JSONResponse | None:
     if state["scenario"] == "signedout":
-        return JSONResponse({"error": "sign in"}, status_code=401)
+        return JSONResponse({"detail": "signed_out"}, status_code=401)
+    # The real API's codes and shapes (src/domain/console/session.py, csrf.py).
     if mutation and request.headers.get("x-csrf-token") != state["me"]["csrf"]:
-        return JSONResponse({"error": "csrf"}, status_code=403)
+        return JSONResponse({"detail": "bad_csrf_token"}, status_code=403)
+    if admin and state["me"]["org"] and state["me"]["role"] == "pending":
+        return JSONResponse({"detail": "slack_install_pending"}, status_code=403)
     if admin and state["me"]["role"] not in ("owner", "admin"):
-        return JSONResponse({"error": "owners and admins only"}, status_code=403)
+        return JSONResponse({"detail": "admin_only"}, status_code=403)
     return None
 
 
@@ -149,14 +152,26 @@ async def create_org(request: Request):
         return denied
     body = await request.json()
     name, code = (body.get("name") or "").strip(), (body.get("invite_code") or "").strip()
-    if not name:
-        return JSONResponse({"error": "name the company"}, status_code=400)
+    if len(name) < 2:
+        return JSONResponse({"error": "bad_name"}, status_code=400)
+    if state["me"]["org"]:
+        return JSONResponse({"error": "already_in_org"}, status_code=409)
     if code.upper() != "BETA-QUILL-2026":
-        return JSONResponse({"error": "invite_code"}, status_code=400)
+        return JSONResponse({"error": "invalid_invite"}, status_code=400)
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    state["me"]["org"] = {"id": "org_01JBFAKE00", "name": name, "slug": slug}
-    state["me"]["role"] = "owner"
-    return state["me"]["org"]
+    # As the real route: the creator is "pending" until the Slack install confirms them, and the
+    # answer is the whole session again, rotated, with a new CSRF token.
+    state["me"].update(org={"id": "org_01JBFAKE00", "name": name, "slug": slug}, role="pending", csrf="fixture-csrf-token-2")
+    return JSONResponse(state["me"], status_code=201)
+
+
+@router.get("/slack/oauth/install")
+def slack_install(request: Request):
+    """Stands in for Slack's install screen: the install confirms the creator as owner."""
+    state = _scenario(request)
+    if state["me"]["org"]:
+        state["me"].update(role="owner", slack_connected=True)
+    return RedirectResponse("/console/start", status_code=303)
 
 
 @router.get("/console/api/connections")
