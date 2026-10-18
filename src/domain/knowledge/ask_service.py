@@ -264,7 +264,7 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
         return "none", {}
     first, rest = split_compound(text)
     if rest:
-        # "who owns billing and what breaks if auth goes down": the first question; the reply offers the second.
+        # "who owns billing and what breaks if auth goes down": the first question; the agent answers the second after it.
         return route(first, tickets)
     ask_who = _ASK_WHO.search(text)
     if ask_who and ask_who.start() > 0 and not coordination.pr_reference(text):
@@ -364,15 +364,16 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     return "who_knows", {"name": text}
 
 
-# A second question joined to the first: "..., and what breaks if auth goes down", "...; who knows X".
-# One that refers back ("and who else has worked on it") is the same question, and is not split.
+# A second question joined to the first: "..., and what breaks if auth goes down", "...; who knows X",
+# "... also who to contact". One about the first part's thing ("and who owns it") is split and asked
+# about that thing. One about more people ("and who else has worked on it") is the same question.
 _COMPOUND = re.compile(
-    r"^(?P<first>\S+(?:\s+\S+)+?)\s*(?:,?\s+and\s+(?:also\s+)?|;\s*|\?\s+(?:and\s+)?|,\s+(?:also\s+)?)"
+    r"^(?P<first>\S+(?:\s+\S+)+?)\s*(?:,?\s+and\s+(?:also\s+)?|;\s*|\?\s+(?:and\s+|also\s+)?|,\s+(?:also\s+)?|\s+also\s+)"
     r"(?P<rest>(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should)\b.+)$",
     re.IGNORECASE,
 )
 _QUESTION_START = re.compile(r"^\s*(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should|list|show|tell|explain|explore)\b", re.IGNORECASE)
-_REFERS_BACK = re.compile(r"\b(?:it|its|they|them|their|that|this|those|these|else|there|he|she|him|her)\b", re.IGNORECASE)
+_REFERS_BACK = re.compile(r"\b(?:they|them|their|those|these|else|there|he|she|him|her)\b", re.IGNORECASE)
 
 
 def split_compound(question: str) -> tuple[str, str | None]:
@@ -381,19 +382,17 @@ def split_compound(question: str) -> tuple[str, str | None]:
     if match is None or _REFERS_BACK.search(match.group("rest")) or not _QUESTION_START.match(match.group("first")):
         # "billing is failing, what changed" is one question with its context first.
         return question, None
-    return match.group("first").strip().rstrip(",;"), match.group("rest").strip()
-
-
-def offer_rest(question: str, result: ToolResult) -> ToolResult:
-    """A compound question answered in its first part offers the second as the next question."""
-    _first, rest = split_compound(question)
-    if rest and result.found:
-        result.answer = f"{result.answer} You also asked “{rest.rstrip('?')}”: ask it on its own for that answer."
-    return result
+    return match.group("first").strip().rstrip(",;?"), match.group("rest").strip()
 
 
 def ask(question: str, scopes: list[str]) -> ToolResult:
-    """Route by keywords and run the tool. The whole no-model path in one call."""
+    """Route by keywords and run the tool. The whole no-model path in one call.
+
+    A question in two parts is answered as the agent answers it, both parts (``compound.py``)."""
+    if split_compound(question.strip())[1]:
+        from src.domain.knowledge import agent
+
+        return agent.run_choice(agent.choose_with_keywords(question), question, scopes)[0]
     tool, args = route(question)
     if tool == "none":
         return ToolResult(tool="none", answer="Ask a question about the company graph.")
@@ -401,7 +400,7 @@ def ask(question: str, scopes: list[str]) -> ToolResult:
         result = _ROUTED[tool](args, scopes)
     if result.found and taken:
         result.answer = resolve.taken_note(taken, result.answer) + result.answer
-    return offer_rest(question, result)
+    return result
 
 
 def ticket_target(title: str, about: str, graph=None) -> Entity | None:

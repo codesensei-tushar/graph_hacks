@@ -1,5 +1,5 @@
 """What sits around an answer on a real FalkorDB: the memories shown under it (only those that
-mention its subject or a neighbour), the second half of a compound question offered next, a
+mention its subject or a neighbour), both halves of a compound question answered, a
 typo answered with the nearest name, and small talk answered as help on the ask page."""
 
 import unittest
@@ -69,13 +69,21 @@ class AnswerExtrasTest(unittest.TestCase):
 
     # --- 8: compound questions -------------------------------------------------------------------
 
-    def test_a_compound_question_answers_the_first_part_and_offers_the_second(self):
+    def test_a_compound_question_answers_both_parts(self):
         result = ask_service.ask("who owns billing and what breaks if auth goes down", ORG)
+        self.assertEqual(result.tool, "who_owns + blast_radius")
+        owner, blast = result.answer.split("\n\n")
+        self.assertTrue(owner.startswith("Billing Service is owned by Arjun Mehta."), result.answer)
+        self.assertTrue(blast.startswith("If Auth Service goes down, these stop with it:"), result.answer)
+        self.assertNotIn("You also asked", result.answer)
+        page = ask_api.answer_question("who owns billing and what breaks if auth goes down")
+        self.assertEqual(page.answer, result.answer)
+
+    def test_a_compound_question_offers_a_second_part_it_cannot_answer(self):
+        result = ask_service.ask("who owns billing and what breaks if the payments gateway goes down", ORG)
         self.assertEqual(result.tool, "who_owns")
         self.assertTrue(result.answer.startswith("Billing Service is owned by Arjun Mehta."), result.answer)
-        self.assertIn("You also asked “what breaks if auth goes down”: ask it on its own for that answer.", result.answer)
-        page = ask_api.answer_question("who owns billing and what breaks if auth goes down")
-        self.assertIn("You also asked", page.answer)
+        self.assertIn("You also asked “what breaks if the payments gateway goes down”: ask it on its own for that answer.", result.answer)
 
     def test_who_to_talk_to_after_a_preamble(self):
         result = ask_service.ask("I am new on payments and need to fix a bug, who should I talk to about the invoice worker", ORG)
