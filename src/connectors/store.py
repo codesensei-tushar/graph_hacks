@@ -181,14 +181,22 @@ def set_secret(install_id: str, secrets: dict) -> bool:
     return True
 
 
-def set_status(install_id: str, status: str, error: str | None = None) -> bool:
-    """``error`` is shown in the console: never put a credential or a vendor's raw text in it."""
+def set_status(install_id: str, status: str, error: str | None = None, *, only_from: tuple[str, ...] | None = None) -> bool:
+    """``error`` is shown in the console: never put a credential or a vendor's raw text in it.
+
+    An install that is ``removing`` never leaves it: its deletion is under way, and a sync step or a
+    request that finishes late must not bring it back. ``only_from`` narrows the change further
+    (a compare-and-set). Returns whether the status was written."""
     if status not in STATUSES:
         raise ValueError(f"bad status {status!r}")
     _, graph = connect()
     rows = graph.query(
-        "MATCH (c:ConnectorInstall {id: $id}) SET c.status = $status, c.last_error = $error, c.updated_at = $now RETURN c.id",
-        {"id": install_id, "status": status, "error": (error or None) and error[:300], "now": _now_ms()},
+        """
+        MATCH (c:ConnectorInstall {id: $id})
+        WHERE (c.status <> 'removing' OR $status = 'removing') AND ($from IS NULL OR c.status IN $from)
+        SET c.status = $status, c.last_error = $error, c.updated_at = $now RETURN c.id
+        """,
+        {"id": install_id, "status": status, "error": (error or None) and error[:300], "now": _now_ms(), "from": list(only_from) if only_from else None},
     ).result_set
     return bool(rows)
 

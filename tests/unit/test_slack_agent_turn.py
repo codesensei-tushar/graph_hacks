@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from src.domain.knowledge import agent, catalogue
-from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
+from src.domain.knowledge.dto import MemoryLine, PathStep, ToolResult, ToolSpec
 from src.domain.memory.writeback import SlackMemoryScope
 from src.domain.slack import agent_turn
 from src.domain.slack.compute import TurnRequest
@@ -64,7 +64,7 @@ def _request(question: str, **overrides) -> TurnRequest:
 
 def _quiet():
     return (
-        mock.patch.object(agent_turn, "search_brain", return_value={"results": []}),
+        mock.patch.object(agent_turn, "attached", return_value=[]),
         mock.patch.object(agent_turn, "channel_names", return_value={}),
     )
 
@@ -82,10 +82,10 @@ class AnswerTurnTest(unittest.TestCase):
             catalogue._TOOLS.pop(spec.name, None)
 
     def test_reply_names_the_tool_cites_the_path_and_dates_memories(self):
-        memory = {"memory": "billing retries moved to the invoice worker", "created_at": 1_760_000_000_000, "updated_at": 1_761_000_000_000, "container_tag": "org_shared", "author": "Bo"}
+        memory = MemoryLine(text="billing retries moved to the invoice worker", learned_at="2025-10-09", author="Bo", scope="org_shared")
         with (
             mock.patch.object(agent, "generate_object", return_value={"tool": "probe_read", "args": {"name": "billing"}}),
-            mock.patch.object(agent_turn, "search_brain", return_value={"results": [memory]}),
+            mock.patch.object(agent_turn, "attached", return_value=[memory]),
             mock.patch.object(agent_turn, "channel_names", return_value={}),
         ):
             outcome = agent_turn.answer_turn(_request("probe billing"))
@@ -161,7 +161,7 @@ class AnswerTurnTest(unittest.TestCase):
         try:
             with (
                 mock.patch.object(agent, "generate_object", return_value={"tool": "probe_miss", "args": {"name": "x"}}),
-                mock.patch.object(agent_turn, "search_brain") as search,
+                mock.patch.object(agent_turn, "attached") as search,
                 mock.patch.object(agent_turn, "channel_names", return_value={}),
             ):
                 outcome = agent_turn.answer_turn(_request("who knows x"))

@@ -141,6 +141,10 @@ QUESTIONS = [
     ("crm not 5", "who handles deals at enterprise scale", "who_owns", None),
     ("crm not 6", "customers complained about refunds", "who_knows", None),
     ("crm not 7", "accounts payable process", "who_knows", None),
+    # Compound and long questions: the first part, and the person to talk to over the preamble.
+    ("compound 1", "who owns billing and what breaks if auth goes down", "who_owns", None),
+    ("compound 2", "I am new on payments and need to fix a bug, who should I talk to about the invoice worker", "who_knows", None),
+    ("compound 3", "open tickets about billing", "find", None),
 ]
 
 

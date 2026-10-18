@@ -42,7 +42,7 @@ def _run_who_owns(args: dict, scopes: list[str]) -> ToolResult:
 
 
 def _run_who_knows(args: dict, scopes: list[str]) -> ToolResult:
-    return ask_service.who_knows(args["name"], scopes)
+    return ask_service.who_knows(args["name"], scopes, args.get("context"))
 
 
 def _run_decision_trace(args: dict, scopes: list[str]) -> ToolResult:
