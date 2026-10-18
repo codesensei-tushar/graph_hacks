@@ -57,6 +57,30 @@ class _ChipsOnTheSeed:
 class QuillfernChipsTest(_ChipsOnTheSeed, unittest.TestCase):
     company = quillfern
 
+    def test_a_chip_that_no_longer_answers_is_not_offered(self):
+        # Production's older seed has no billing retries decision; that chip is refused there.
+        self.addCleanup(seed.reset_and_seed, self.company)
+        _, graph = falkordb_client.connect()
+        graph.query("MATCH (d:Decision {name: 'Retry renewal webhooks inside the billing service'}) DETACH DELETE d")
+        dropped = "is the billing retries decision still the last word"
+        questions = ask_api.examples().questions
+        self.assertEqual(questions, [question for question in ask_api.EXAMPLES["quillfern"] if question != dropped])
+        self.assertEqual(questions[-1], "who knows the payments gateway")
+
+    def test_a_chip_that_raises_is_dropped_alone_and_logged(self):
+        broken = "which services are load-bearing"
+        answer_question = ask_api.answer_question
+
+        def ask(question, *args, **kwargs):
+            if question == broken:
+                raise RuntimeError("graph timed out")
+            return answer_question(question, *args, **kwargs)
+
+        with mock.patch.object(ask_api, "answer_question", side_effect=ask), self.assertLogs(ask_api.log, "WARNING") as logged:
+            questions = ask_api.examples().questions
+        self.assertEqual(questions, [question for question in ask_api.EXAMPLES["quillfern"] if question != broken])
+        self.assertIn(broken, logged.output[0])
+
 
 class CompanyBrainChipsTest(_ChipsOnTheSeed, unittest.TestCase):
     company = company_brain

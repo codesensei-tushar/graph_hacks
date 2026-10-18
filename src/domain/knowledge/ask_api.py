@@ -13,8 +13,12 @@ The surface is public, so it is protected here rather than in the route: a quest
 than ``MAX_QUESTION_CHARS`` is refused with ``QuestionTooLong``; keyword answers and the
 proof report are kept for ``CACHE_TTL_SECONDS`` per graph, so a chip clicked twice walks the
 graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``.
+
+The page offers an example chip only when it answers on the graph in use, so a chip whose
+data the live graph lacks stays hidden until a seed refresh brings it back.
 """
 
+import logging
 import math
 import re
 import threading
@@ -29,10 +33,13 @@ from src.domain.knowledge import agent, ask_service, catalogue, kinds
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
 from src.domain.knowledge.proof import ProofReport, run_proof
 
+log = logging.getLogger(__name__)
+
 DEFAULT_SCOPES = ("org_shared",)
 
 # Questions the page offers, per seeded company, in the order the demo asks them. Each
-# exercises one tool; the last names something the graph does not have.
+# exercises one tool; the last names something the graph does not have. ``examples()``
+# offers only the ones that answer on the graph in use.
 EXAMPLES: dict[str, list[str]] = {
     "quillfern": [
         "who owns billing, and who else has worked on it",
@@ -291,11 +298,28 @@ def demo_steps(company_id: str | None) -> list[dict[str, str]]:
 
 
 def examples() -> Examples:
-    """The seeded company and the questions to offer for it. An unknown company gets the Quillfern set."""
+    """The seeded company and the questions to offer for it. An unknown company gets the Quillfern set.
+
+    Chips are offered only when they answer: every question but the last is asked here and
+    dropped unless it is ``found``, so a graph missing a chip's data never offers it. The
+    last is the deliberate refusal and is always kept, unasked, as the last. Asking goes
+    through ``answer_question``'s cache, so each chip runs its tool at most once per cache
+    period and the click that follows is already answered.
+    """
     _, graph = connect()
     rows = graph.ro_query("MATCH (c:Company) RETURN c.id, c.name ORDER BY c.id LIMIT 1").result_set
     company_id, company_name = (rows[0][0], rows[0][1]) if rows else (None, None)
-    return Examples(company_id, company_name, list(EXAMPLES.get(company_id or "", EXAMPLES["quillfern"])))
+    *chips, refusal = EXAMPLES.get(company_id or "", EXAMPLES["quillfern"])
+    return Examples(company_id, company_name, [question for question in chips if _answers(question)] + [refusal])
+
+
+def _answers(question: str) -> bool:
+    """Whether an example chip answers on the graph in use. A chip that raises is dropped and logged."""
+    try:
+        return answer_question(question).found
+    except Exception as error:
+        log.warning("[ask] example chip dropped (%s): %s", error, question)
+        return False
 
 
 def answer_question(question: str, tool: str | None = None, use_model: bool = False, scopes=DEFAULT_SCOPES) -> AskAnswer:
