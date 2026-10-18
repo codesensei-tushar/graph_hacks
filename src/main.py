@@ -38,15 +38,22 @@ def _seed_if_empty() -> None:
         if nodes == 0:
             log.info("graph is empty; seeding %s (SEED_ON_STARTUP)", settings.seed_company)
             reset_and_seed(company_module(settings.seed_company))
-    # Every index and migration (src/db/schema.py) in the legacy org's graph.
-    schema.ensure()
+    # Every index (src/db/schema.py) in the legacy org's graph, now; its data migrations after
+    # startup, in the background, so /healthz is never held up by a big graph. A failure is logged
+    # and the app starts anyway: every reader already treats what a migration writes as optional.
+    try:
+        schema.ensure(migrate=False)
+    except Exception:
+        log.exception("[schema] index build failed for the legacy org; starting anyway")
+    schema.ensure_in_background()
     # The other orgs' graphs got theirs when they were created; this adds any index or migration
     # added since, and the Company node to orgs made before create_org wrote one.
     for org in _other_orgs():
         try:
-            orgs.build_org_indexes(org)
+            orgs.build_org_indexes(org, migrate=False)
         except Exception:
             log.exception("index build failed org=%s", org.id)
+        schema.ensure_in_background(org)
         try:
             orgs.ensure_company(org)
         except Exception:

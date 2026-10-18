@@ -156,12 +156,13 @@ def _slug_for(name: str) -> str:
     return f"{base}-{index}"
 
 
-def build_org_indexes(org: OrgRef) -> None:
-    """Every index and migration (``schema.ensure``) in ``org``'s graph, as main.py runs at startup."""
+def build_org_indexes(org: OrgRef, migrate: bool = True) -> None:
+    """Every index (and with ``migrate``, every migration: ``schema.ensure``) in ``org``'s graph. A new
+    org's graph is empty, so its migrations are instant; startup runs them in the background instead."""
     from src.db import schema
 
     with tenancy.org_context(org):
-        schema.ensure()
+        schema.ensure(migrate=migrate)
 
 
 def company_id(org: OrgRef) -> str:

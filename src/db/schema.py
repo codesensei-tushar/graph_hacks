@@ -13,6 +13,7 @@ Range indexes are what make ``(n:Label {id: $id})`` an index seek instead of a l
 """
 
 import logging
+import threading
 import time
 from collections.abc import Callable
 
@@ -91,13 +92,14 @@ def _backfill_changed_at(graph) -> None:
         while True:
             rows = graph.query(
                 f"MATCH (n:{label}) WHERE n.changed_at_ms IS NULL AND n.source_updated_at IS NOT NULL "
-                f"RETURN n.id, n.source_updated_at LIMIT {BATCH}"
+                f"RETURN ID(n), n.source_updated_at LIMIT {BATCH}"
             ).result_set
             if not rows:
                 break
-            stamps = [{"id": node_id, "at": changed_at_ms(str(updated)) or -1} for node_id, updated in rows]
-            graph.query(f"UNWIND $rows AS row MATCH (n:{label} {{id: row.id}}) SET n.changed_at_ms = row.at", {"rows": stamps})
-            if len(rows) < BATCH:
+            # By internal id: a node without an id is stamped too, so the next pass never finds it again.
+            stamps = [{"node": node, "at": changed_at_ms(str(updated)) or -1} for node, updated in rows]
+            done = graph.query("UNWIND $rows AS row MATCH (n) WHERE ID(n) = row.node SET n.changed_at_ms = row.at", {"rows": stamps})
+            if not getattr(done, "properties_set", 0) or len(rows) < BATCH:
                 break
 
 
@@ -173,6 +175,26 @@ def ensure(graph=None, migrate: bool = True) -> int:
         log.info("[schema] %s: migration %d (%s) in %.1fs", getattr(graph, "name", "?"), number, what, time.monotonic() - started)
         current = number
     return current
+
+
+def ensure_in_background(org=None) -> threading.Thread:
+    """``ensure(migrate=True)`` for ``org`` (the legacy org's graph when None) in a daemon thread: a
+    big graph's data migrations never hold up startup, and a failure is logged, never raised."""
+    from src.core import tenancy
+
+    def run() -> None:
+        try:
+            if org is None:
+                ensure()
+            else:
+                with tenancy.org_context(org):
+                    ensure()
+        except Exception:
+            log.exception("[schema] migrations failed for %s; they run again on the next start", getattr(org, "id", "legacy"))
+
+    thread = threading.Thread(target=run, name=f"schema-{getattr(org, 'id', 'legacy')}", daemon=True)
+    thread.start()
+    return thread
 
 
 def _fulltext_indexes(graph) -> None:

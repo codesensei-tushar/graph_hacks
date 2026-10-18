@@ -57,7 +57,8 @@ class SchemaTest(unittest.TestCase):
             CREATE (:Service {id: 'billing', name: 'Billing'}), (:Person {id: 'ada', name: 'Ada'}),
                    (:Ticket {id: 't1', name: 'T-1', scope: 'slack_channel_C1'}), (:Memory {id: 'm1', text: 'kept as is'}),
                    (:Ticket {id: 'j1', name: 'PAY-1', scope: 'org_internal', source_updated_at: '2026-09-01T10:00:00.000+0000'}),
-                   (:Ticket {id: 'j2', name: 'PAY-2', scope: 'org_internal', source_updated_at: 'not a time'})
+                   (:Ticket {id: 'j2', name: 'PAY-2', scope: 'org_internal', source_updated_at: 'not a time'}),
+                   (:Ticket {name: 'no id', scope: 'org_internal', source_updated_at: '2026-09-01T10:00:00Z'})
             """
         )
         self.assertEqual(schema.version(old), 0)
@@ -69,8 +70,8 @@ class SchemaTest(unittest.TestCase):
         scopes = dict(old.ro_query("MATCH (n) WHERE n.id IN ['billing', 'ada', 't1', 'm1'] RETURN n.id, n.scope").result_set)
         self.assertEqual(scopes, {"billing": "org_shared", "ada": "org_shared", "t1": "slack_channel_C1", "m1": None})
         # Synced before changed_at_ms: it is filled from the source time, -1 when that cannot be read.
-        changed = dict(old.ro_query("MATCH (t:Ticket) RETURN t.id, t.changed_at_ms").result_set)
-        self.assertEqual(changed, {"t1": None, "j1": 1788256800000, "j2": -1})
+        changed = dict(old.ro_query("MATCH (t:Ticket) RETURN coalesce(t.id, t.name), t.changed_at_ms").result_set)
+        self.assertEqual(changed, {"t1": None, "j1": 1788256800000, "j2": -1, "no id": 1788256800000})  # an id-less node too, and the loop ends
 
     def test_running_it_again_changes_nothing(self):
         graph = _graph(FRESH)
@@ -93,6 +94,18 @@ class SchemaTest(unittest.TestCase):
         finally:
             falkordb_client.scratch_graph(org.graph).delete()
             tenancy.control_graph().query("MATCH (o:Org {id: $id}) DETACH DELETE o", {"id": org.id})
+
+    def test_background_migrations_run_and_a_failure_is_only_logged(self):
+        from unittest import mock
+
+        graph = _graph(FRESH)
+        graph.query("CREATE (:Person {id: 'ada', name: 'Ada'})")
+        self.assertEqual(schema.ensure(graph, migrate=False), 0)
+        with mock.patch.object(falkordb_client, "graph_name", return_value=FRESH):
+            schema.ensure_in_background().join(30)
+        self.assertEqual(schema.version(graph), schema.LATEST)
+        with mock.patch.object(schema, "ensure", side_effect=RuntimeError("boom")), self.assertLogs("src.db.schema", level="ERROR"):
+            schema.ensure_in_background().join(30)
 
     def test_a_migration_runs_once(self):
         graph = _graph(FRESH)

@@ -169,8 +169,24 @@ class EnsureIndexesTest(unittest.TestCase):
         calls = []
         with (
             mock.patch.object(main, "settings", replace(main.settings, seed_on_startup=False)),
-            mock.patch.object(main.schema, "ensure", side_effect=lambda *args, **kwargs: calls.append("schema")),
+            mock.patch.object(main.schema, "ensure", side_effect=lambda *args, **kwargs: calls.append(("indexes", kwargs))),
+            mock.patch.object(main.schema, "ensure_in_background", side_effect=lambda *args: calls.append(("migrations", args))),
             mock.patch.object(main, "_other_orgs", return_value=[]),
         ):
             main._seed_if_empty()
-        self.assertEqual(calls, ["schema"])
+        # Indexes now, the data migrations after startup.
+        self.assertEqual(calls, [("indexes", {"migrate": False}), ("migrations", ())])
+
+    def test_startup_survives_a_schema_failure(self):
+        from dataclasses import replace
+
+        from src import main
+
+        with (
+            mock.patch.object(main, "settings", replace(main.settings, seed_on_startup=False)),
+            mock.patch.object(main.schema, "ensure", side_effect=RuntimeError("index build failed")),
+            mock.patch.object(main.schema, "ensure_in_background"),
+            mock.patch.object(main, "_other_orgs", return_value=[]),
+            self.assertLogs("src.main", level="ERROR"),
+        ):
+            main._seed_if_empty()

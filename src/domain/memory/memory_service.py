@@ -57,10 +57,11 @@ class Memory:
 
 
 def ensure_indexes() -> None:
-    """The memory layer's indexes, and every other one: they all live in ``schema.INDEXES``."""
+    """The memory layer's indexes, and every other one: they all live in ``schema.INDEXES``. Indexes
+    only: data migrations run at startup (``schema.ensure_in_background``), never as a side effect."""
     from src.db import schema
 
-    schema.ensure()
+    schema.ensure(migrate=False)
 
 
 def worth_keeping(text: str) -> bool:
