@@ -89,6 +89,22 @@ def depth_in(question: str) -> int | None:
     return None
 
 
+def depth_capped(question: str, depth=None) -> bool:
+    """Whether the hops asked for, in the question or the argument, were more than ``MAX_DEPTH``."""
+    asked = []
+    for value in (depth, *(match.group(1) for pattern in (_HOPS, _DEPTH) for match in [pattern.search(question or "")] if match)):
+        try:
+            asked.append(int(_WORD_NUMBERS.get(str(value).lower(), value)))
+        except (TypeError, ValueError):
+            continue
+    return any(number > MAX_DEPTH for number in asked)
+
+
+def capped_note(question: str, depth=None) -> str:
+    """" (Capped at 6 hops.)" when more were asked for, so a clamp is never silent."""
+    return f" (Capped at {MAX_DEPTH} hops.)" if depth_capped(question, depth) else ""
+
+
 def asks_for_dependencies(question: str) -> bool:
     """Whether a question asks what a service depends on, rather than what depends on it."""
     return bool(_NEEDS.search(question or ""))
@@ -98,6 +114,14 @@ def asks_for_dependencies(question: str) -> bool:
 
 
 def blast_radius(question: str, scopes: list[str], depth=None, direction=None) -> ToolResult:
+    """``_blast_radius``, saying so when the hops asked for were capped."""
+    result = _blast_radius(question, scopes, depth, direction)
+    if result.found:
+        result.answer += capped_note(question, depth)
+    return result
+
+
+def _blast_radius(question: str, scopes: list[str], depth=None, direction=None) -> ToolResult:
     """What stops working if a service goes down, following DEPENDS_ON for ``depth`` hops.
 
     Services and systems that depend on it are listed together by hop, in the same words

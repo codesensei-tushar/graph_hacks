@@ -15,7 +15,7 @@ class RouteTest(unittest.TestCase):
             "what breaks if auth goes down, two hops out": ("blast_radius", {"name": "what breaks if auth goes down, two hops out", "depth": 2}),
             "which services are load bearing": ("load_bearing", {"limit": algorithms.DEFAULT_LOAD_BEARING}),
             "how is maya connected to the invoice worker": ("path_between", {"source": "how is maya connected to the invoice worker", "target": ""}),
-            "what have we said about billing": ("related_memories", {"name": "what have we said about billing"}),
+            "what have we said about billing": ("related_memories", {"name": "billing"}),
             "who said the retries were flaky": ("recall", {"query": "who said the retries were flaky"}),
             "why did we cut vector recall": ("decision_trace", {"topic": "why did we cut vector recall"}),
             "is the billing retries decision still the last word": (
@@ -393,6 +393,18 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("who owns the enterprise accounts")[0], "who_owns")
         self.assertEqual(ask_service.route("list the services in payments"), ("find", {"label": "Service", "team": "payments"}))
 
+    def test_a_bare_key_and_whats_open_in_a_project(self):
+        self.assertEqual(ask_service.route("PAY-999"), ("ticket_status", {"name": "PAY-999"}))
+        self.assertEqual(ask_service.route("PLAT-7?"), ("ticket_status", {"name": "PLAT-7?"}))
+        self.assertNotEqual(ask_service.route("utf-8")[0], "ticket_status")
+        self.assertNotEqual(ask_service.route("PR-45")[0], "ticket_status")
+        self.assertEqual(ask_service.route("what's open in PLAT"), ("find", {"label": "Ticket", "state": "open", "project": "PLAT"}))
+        self.assertEqual(ask_service.route("what is open in the PAY project"), ("find", {"label": "Ticket", "state": "open", "project": "PAY"}))
+        # A word that is not a project key keeps the route it had.
+        for question in ("what's open in billing", "what's open in payments"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("who_knows", {"name": question}))
+
     def test_other_ticket_questions_keep_their_tools(self):
         cases = {
             "who knows about TKT-102": "who_knows",
@@ -401,6 +413,68 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
             "everything on TKT-102": "explore",
             "who should know about notebook#45": "who_should_know",
             "what is PR-45": "who_knows",
+        }
+        for question, tool in cases.items():
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+
+
+class PeopleInsightsRouteTest(unittest.TestCase):
+    def test_a_ranking_question_picks_its_measure(self):
+        cases = {
+            "who reviewed the most code": "reviews",
+            "top reviewers": "reviews",
+            "who owns the most": "owns",
+            "who wrote the most": "authored",
+            "top contributors": "authored",
+            "who approved the most decisions": "decisions",
+            "who is the busiest person": "load",
+            "who has the most open tickets": "load",
+            "who has the most on their plate": "load",
+            "who bridges the most teams": "bridges",
+            "who knows the most": "holds",
+            "who has worked on the most": "holds",
+        }
+        for question, measure in cases.items():
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("people_ranking", {"measure": measure, "team": question}))
+
+    def test_who_to_go_to_now_is_go_to(self):
+        for question in (
+            "who is the go-to for postgres right now",
+            "who's the go to person for billing",
+            "who last worked on billing",
+            "when did we last touch the auth service",
+            "who is working on billing currently",
+            "who has recently touched the invoice worker",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("go_to", {"name": question}))
+
+    def test_newest_decisions_and_unowned_services_are_find(self):
+        self.assertEqual(ask_service.route("what is the newest decision"), ("find", {"label": "Decision", "standing": True, "limit": 1}))
+        self.assertEqual(ask_service.route("show me the latest decisions"), ("find", {"label": "Decision", "standing": True}))
+        for question in ("which services have no owner", "what services are unowned", "list services without an owner"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("find", {"label": "Service", "owner": "none"}))
+
+    def test_a_team_reaches_the_risk_map_and_the_company_view_stays_bare(self):
+        for question in ("what are the biggest risks for the payments team", "risk map for platform"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("risk_map", {"team": question}))
+        self.assertEqual(ask_service.route("what are our biggest risks"), ("risk_map", {}))
+        self.assertEqual(ask_service.route("bus factor across the company"), ("risk_map", {}))
+
+    def test_neighbouring_questions_keep_their_tools(self):
+        cases = {
+            "who knows the most about billing": "who_knows",
+            "what was the latest decision about billing": "decision_trace",
+            "who knows billing": "who_knows",
+            "who owns billing": "who_owns",
+            "who should I ask about billing": "who_knows",
+            "what changed in billing lately": "what_changed",
+            "tickets with no owner": "who_owns",
+            "who is arjun": "who_knows",
         }
         for question, tool in cases.items():
             with self.subTest(question=question):

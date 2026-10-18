@@ -45,10 +45,15 @@ class FakeJiraClient:
 
     def projects(self, keys) -> list[dict]:
         keys = set(keys)
-        return [project for project in load("projects.json")["values"] if project["key"] in keys]
+        return [self._with_insight(project) for project in load("projects.json")["values"] if project["key"] in keys]
 
     def all_projects(self, limit: int = 500) -> list[dict]:
-        return load("projects.json")["values"][:limit]
+        return [self._with_insight(project) for project in load("projects.json")["values"][:limit]]
+
+    def _with_insight(self, project: dict) -> dict:
+        """As ``project/search?expand=insight`` answers: the project's issue count under ``insight``."""
+        count = sum(1 for issue in self.issues if issue["fields"]["project"]["id"] == project["id"])
+        return {**project, "insight": {"totalIssueCount": count, "lastIssueUpdateTime": "2026-10-18T06:00:00.000+0000"}}
 
     def search_page(self, jql: str, next_page_token: str | None = None, max_results: int = 100, fields=None) -> dict:
         if self.rejected:

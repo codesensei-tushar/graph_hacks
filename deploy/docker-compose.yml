@@ -40,6 +40,9 @@ services:
       PUBLIC_URL: https://brain.noobsurd.space
       # Production serves Quillfern: /ops/seed, /ops/import and `onboard team:` all join this company.
       SEED_COMPANY: quillfern
+      # A graph write with no org in context raises instead of landing in the legacy org's graph
+      # (src/core/tenancy.py). Reads keep the fallback; the legacy-only routes set their org.
+      TENANCY_WRITE_STRICT: "1"
     depends_on:
       falkordb:
         condition: service_healthy

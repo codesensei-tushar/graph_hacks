@@ -27,6 +27,9 @@ from src.core.config import settings
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 CONSOLE_DIR = STATIC_DIR / "console"
 PRIVACY = STATIC_DIR / "privacy.html"
+# Where privacy questions and deletion requests go: the one place to change it. /privacy fills
+# every {{contact}} in privacy.html with it.
+PRIVACY_CONTACT = "privacy@refactron.dev"
 
 CSP = "default-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self' https://slack.com"
 HEADERS = {
@@ -142,7 +145,7 @@ for _route, _name in PAGES.items():
 
 @router.get("/privacy")
 def privacy():
-    return HTMLResponse(render(PRIVACY.read_text(), console_enabled()), headers=HEADERS)
+    return HTMLResponse(render(PRIVACY.read_text().replace("{{contact}}", PRIVACY_CONTACT), console_enabled()), headers=HEADERS)
 
 
 def fixtures_enabled() -> bool:

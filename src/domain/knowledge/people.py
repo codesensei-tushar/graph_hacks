@@ -66,7 +66,12 @@ def describe(entity: Entity) -> str:
 
 
 def unlinked_hint(account: Entity) -> str:
-    """The sentence every answer about an unlinked user ends with: how an admin links them."""
+    """The sentence every answer about an unlinked user ends with: how an admin links them. A console
+    org links people on its People screen; the env-configured legacy org in CONNECTOR_*_PEOPLE."""
+    from src.core import tenancy  # the org in context decides where linking happens
+
+    if not tenancy.is_legacy():
+        return f"{account.name} is not linked to a person yet; an admin can link them in Console → People."
     sources = [source for source, tool in SOURCE_NAMES.items() if tool in _tools(account)] or ["hubspot"]
     settings = " or ".join(f"{PEOPLE_SETTINGS[source][0]} ({PEOPLE_SETTINGS[source][1]})" for source in sources if source in PEOPLE_SETTINGS)
     return f"{account.name} is not linked to a person yet; an admin can link them in {settings}."

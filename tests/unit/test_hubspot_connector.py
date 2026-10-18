@@ -7,6 +7,7 @@ from unittest import mock
 from src.connectors import registry
 from src.connectors.base import Container, CredentialsRejected, Install, InstallInfo
 from src.connectors.hubspot import connector as hubspot
+from src.connectors.hubspot import mapping
 from src.connectors.http import HttpError
 from tests.fixtures.hubspot.fake_hubspot import SERVER_MS, FakeHubSpot
 
@@ -49,12 +50,26 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("pat-na1-x", repr(install))
 
     def test_credentials_and_the_one_portal_container(self):
-        connector = _connector(FakeHubSpot())
+        fake = FakeHubSpot()
+        connector = _connector(fake)
         self.assertEqual(connector.check_credentials(INSTALL), InstallInfo("HubSpot portal 24681357", "https://app.hubspot.com"))
+        in_scope = fake.total("companies", mapping.scope_filters())
+        self.assertGreater(in_scope, 0)
         self.assertEqual(
             connector.containers(INSTALL),
-            [Container("hubspot:default:container:24681357", "HubSpot portal 24681357", "24681357", "https://app.hubspot.com/contacts/24681357/companies", "portal")],
+            [
+                Container(
+                    "hubspot:default:container:24681357", "HubSpot portal 24681357", "24681357", "https://app.hubspot.com/contacts/24681357/companies", "portal",
+                    available=in_scope,
+                )
+            ],
         )
+
+    def test_a_failed_company_count_is_no_count_not_a_failed_listing(self):
+        fake = FakeHubSpot()
+        connector = _connector(fake)
+        with mock.patch.object(fake, "total", side_effect=RuntimeError("429")):
+            self.assertIsNone(connector.containers(INSTALL)[0].available)
 
     def test_no_portal_id_is_an_error_not_a_new_container(self):
         fake = FakeHubSpot()

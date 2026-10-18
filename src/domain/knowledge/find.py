@@ -151,6 +151,7 @@ _BLOCKERS = _q(
     """
 )
 _ACCOUNTS_OF ="MATCH (a)-[:IS]->(p:Person {id: $id}) RETURN a.id"
+_OWNED = "MATCH (:Person)-[:OWNS]->(x:Service) WHERE x.id IN $ids RETURN DISTINCT x.id"
 
 _NOUNS = {
     "Service": ("service", "services"), "Ticket": ("ticket", "tickets"), "Decision": ("decision", "decisions"),
@@ -159,6 +160,8 @@ _NOUNS = {
 }
 _KIND_PLURALS = {"process": "processes", "policy": "policies"}
 _TRUE = frozenset({"true", "yes", "1", "standing", "current"})
+# owner values that ask for the services nobody owns, rather than naming a person.
+_NO_OWNER = frozenset({"none", "nobody", "no one", "noone", "unowned", "no owner"})
 _FALSE = frozenset({"false", "no", "0", "replaced", "superseded"})
 
 
@@ -176,8 +179,12 @@ class Row:
 
 
 def find(label, filters: dict, scopes: list[str]) -> ToolResult:
-    """The nodes of ``label`` that pass every filter in ``filters``, cited by the edges that make them pass."""
+    """The nodes of ``label`` that pass every filter in ``filters``, cited by the edges that make them pass.
+
+    ``limit`` (1..MAX_ROWS) caps how many are named: decisions come newest first, so a limit of
+    one is "the newest decision". A Service ``owner`` of "none" lists the services nobody owns."""
     filters = {key: value for key, value in (filters or {}).items() if value is not None and value != ""}
+    limit = _limit(filters.pop("limit", None))
     chosen = _label(label)
     if chosen is None:
         # A tool named outright gets the question in its first argument: read the list it asks for from it.
@@ -194,6 +201,9 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
         return ToolResult(tool=TOOL, answer=f"{plural} {takes}; not by {join_names(unknown)}.", found=False)
 
     enums: dict[str, object] = {}
+    if chosen == "Service" and str(filters.get("owner", "")).strip().lower() in _NO_OWNER:
+        filters.pop("owner")
+        enums["unowned"] = True
     for key, value in filters.items():
         if allowed[key].target is None:
             checked = _enum(chosen, key, value)
@@ -259,7 +269,7 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
             edges.setdefault(node_id, []).extend(cited)
 
     ordered = sorted(rows.values(), key=lambda row: (-(row.decided_at or 0), row.name.lower()) if chosen == "Decision" else (row.name.lower(),))
-    listed = ordered[:MAX_ROWS]
+    listed = ordered[:limit]
     result = ToolResult(tool=TOOL, answer="", candidates=candidates)
     if not named and listed:
         for node_id, cited in graph.ro_query(CONTEXT[chosen], {"ids": [row.id for row in listed], "scopes": scopes}).result_set:
@@ -334,6 +344,13 @@ def stage_key(value) -> str:
     return _STAGE_WORDS.get(text, text)
 
 
+def _limit(value) -> int:
+    try:
+        return max(1, min(MAX_ROWS, int(value)))
+    except (TypeError, ValueError):
+        return MAX_ROWS
+
+
 def _state(state, merged) -> str:
     if merged:
         return "merged"
@@ -355,6 +372,9 @@ def _apply_enums(graph, label: str, rows: dict[str, Row], enums: dict, scopes: l
     if "standing" in enums:
         replaced = _replaced(graph, list(rows), scopes)
         rows = {node_id: row for node_id, row in rows.items() if (node_id not in replaced) == enums["standing"]}
+    if enums.get("unowned"):
+        owned = {row[0] for row in graph.ro_query(_OWNED, {"ids": list(rows)}).result_set}
+        rows = {node_id: row for node_id, row in rows.items() if node_id not in owned}
     return rows
 
 
@@ -382,6 +402,8 @@ def _noun(label: str, enums: dict, count: int) -> str:
         adjectives.append("blocked" if enums["blocked"] else "unblocked")
     if "status" in enums:
         adjectives.append(_STAGE_LABELS.get(enums["status"], enums["status"]))
+    if enums.get("unowned"):
+        adjectives.append("unowned")
     return " ".join([*adjectives, word])
 
 

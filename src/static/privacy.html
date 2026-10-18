@@ -44,7 +44,7 @@
       <ul>
         <li><b>Slack sign-in.</b> Your Slack user ID, your workspace's ID, your name and your email address, so we know who you are and which company you belong to.</li>
         <li><b>The Slack app</b>, when a workspace adds it: messages that mention it or are sent to it, and messages in the channels it is added to, so it can answer and remember what was decided. What comes from a private channel is only ever shown to members of that channel.</li>
-        <li><b>Jira</b>, read-only, for the projects an admin picks: issues with their key, summary, description, status, components, reporter and assignee, and the names of those people.</li>
+        <li><b>Jira</b>, read-only, for the projects an admin picks: issues with their key, summary, description, status, components, reporter and assignee, and the names and email addresses of those people. We read the email addresses to link each Jira account to the same person in Slack.</li>
         <li><b>HubSpot</b>, read-only: companies, deals and their owners (names and email addresses), and which company each deal belongs to.</li>
       </ul>
       <p>We never write to Jira or HubSpot, and we ask each for the narrowest read access that does the job.</p>
@@ -59,11 +59,14 @@
         <li>When a question is answered with the help of a language model, the question and the parts of the graph needed to answer it are sent to our model provider, Anthropic, under its commercial API terms.</li>
       </ul>
 
+      <h2>How long it is kept</h2>
+      <p>What a tool brings in is kept while it stays connected. What Company Brain remembers from Slack conversations is kept until it is deleted: email <a href="mailto:{{contact}}">{{contact}}</a> to have memories, a person or a whole company deleted, and say which workspace you are in.</p>
+
       <h2>Removing it</h2>
-      <p>An admin can disconnect a tool in the console at any time. Disconnecting deletes everything that tool brought into the graph, its tokens and its settings. Removing the Slack app from a workspace stops it reading that workspace. To have a whole company's data deleted, contact us below.</p>
+      <p>An admin can disconnect, in the console, any tool that was connected in the console. Disconnecting deletes everything that connection brought into the graph, its tokens and its settings. Removing the Slack app from a workspace stops it reading that workspace; what it already remembers stays until you ask us to delete it.</p>
 
       <h2>Contact</h2>
-      <p>For questions about this notice, or to ask for your data to be deleted, open an issue on the project's <a href="https://github.com/codesensei-tushar/graph_hacks/issues">GitHub repository</a>.</p>
+      <p>For questions about this notice, or to ask for your data to be deleted, email <a href="mailto:{{contact}}">{{contact}}</a>. Requests are handled privately, never in a public tracker.</p>
     </div>
   </div>
 </main>

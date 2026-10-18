@@ -132,10 +132,10 @@ class WiringTest(unittest.TestCase):
         self.assertIn('el("ul", { class: "next-list", "aria-label": label })', self.answer_js)
         self.assertIn("const MAX_NEXT = 3;", self.answer_js)
 
-    def test_the_row_comes_after_the_edge_lines_and_before_the_footer(self):
+    def test_the_row_comes_after_the_footer_so_the_recording_frame_keeps_its_provenance(self):
         render = self.answer_js[self.answer_js.index("function render(out, data, question, opts)"):]
-        self.assertLess(render.index("BrainGraph.renderPath("), render.index("chipRow("))
-        self.assertLess(render.index("chipRow("), render.index('el("p", { class: "footer-line" })'))
+        self.assertLess(render.index("BrainGraph.renderPath("), render.index("out.append(footer);"))
+        self.assertLess(render.index("out.append(footer);"), render.index("chipRow("))
 
 
 class WalkTest(unittest.TestCase):
@@ -162,12 +162,12 @@ class WalkTest(unittest.TestCase):
         for storage in ("localStorage", "sessionStorage"):
             self.assertNotIn(storage, self.app_js[self.app_js.index("// --- The walk"):self.app_js.index("async function ask(")])
 
-    def test_your_walk_comes_after_ask_next_and_before_the_footer(self):
-        # answer.js draws the trail the page passes between "Ask next" and the footer; the page passes its walk.
+    def test_your_walk_comes_after_ask_next_which_comes_after_the_footer(self):
+        # answer.js draws the trail the page passes after the footer and "Ask next"; the page passes its walk.
         answer_js = (STATIC / "answer.js").read_text()
         render = answer_js[answer_js.index("function render(out, data, question, opts)"):]
+        self.assertLess(render.index("out.append(footer);"), render.index("chipRow("))
         self.assertLess(render.index("chipRow("), render.index("opts.trail()"))
-        self.assertLess(render.index("opts.trail()"), render.index('el("p", { class: "footer-line" })'))
         self.assertIn("trail: walkRow,", self.app_js)
         self.assertIn('el("nav", { class: "next walk", "aria-label": "Your walk" })', self.app_js)
         self.assertIn('item.setAttribute("aria-current", "step");', self.app_js)

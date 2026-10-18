@@ -185,7 +185,7 @@
     const footer = $(".footer-line", out);
     if (!opts.isCurrent(asked) || !footer || $(".next-list", out)) return;
     const next = insteadOf(data, asked, opts.examples());
-    if (next.length) out.insertBefore(chipRow("Try instead", next, opts.onAsk), $(".walk", out) || footer);
+    if (next.length) out.insertBefore(chipRow("Try instead", next, opts.onAsk), $(".walk", out));
   }
 
   // "Ask next" after an answer, "Try instead" after a refusal: a labelled row of question chips.
@@ -211,7 +211,10 @@
     const onAsk = opts.onAsk;
     out.replaceChildren();
     if (data.notice) out.append(el("p", { class: "notice" }, data.notice));
-    out.append(el("p", { class: data.found ? "text" : "text refused" }, data.answer));
+    // A question in two parts answers each in its own paragraph, in order.
+    for (const part of data.parts && data.parts.length ? data.parts : [data]) {
+      out.append(el("p", { class: part.found ? "text" : "text refused" }, part.answer));
+    }
     // risk_map and person_profile return the same grid shape; one table draws both.
     if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: onAsk });
 
@@ -235,19 +238,20 @@
       out.append(list);
     }
 
-    // After the edge lines and before the footer, so the answer text, the drawing and its head
-    // stay where the recording frames them. A refusal offers its nearest names as questions.
-    const next = data.found ? nextQuestions(data, question) : insteadOf(data, question, opts.examples ? opts.examples() : []);
-    if (next.length) out.append(chipRow(data.found ? "Ask next" : "Try instead", next, onAsk));
-    else if (!data.found && opts.examplesReady) opts.examplesReady.then(() => insteadLater(out, data, question, opts));
-    const trail = opts.trail ? opts.trail() : null;
-    if (trail) out.append(trail);
-
     const picker = data.picked_by === "model" ? "the model" : data.picked_by === "caller" ? "you" : "keywords";
     const read = (data.scopes || []).map((scope) => labels[scope] || scope).join(", ");
     const footer = el("p", { class: "footer-line" });
     footer.append("Tool ", el("code", {}, data.tool), ` · picked by ${picker} · read from ${read}`);
     out.append(footer);
+
+    // After the footer, so the answer text, the drawing, its head and the footer's provenance stay
+    // where the recording frames them, and a frame that is cut cuts the optional rows. A refusal
+    // offers its nearest names as questions.
+    const next = data.found ? nextQuestions(data, question) : insteadOf(data, question, opts.examples ? opts.examples() : []);
+    if (next.length) out.append(chipRow(data.found ? "Ask next" : "Try instead", next, onAsk));
+    else if (!data.found && opts.examplesReady) opts.examplesReady.then(() => insteadLater(out, data, question, opts));
+    const trail = opts.trail ? opts.trail() : null;
+    if (trail) out.append(trail);
   }
 
   window.BrainAnswer = { render, chip, chipRow, copyOut, nextQuestions, insteadOf };
