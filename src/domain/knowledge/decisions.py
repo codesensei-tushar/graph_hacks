@@ -661,7 +661,7 @@ def record_decision(args: dict, scopes: list[str]) -> ToolResult:
             {"c": channel_id, "d": decision_id},
         )
     for source in sources:
-        graph.query("MATCH (d:Decision {id: $d}), (s {id: $s}) MERGE (d)-[:BASED_ON]->(s)", {"d": decision_id, "s": source.id})
+        graph.query(f"MATCH (d:Decision {{id: $d}}), (s:{resolve.label_of(source)} {{id: $s}}) MERGE (d)-[:BASED_ON]->(s)", {"d": decision_id, "s": source.id})
     came_from = source_message(graph, channel_id, args.get("asker_slack_user_id"), decided_at, args.get("source_ts"))
     if came_from is not None:
         graph.query("MATCH (d:Decision {id: $d}), (m:Memory {id: $m}) MERGE (d)-[:RECORDED_FROM]->(m)", {"d": decision_id, "m": came_from.memory_id})

@@ -209,7 +209,9 @@ def read(graph, target: Entity, scopes: list[str], result: ToolResult) -> Ticket
 
     for rel, who_id, who, who_label, source in graph.ro_query(
         f"""
-        MATCH (who)-[r:ASSIGNED|OPENED|WORKED_ON]->(:Ticket {{id: $id}})
+        MATCH (ticket:Ticket {{id: $id}})
+        WITH ticket
+        MATCH (who)-[r:ASSIGNED|OPENED|WORKED_ON]->(ticket)
         WHERE labels(who)[0] IN ['Person', 'GitHubUser', 'ExternalUser'] AND {SCOPED.format(var="who")}
         OPTIONAL MATCH (who)-[:IS]->(person:Person)
         WHERE {SCOPED.format(var="person")}

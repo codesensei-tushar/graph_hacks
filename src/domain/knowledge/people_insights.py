@@ -390,10 +390,13 @@ def _touches(graph, target: Entity, scopes: list[str]) -> list[Touch]:
     """Every dated thing anyone did on the target, through their own edges."""
     params = {"id": target.id, "scopes": scopes}
     label = target.label
+    anchor = resolve.label_of(target)  # each read seeks the target by its label's id index, then walks out
     touches: list[Touch] = []
     for person_id, person, rel, pr_id, pr, updated in graph.ro_query(
         f"""
-        MATCH (p:Person)<-[:IS]-(:GitHubUser)-[r:AUTHORED|REVIEWED]->(pr:PullRequest)-[:TOUCHES]->(x {{id: $id}})
+        MATCH (x:{anchor} {{id: $id}})
+        WITH x
+        MATCH (p:Person)<-[:IS]-(:GitHubUser)-[r:AUTHORED|REVIEWED]->(pr:PullRequest)-[:TOUCHES]->(x)
         WHERE {SCOPED.format(var="pr")}
         RETURN p.id, p.name, type(r), pr.id, pr.name, coalesce(pr.updated_at, '')
         """,
@@ -408,7 +411,9 @@ def _touches(graph, target: Entity, scopes: list[str]) -> list[Touch]:
             touches.append(Touch(person_id, person, at, f"{_VERBS[rel]} {pr}", steps))
     for person_id, person, memory_id, text, scope, channel_id, created, ts in graph.ro_query(
         f"""
-        MATCH (p:Person)<-[:IS]-(:SlackUser)-[:SAID]->(m:Memory)-[:MENTIONS]->(x {{id: $id}})
+        MATCH (x:{anchor} {{id: $id}})
+        WITH x
+        MATCH (p:Person)<-[:IS]-(:SlackUser)-[:SAID]->(m:Memory)-[:MENTIONS]->(x)
         WHERE m.scope IN $scopes AND {_LIVE}
         RETURN p.id, p.name, m.id, m.text, m.scope, m.channel_id, m.created_at, m.ts
         """,
@@ -426,7 +431,9 @@ def _touches(graph, target: Entity, scopes: list[str]) -> list[Touch]:
             touches.append(Touch(person_id, person, at, f"said “{name}”", steps, memory))
     for person_id, person, rel, decision_id, decision, decided in graph.ro_query(
         f"""
-        MATCH (p:Person)-[r:PROPOSED|APPROVED]->(d:Decision)-[:ABOUT]->(x {{id: $id}})
+        MATCH (x:{anchor} {{id: $id}})
+        WITH x
+        MATCH (p:Person)-[r:PROPOSED|APPROVED]->(d:Decision)-[:ABOUT]->(x)
         WHERE {SCOPED.format(var="d")}
         RETURN p.id, p.name, type(r), d.id, d.name, d.decided_at
         """,
@@ -441,7 +448,9 @@ def _touches(graph, target: Entity, scopes: list[str]) -> list[Touch]:
             touches.append(Touch(person_id, person, at, f"{_VERBS[rel]} *{decision}*", steps))
     for person_id, person, ticket_id, ticket, updated in graph.ro_query(
         f"""
-        MATCH (p:Person)-[:WORKED_ON]->(t:Ticket)-[:ABOUT]->(x {{id: $id}})
+        MATCH (x:{anchor} {{id: $id}})
+        WITH x
+        MATCH (p:Person)-[:WORKED_ON]->(t:Ticket)-[:ABOUT]->(x)
         WHERE {SCOPED.format(var="t")}
         RETURN p.id, p.name, t.id, t.name, coalesce(t.updated_at, t.created_at, '')
         """,
