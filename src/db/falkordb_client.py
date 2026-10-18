@@ -4,13 +4,29 @@
 FalkorDB and once with every read returning an empty result set, so the report can show
 which capabilities collapse without the graph. While it is set, ``connect()`` returns a
 proxy graph instead of a real one and never touches the database.
+
+Every real graph ``connect()`` hands out is wrapped in ``_GraphProxy``, the single point every
+query passes through. It does two things and forwards everything else untouched:
+
+- **Per-context timeout.** While ``query_timeout(ms)`` is active (``tool_guard`` sets it for
+  the public and MCP surfaces), each ``query`` and ``ro_query`` that names no timeout of its
+  own gets that one, so a public caller cannot hold a worker for FalkorDB's full ``TIMEOUT``.
+  Outside it (Slack turns, sync, jobs) queries keep the server default.
+- **Hooks.** ``BEFORE_QUERY`` and ``AFTER_QUERY`` are lists of callbacks, each called with the
+  same ``QueryCall`` for every query: before it runs, and after it returns or raises (with
+  ``duration_ms``, and ``result`` or ``error``, filled in). Register with ``add_query_hook``.
+  A hook that raises is logged and skipped; it never fails or changes the query.
 """
 
 import logging
 import re
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
 from falkordb import FalkorDB
 
@@ -22,7 +38,98 @@ log = logging.getLogger(__name__)
 # request never darkens another request's reads.
 graph_reads_disabled: ContextVar[bool] = ContextVar("graph_reads_disabled", default=False)
 
+# The timeout, in milliseconds, for queries that name none of their own; None is the server's TIMEOUT.
+query_timeout_ms: ContextVar[int | None] = ContextVar("query_timeout_ms", default=None)
+
 _WRITE = re.compile(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE)\b", re.IGNORECASE)
+
+
+@contextmanager
+def query_timeout(ms: int | None) -> Iterator[None]:
+    """Within the block, a query that names no timeout gets ``ms``. Nested blocks keep the shorter one."""
+    current = query_timeout_ms.get()
+    token = query_timeout_ms.set(ms if current is None or (ms is not None and ms < current) else current)
+    try:
+        yield
+    finally:
+        query_timeout_ms.reset(token)
+
+
+@dataclass
+class QueryCall:
+    """One query through ``_GraphProxy``, as the hooks see it. ``timeout`` is what was sent (None: the server's)."""
+
+    graph: str
+    method: str
+    query: str
+    params: Any
+    timeout: int | None
+    duration_ms: float | None = None
+    result: Any = None
+    error: BaseException | None = None
+
+
+QueryHook = Callable[[QueryCall], None]
+# Called before each query runs, and after it returns or raises. Append with add_query_hook.
+BEFORE_QUERY: list[QueryHook] = []
+AFTER_QUERY: list[QueryHook] = []
+
+
+def add_query_hook(before: QueryHook | None = None, after: QueryHook | None = None) -> None:
+    """Register callbacks for every query through ``connect()`` (metrics, logging). Never for dark graphs."""
+    if before is not None:
+        BEFORE_QUERY.append(before)
+    if after is not None:
+        AFTER_QUERY.append(after)
+
+
+def remove_query_hook(hook: QueryHook) -> None:
+    for hooks in (BEFORE_QUERY, AFTER_QUERY):
+        while hook in hooks:
+            hooks.remove(hook)
+
+
+def _run_hooks(hooks: list[QueryHook], call: QueryCall) -> None:
+    for hook in list(hooks):
+        try:
+            hook(call)
+        except Exception:
+            log.exception("[falkordb] query hook %r failed; the query is unaffected", hook)
+
+
+class _GraphProxy:
+    """A FalkorDB graph whose ``query`` and ``ro_query`` take the context's timeout and run the hooks.
+
+    Every other attribute (``name``, ``delete``, ``explain``, ...) is the wrapped graph's own.
+    """
+
+    def __init__(self, graph) -> None:
+        self._graph = graph
+
+    def __getattr__(self, name: str):
+        return getattr(self._graph, name)
+
+    def query(self, q: str, params=None, timeout=None, **kwargs):
+        return self._run("query", q, params, timeout, kwargs)
+
+    def ro_query(self, q: str, params=None, timeout=None, **kwargs):
+        return self._run("ro_query", q, params, timeout, kwargs)
+
+    def _run(self, method: str, q: str, params, timeout, kwargs):
+        if timeout is None:
+            timeout = query_timeout_ms.get()
+        call = QueryCall(getattr(self._graph, "name", ""), method, q, params, timeout)
+        _run_hooks(BEFORE_QUERY, call)
+        started = time.perf_counter()
+        try:
+            call.result = getattr(self._graph, method)(q, params, timeout=timeout, **kwargs)
+            return call.result
+        except BaseException as error:
+            call.error = error
+            raise
+        finally:
+            call.duration_ms = (time.perf_counter() - started) * 1000
+            _run_hooks(AFTER_QUERY, call)
 
 
 @lru_cache(maxsize=1)
@@ -76,7 +183,7 @@ def connect():
     if graph_reads_disabled.get():
         return None, DarkGraph(graph_name())
     db = client()
-    return db, db.select_graph(graph_name())
+    return db, _GraphProxy(db.select_graph(graph_name()))
 
 
 def kv():

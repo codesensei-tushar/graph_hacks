@@ -22,7 +22,7 @@ def explore(request: Request, node: str = "", depth: int = 1):
     if throttled := _throttled(request):
         return throttled
     try:
-        with tool_guard.guard("explore", node):
+        with tool_guard.guard("explore", node, timeout_ms=tool_guard.PUBLIC_QUERY_TIMEOUT_MS):
             return explorer.public_explore(node, depth).to_dict()
     except QuestionTooLong as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)
@@ -35,7 +35,7 @@ def neighbors(request: Request, node: str = "", relation: str = "", direction: s
     if throttled := _throttled(request):
         return throttled
     try:
-        with tool_guard.guard("explore", f"{node} {relation} {direction}"):
+        with tool_guard.guard("explore", f"{node} {relation} {direction}", timeout_ms=tool_guard.PUBLIC_QUERY_TIMEOUT_MS):
             return explorer.public_neighbors(node, relation, direction, depth).to_dict()
     except QuestionTooLong as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)

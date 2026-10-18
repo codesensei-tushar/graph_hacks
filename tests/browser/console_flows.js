@@ -115,7 +115,8 @@ const [base, shots] = process.argv.slice(2);
     await page.waitForURL(/\/console(\?removed=1)?$/, { timeout: 40000 });
     await page.waitForSelector("#banner.ok");
     assert.match(await page.textContent("#banner"), /Disconnected/);
-    assert.equal(await page.locator(".conn-card").count(), 1);
+    assert.equal(await page.locator("a.conn-card").count(), 1);
+    assert.match(await page.textContent(".slack-card-c"), /App installed/);
     step("disconnect: back on Connections with one card left");
     await ctx.close();
   }

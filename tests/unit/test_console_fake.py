@@ -23,7 +23,9 @@ from src.core.config import settings  # noqa: E402
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "console"
 ME = {"org", "person", "role", "csrf", "slack_connected"}
 CONNECTION = {"id", "source", "status", "account", "site", "auth", "created_by", "created_at", "items", "last_sync_at", "last_error", "containers"}
-CONTAINER = {"id", "name", "items", "backfilled", "capped", "last_fetch_at", "last_error"}
+# readers and available joined the contract in explorer round 4 (approved by main).
+CONTAINER = {"id", "name", "items", "backfilled", "capped", "readers", "available", "last_fetch_at", "last_error"}
+SLACK = {"team_id", "team_name", "bot_installed", "home_channel", "channels", "last_event_at", "install_url"}
 AVAILABLE = {"external_id", "key", "name"}
 
 
@@ -43,6 +45,13 @@ class FixtureShapeTest(unittest.TestCase):
                 for container in connection["containers"]:
                     self.assertEqual(set(container), CONTAINER, name)
                     self.assertTrue(container["id"].startswith(f"{connection['id']}:container:"))
+
+    def test_slack(self):
+        slack = json.loads((FIXTURES / "slack.json").read_text())
+        self.assertEqual(set(slack), SLACK)
+        self.assertEqual(set(slack["home_channel"]), {"id", "name"})
+        for channel in slack["channels"]:
+            self.assertEqual(set(channel), {"id", "name", "private"})
 
     def test_available(self):
         for item in json.loads((FIXTURES / "available.json").read_text()):
