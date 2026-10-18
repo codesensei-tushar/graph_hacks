@@ -42,10 +42,11 @@ class SchedulerTest(unittest.TestCase):
     def test_a_due_job_is_claimed_by_exactly_one_of_many_claimers(self):
         scheduler.schedule(0, self.names[0], {"n": 1}, job_id="once")
         claims, barrier = [], threading.Barrier(8)
+        now = time.time() + 1  # one clock for every claimer: the lease is checked against it exactly
 
         def claim():
             barrier.wait()
-            claims.append(scheduler._claim(time.time() + 1))
+            claims.append(scheduler._claim(now))
 
         threads = [threading.Thread(target=claim) for _ in range(8)]
         for thread in threads:
@@ -57,7 +58,7 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(won[0][0], "once")
         # Claimed: out of the queue, in running with a lease, and its payload kept until it finishes.
         self.assertIsNone(kv().zscore(scheduler.QUEUE, "once"))
-        self.assertGreater(kv().zscore(scheduler.RUNNING, "once"), time.time() + scheduler.LEASE_SECONDS - 5)
+        self.assertAlmostEqual(kv().zscore(scheduler.RUNNING, "once"), now + scheduler.LEASE_SECONDS, places=2)
         self.assertIsNotNone(kv().hget(scheduler.PAYLOADS, "once"))
         scheduler._run_claimed(*won[0])
         self.assertEqual(self.ran, [(self.names[0], 1, tenancy.LEGACY_ORG_ID)])
@@ -97,8 +98,9 @@ class SchedulerTest(unittest.TestCase):
         try:
             kv().zadd(scheduler.RUNNING, {stored: time.time() + 1})
             kv().pexpire(lock, 1000)
+            before = time.time()
             scheduler._renew()
-            self.assertGreater(kv().zscore(scheduler.RUNNING, stored), time.time() + scheduler.LEASE_SECONDS - 5)
+            self.assertGreaterEqual(kv().zscore(scheduler.RUNNING, stored), before + scheduler.LEASE_SECONDS)
             self.assertGreater(kv().pttl(lock), (scheduler.LEASE_SECONDS - 5) * 1000)
         finally:
             with scheduler._running_lock:
@@ -131,6 +133,30 @@ class SchedulerTest(unittest.TestCase):
             # Released: the one left waiting runs now.
             self.assertEqual(scheduler.run_due(time.time() + 1), 1)
         self.assertEqual(sorted(n for _name, n, _org in self.ran), [1, 2, 3, 4])
+
+    def test_a_long_backlog_of_one_blocked_group_hides_no_one_else(self):
+        """60 due jobs of one (org, group), its lock taken by a running one: the next claim still finds
+        another org's job behind them, and the fast lane still finds the approval expiry."""
+        org_b = tenancy.OrgRef(id="orgb", graph="org_" + "b" * 26)
+        resolve = tenancy.resolve
+        with mock.patch.object(tenancy, "resolve", side_effect=lambda org: org_b if org == "orgb" else resolve(org)), \
+                mock.patch.object(scheduler, "FAST", frozenset({self.names[2]})), mock.patch.object(scheduler, "CLAIM_SCAN", 10):
+            for n in range(61):
+                scheduler.schedule(0, self.names[0], {"n": n}, job_id=f"wave{n:02d}")
+            now = time.time() + 1
+            running = scheduler._claim(now)  # the first of the wave runs and holds its group's lock
+            self.assertTrue(running[0].startswith("wave"))
+            with tenancy.org_context(org_b):
+                scheduler.schedule(0, self.names[1], {"n": 100}, job_id="other-org")
+            scheduler.schedule(0, self.names[2], {"n": 200}, job_id="expiry")
+            later = time.time() + 2
+            expiry = scheduler._claim(later, "fast")
+            self.assertEqual(expiry[0], "expiry")
+            other = scheduler._claim(later)
+            self.assertEqual(other[0], "orgb:other-org")
+            self.assertIsNone(scheduler._claim(later))  # the rest of the wave waits for its lock
+            for claim in (running, expiry, other):
+                scheduler._run_claimed(*claim)
 
     def test_connector_jobs_of_one_org_share_a_group(self):
         self.assertEqual(scheduler.GROUPS["runConnectorSync"], scheduler.GROUPS["runConnectorRemoval"])

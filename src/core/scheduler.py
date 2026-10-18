@@ -59,8 +59,9 @@ FAST_WORKERS = 1
 # How long a claim holds before the reaper may hand the job to another worker; renewed while it runs.
 LEASE_SECONDS = 300
 RENEW_SECONDS = 60
-# Due jobs one claim looks through for one it may run (the rest wait for their group's lock).
-CLAIM_SCAN = 50
+# Due jobs one claim reads per round trip inside the script, and the most it looks through in all.
+CLAIM_SCAN = 200
+CLAIM_MAX_SCAN = 5_000
 
 # Jobs the fast lane takes: an approval card left unanswered must expire on time, whatever else runs.
 FAST = frozenset({"runApprovalExpiry"})
@@ -98,12 +99,22 @@ local now, lease, scan, lane, prefix = tonumber(ARGV[1]), tonumber(ARGV[2]), ton
 local fast = cjson.decode(ARGV[6])
 local groups = cjson.decode(ARGV[7])
 local legacy = ARGV[8]
+local listed = ARGV[9] and ARGV[9] ~= ''
+local max_scan = tonumber(ARGV[10])
+-- Locks found taken in this call: every other job of that (org, group) is skipped without asking again,
+-- and the scan goes on past them, so a backlog of one blocked group never hides anyone else's job.
+local blocked = {}
+local offset = 0
+while true do
 local ids
-if ARGV[9] and ARGV[9] ~= '' then
+if listed then
+  if offset > 0 then return nil end
   ids = cjson.decode(ARGV[9])
 else
-  ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, scan)
+  ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', offset, scan)
+  if #ids == 0 or offset >= max_scan then return nil end
 end
+offset = offset + scan
 for _, id in ipairs(ids) do
   local due = redis.call('ZSCORE', KEYS[1], id)
   local raw = due and tonumber(due) <= now and redis.call('HGET', KEYS[2], id)
@@ -122,15 +133,18 @@ for _, id in ipairs(ids) do
       local org = legacy
       if type(job.org) == 'string' and job.org ~= '' then org = job.org end
       local lock = prefix .. org .. ':' .. (groups[job.name] or job.name)
-      if redis.call('SET', lock, id, 'NX', 'PX', lease * 1000) then
-        redis.call('ZREM', KEYS[1], id)
-        redis.call('ZADD', KEYS[3], now + lease, id)
-        return {id, raw, lock}
+      if not blocked[lock] then
+        if redis.call('SET', lock, id, 'NX', 'PX', lease * 1000) then
+          redis.call('ZREM', KEYS[1], id)
+          redis.call('ZADD', KEYS[3], now + lease, id)
+          return {id, raw, lock}
+        end
+        blocked[lock] = true
       end
     end
   end
 end
-return nil
+end
 """
 
 # A claimed job is done: KEYS = queue, payloads, running, the name index, the org index, the lock.
@@ -311,10 +325,16 @@ def cancel_org(org_id: str) -> int:
 
 
 def _claim(now: float, lane: str = "any", only: list[str] | None = None) -> tuple[str, str, str] | None:
+    if lane == "fast" and only is None:
+        # The fast lane reads its own jobs through the name index: however long the queue, an
+        # approval expiry is found at once.
+        only = sorted({stored for name in FAST for stored in (kv().smembers(_name_key(name)) or [])})
+        if not only:
+            return None
     claimed = kv().eval(
         _CLAIM, 3, QUEUE, PAYLOADS, RUNNING,
         now, LEASE_SECONDS, CLAIM_SCAN, lane, _lock_prefix(), json.dumps({name: True for name in FAST}),
-        json.dumps(GROUPS), tenancy.LEGACY_ORG_ID, json.dumps(only) if only else "",
+        json.dumps(GROUPS), tenancy.LEGACY_ORG_ID, json.dumps(only) if only else "", CLAIM_MAX_SCAN,
     )
     if not claimed:
         return None
