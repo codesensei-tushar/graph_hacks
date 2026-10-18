@@ -89,6 +89,11 @@ class HubSpotConnector(Connector):
         companies, after, headers = client.search("companies", _search_body(mapping.scope_filters(since), "ASCENDING", state.get("after")))
         upcoming = state.get("next") or self._server_ms(headers) - OVERLAP_MS
         page = self._page(install, container, client, [company for company in companies if mapping.in_scope(company)])
+        if not state.get("after"):
+            # Every active owner once a cycle, so one whose Person arrives later is linked within a poll.
+            owners, _ = self._directory(install, client)
+            sent = {user.external_id for user in page.users}
+            page.users += self._users(install, owners, [owner for owner in owners if owner not in sent])
         if after:
             page.next_cursor = _encode(mode="poll", phase="companies", since=since, after=after, next=upcoming)
         else:
@@ -127,9 +132,13 @@ class HubSpotConnector(Connector):
             page.items.append(mapping.company_item(install, container.id, company, portal, ui_domain))
             deals = [counted[deal] for deal in linked.get(str(company["id"]), []) if deal in counted]
             page.edges.extend(mapping.company_edges(install, company, deals, stages, active=owners))
-        emails = mapping.people(install.get_list("people"))
-        page.users = [mapping.owner_user(install, owners[owner], emails.get(owner)) for owner in mapping.owner_ids(companies, list(counted.values())) if owner in owners]
+        page.users = self._users(install, owners, mapping.owner_ids(companies, list(counted.values())))
         return page
+
+    def _users(self, install: Install, owners: dict[str, dict], owner_ids: list[str]) -> list:
+        """The active owners among ``owner_ids``, with the email an admin set for them (``people``) if any."""
+        emails = mapping.people(install.get_list("people"))
+        return [mapping.owner_user(install, owners[owner], emails.get(owner)) for owner in owner_ids if owner in owners]
 
     # --- what is reused between pages --------------------------------------------------------
 

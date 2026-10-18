@@ -100,8 +100,8 @@ An owner becomes a Person's account only when their email is the email of exactl
 in the graph; the connector never creates a Person. Until then the owner is an account of its
 own: `who_knows` names them under their HubSpot name, while `who_owns` and `if_person_leaves`
 only count Persons. Once a Person with that email arrives (a team file, `onboard team:` or Slack),
-the next sync links them and their `OWNS` and `WORKED_ON` edges move onto the Person. The same
-people then cover Jira and HubSpot alike.
+the next poll links them, since every poll sends every active owner, and their `OWNS` and
+`WORKED_ON` edges move onto the Person. The same people then cover Jira and HubSpot alike.
 
 When a HubSpot login is not the email the brain knows someone by, an admin says so:
 

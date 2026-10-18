@@ -158,6 +158,15 @@ class HubSpotSyncTest(unittest.TestCase):
         self.assertEqual(_rows("MATCH (:ExternalUser {external_id: '104'})-[:IS]->(p:Person) RETURN p.id"), [["noor"]])
         self.assertEqual(_ask("who owns Bramblecote Analytics").answer, "The Bramblecote Analytics account is owned by Noor Haddad.")
 
+    def test_an_owner_who_joins_the_brain_later_is_linked_by_the_next_poll(self):
+        _rows("CREATE (:Person {id: 'riley', name: 'Riley Chen', email: 'riley@partner.example.org'})")
+        sync.sync_now("hubspot")
+        self._drain()
+        self.assertEqual(_rows("MATCH (:ExternalUser {external_id: '104'})-[:IS]->(p:Person) RETURN p.id"), [["riley"]])
+        owner = _ask("who owns Bramblecote Analytics")
+        self.assertEqual(owner.answer, "The Bramblecote Analytics account is owned by Riley Chen.")
+        self.assertEqual(_cites(owner), ["Riley Chen -[OWNS]-> Bramblecote Analytics"])
+
     def test_a_second_full_sync_changes_nothing(self):
         def counts():
             return _rows("MATCH (n) WHERE n.source = 'hubspot' OR n.install = 'hubspot:default' RETURN count(n)")[0][0], _rows("MATCH ()-[r {install: 'hubspot:default'}]->() RETURN count(r)")[0][0]

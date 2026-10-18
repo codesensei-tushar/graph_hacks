@@ -140,6 +140,8 @@ class PollTest(unittest.TestCase):
         companies = self.connector.fetch(INSTALL, self.container, self.cursor)
         # Nothing in scope changed on the 17th; Mossgarth changed, but it is a lead with no deal.
         self.assertEqual((companies.items, companies.has_more), ([], True))
+        # Every active owner comes once a cycle, so a Person who arrived since is linked now.
+        self.assertEqual([user.external_id for user in companies.users], ["101", "102", "103", "104"])
         self.assertEqual(_cursor(companies), {"mode": "poll", "phase": "deals", "since": self.SINCE, "next": SERVER_MS - hubspot.OVERLAP_MS})
         body = self.fake.searches("companies")[-1]
         self.assertEqual(body["sorts"][0]["direction"], "ASCENDING")
@@ -165,7 +167,7 @@ class PollTest(unittest.TestCase):
         page = self.connector.fetch(INSTALL, self.container, cursor)
         self.assertEqual([item.name for item in page.items], ["Bramblecote Analytics"])
         self.assertEqual(sorted((edge.rel, edge.from_id) for edge in page.edges), [("OWNS", "hubspot:default:user:104"), ("WORKED_ON", "hubspot:default:user:103")])
-        self.assertEqual({user.external_id for user in page.users}, {"103", "104"})
+        self.assertEqual([user.external_id for user in page.users], ["104", "103"])
         self.assertEqual(_cursor(page), {"mode": "poll", "phase": "companies", "since": SERVER_MS})
 
     def test_the_window_never_moves_back(self):
