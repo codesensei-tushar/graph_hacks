@@ -308,6 +308,12 @@ def connect():
     return db, _GraphProxy(db.select_graph(graph_name()))
 
 
+def scratch_graph(name: str):
+    """A throwaway graph (an algorithm's working copy) behind the same proxy as ``connect()``'s, so
+    its queries take the context's timeout and are seen by the hooks. The caller deletes it."""
+    return _GraphProxy(client().select_graph(name))
+
+
 def kv():
     """The Redis connection under FalkorDB. Holds short-lived keys: event dedupe, approvals, bot threads."""
     return client().connection
