@@ -5,7 +5,8 @@ refusal, and a click on a node of a drawing (the hero's sample and every answer'
 BrainGraph.questionsFor (graph.js, QUESTIONS) of a node the page drew, or an app.js NEXT step,
 which tests/unit/test_explore.py holds to those same questions. So asking every question
 QUESTIONS gives for every node of every example chip's answer, and of the hero's sample, asks
-everything a judge can click. Each must be found. A question that is not is fixed in the
+everything a judge can click; so does each team page's link for a person, a thing, a decision
+and a ticket. Each must be found. A question that is not is fixed in the
 mapping, never here.
 """
 
@@ -16,7 +17,7 @@ from unittest import mock
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_api, graph_overview  # noqa: E402
+from src.domain.knowledge import ask_api, graph_overview, team_page  # noqa: E402
 from src.seed import quillfern, quillfern_sales, seed  # noqa: E402
 from tests.page_questions import NEXT, questions_for  # noqa: E402
 
@@ -67,6 +68,15 @@ class _ExploreOnTheSeed:
         for node in graph_overview.public_sample().nodes:
             for question in questions_for(node.name, node.label, node.kind):
                 offered.setdefault(question, "a node of the hero's sample")
+        # A team page links each person, thing, decision and ticket to its first question.
+        for team in team_page.public_teams():
+            page = team_page.public_team_page(team.id)
+            named = [(member.name, "Person", None) for member in page.members]
+            named += [(thing.name, "Service", thing.kind) for group in page.owns for thing in group.items]
+            named += [(decision.name, "Decision", None) for decision in page.decisions]
+            named += [(ticket.id, "Ticket", None) for ticket in page.tickets]
+            for name, label, kind in named:
+                offered.setdefault(questions_for(name, label, kind)[0], f"the {team.name} team page")
         return offered
 
     def test_every_question_a_node_offers_is_found(self):

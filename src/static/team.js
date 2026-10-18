@@ -2,11 +2,20 @@
 (() => {
   "use strict";
 
-  const { el, renderPath, SCOPE_LABEL } = window.BrainGraph;
+  const { el, renderPath, questionsFor, SCOPE_LABEL } = window.BrainGraph;
   const $ = (selector) => document.querySelector(selector);
   const teamId = decodeURIComponent(location.pathname.replace(/\/+$/, "").split("/").pop() || "");
   const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   const listed = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
+
+  // Every person, thing, decision and ticket on the page links to the ask page with the question
+  // the answers offer about it (BrainGraph.questionsFor), so the page leads somewhere too. The
+  // drawing stays passive.
+  function askLink(text, node) {
+    const [question] = questionsFor(node);
+    if (!question) return document.createTextNode(text);
+    return el("a", { class: "ask-link", href: `/?q=${encodeURIComponent(question)}`, title: `Ask: ${question}` }, text);
+  }
 
   async function load() {
     try {
@@ -40,7 +49,9 @@
     const members = $("#members");
     for (const member of data.members) {
       const card = el("li");
-      card.append(el("b", {}, member.name));
+      const name = el("b");
+      name.append(askLink(member.name, { name: member.name, label: "Person" }));
+      card.append(name);
       if (member.role) card.append(el("p", {}, member.role));
       card.append(el("p", { class: "owns-line" }, member.owns.length ? `Owns ${member.owns.join(", ")}` : "Owns nothing directly"));
       members.append(card);
@@ -60,7 +71,9 @@
       const body = el("tbody");
       for (const item of group.items) {
         const row = el("tr");
-        row.append(el("td", { class: "name" }, item.name));
+        const name = el("td", { class: "name" });
+        name.append(askLink(item.name, { name: item.name, label: "Service", kind: item.kind }));
+        row.append(name);
         row.append(el("td", {}, item.owners.join(", ") || "no owner in the graph"));
         if (described) row.append(el("td", {}, item.summary || ""));
         body.append(row);
@@ -98,7 +111,9 @@
     for (const decision of data.decisions) {
       const item = el("li");
       const title = el("p", { class: "decision-title" });
-      title.append(el("b", {}, decision.name));
+      const name = el("b");
+      name.append(askLink(decision.name, { name: decision.name, label: "Decision" }));
+      title.append(name);
       if (decision.decided_on) title.append(` · decided ${decision.decided_on}`);
       item.append(title);
       if (decision.summary) item.append(el("p", {}, decision.summary));
@@ -114,7 +129,11 @@
     if (!data.decisions.length) $("#decisions-block").hidden = true;
 
     const tickets = $("#tickets");
-    for (const ticket of data.tickets) tickets.append(el("li", {}, `${ticket.id}: ${ticket.title} (about ${ticket.about})`));
+    for (const ticket of data.tickets) {
+      const item = el("li");
+      item.append(askLink(ticket.id, { name: ticket.id, label: "Ticket" }), `: ${ticket.title} (about ${ticket.about})`);
+      tickets.append(item);
+    }
     if (!data.tickets.length) $("#tickets-block").hidden = true;
 
     const memories = $("#memories");

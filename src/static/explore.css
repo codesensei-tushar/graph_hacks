@@ -4,8 +4,39 @@
 /* "Ask next" after an answer and "Try instead" after a refusal: one labelled row of chips,
    after the edge lines and before the footer line, so nothing above it moves. */
 .next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 18px 0 0; }
-.next-label { margin: 0; font: 500 0.72rem/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-3); }
+.next-label { margin: 0; font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 .next-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
 
 /* A node in the answer drawing that asks a question when clicked. */
 .canvas .node.askable { cursor: pointer; }
+
+/* "Your walk": the questions asked before this one, in order, under "Ask next". Each earlier
+   step is a quiet text button that goes back to it; the one on screen ends the row. */
+.walk-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; margin: 0; padding: 0; list-style: none; min-width: 0; font: var(--fs-sm)/1.4 var(--font); }
+.walk-steps li { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+.walk-steps li + li::before { content: "→"; margin: 0 8px; color: var(--ink-3); }
+.walk-step, .walk-here { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28ch; }
+.walk-step {
+  min-height: 28px; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; color: var(--ink-2);
+  text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px;
+  transition: color var(--fast) var(--ease), text-decoration-color var(--fast) var(--ease);
+}
+.walk-step:hover { color: var(--ink); text-decoration-color: var(--ink-3); }
+.walk-here { color: var(--ink); }
+
+/* A proof question asks itself. Colours come from tokens only, so it follows any band it sits in. */
+.proof-ask {
+  padding: 0; border: 0; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left;
+  text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px;
+  transition: text-decoration-color var(--fast) var(--ease);
+}
+.proof-ask:hover { text-decoration-color: var(--ink-3); }
+
+/* On a team page, a person, a thing, a decision or a ticket links to its question on the ask page. */
+.ask-link { color: inherit; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; transition: text-decoration-color var(--fast) var(--ease); }
+.ask-link:hover { text-decoration-color: var(--ink-3); }
+
+@media (max-width: 420px) {
+  .walk-step { min-height: 44px; }
+  .walk-step, .walk-here { max-width: 22ch; }
+}

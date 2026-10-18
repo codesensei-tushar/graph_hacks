@@ -124,3 +124,71 @@ class WiringTest(unittest.TestCase):
         render = self.app_js[self.app_js.index("function render(data, question)"):]
         self.assertLess(render.index("BrainGraph.renderPath("), render.index("chipRow("))
         self.assertLess(render.index("chipRow("), render.index('el("p", { class: "footer-line" })'))
+
+
+class WalkTest(unittest.TestCase):
+    """Every ask is a history entry; Back and Forward show the step's answer from memory."""
+
+    def setUp(self):
+        self.app_js = (STATIC / "app.js").read_text()
+        self.popstate = self.app_js[self.app_js.index('window.addEventListener("popstate"'):self.app_js.index("function walkRow()")]
+
+    def test_a_deep_link_starts_the_walk_without_a_second_entry(self):
+        self.assertIn('if (initial) { input.value = initial; ask(initial, true, "start"); }', self.app_js)
+        start = self.app_js[self.app_js.index('} else if (how === "start") {'):self.app_js.index("} else if (walk.at >= 0")]
+        self.assertIn("history.replaceState(", start)
+        self.assertNotIn("pushState", start)
+
+    def test_back_and_forward_render_the_steps_answer_without_asking_or_pinning(self):
+        self.assertIn("render(entry.data, q);", self.popstate)
+        self.assertNotIn("getJson(", self.popstate)
+        self.assertNotIn("pinAnswer(", self.popstate)
+        # Only an entry that outlived a reload asks again, once, and starts a new walk.
+        self.assertIn('if (!entry || entry.q !== q || !entry.data) { ask(q, false, "back", state.step); return; }', self.popstate)
+
+    def test_the_walk_lives_in_memory_only(self):
+        for storage in ("localStorage", "sessionStorage"):
+            self.assertNotIn(storage, self.app_js[self.app_js.index("// --- The walk"):self.app_js.index("async function ask(")])
+
+    def test_your_walk_comes_after_ask_next_and_before_the_footer(self):
+        render = self.app_js[self.app_js.index("function render(data, question)"):]
+        self.assertLess(render.index("chipRow("), render.index("walkRow()"))
+        self.assertLess(render.index("walkRow()"), render.index('el("p", { class: "footer-line" })'))
+        self.assertIn('el("nav", { class: "next walk", "aria-label": "Your walk" })', self.app_js)
+        self.assertIn('item.setAttribute("aria-current", "step");', self.app_js)
+        self.assertIn("history.go(step - walk.at)", self.app_js)
+
+
+class MoreWaysOnTest(unittest.TestCase):
+    def setUp(self):
+        self.graph_js = (STATIC / "graph.js").read_text()
+        self.app_js = (STATIC / "app.js").read_text()
+
+    def test_the_arrow_keys_walk_every_drawing_and_only_move_focus(self):
+        walk = self.graph_js[self.graph_js.index("function walkWithKeys("):self.graph_js.index("// A node with a question asks it")]
+        for key in ("ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"):
+            self.assertIn(f"{key}:", walk)
+        self.assertIn("nodeEls.get(to).focus();", walk)
+        self.assertNotIn("onAsk", walk)
+        self.assertIn("    walkWithKeys(nodeEls, links);\n    if (meta.onAsk)", self.graph_js)
+
+    def test_a_refusal_with_no_near_name_offers_the_example_chips_that_answer(self):
+        instead = self.app_js[self.app_js.index("function insteadOf("):self.app_js.index("function chipRow(")]
+        self.assertIn("examplesAnswered", instead)
+        self.assertIn("examplesAnswered = answered;", self.app_js)
+
+    def test_a_team_page_links_its_people_things_decisions_and_tickets_to_their_questions(self):
+        team_js = (STATIC / "team.js").read_text()
+        self.assertIn("const [question] = questionsFor(node);", team_js)
+        self.assertIn("href: `/?q=${encodeURIComponent(question)}`", team_js)
+        for node in ('{ name: member.name, label: "Person" }', '{ name: item.name, label: "Service", kind: item.kind }', '{ name: decision.name, label: "Decision" }', '{ name: ticket.id, label: "Ticket" }'):
+            self.assertIn(f"askLink({node.split(',')[0].split(': ')[1]}, {node})", team_js)
+        self.assertIn('href="/static/explore.css', (STATIC / "team.html").read_text())
+
+    def test_a_proof_question_asks_itself(self):
+        proof = self.app_js[self.app_js.index("async function loadProof()"):]
+        self.assertIn('class: "proof-ask"', proof)
+        self.assertIn("askFromPage(row.question)", proof)
+        css = (STATIC / "explore.css").read_text()
+        rule = css[css.index(".proof-ask {"):css.index("}", css.index(".proof-ask {"))]
+        self.assertNotRegex(rule, r"#[0-9a-fA-F]{3,8}\b|rgba?\(")

@@ -37,6 +37,8 @@ Graph Hacks 2026: track 03, Company Brain, also entered in tracks 01 and 02.
 | `why did we move the memory layer off postgres` | The decision, who proposed and approved it, the RFC and ticket it rests on, and the chat it came from |
 | `who knows the payments gateway` | Something the graph does not know: "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." It never guesses. |
 
+Every answer ends with questions to ask next, and you can click any node in its drawing to ask about it.
+
 Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, the teams it depends on and the ones that depend on it, where its risk sits, and the edges behind every line. The team names at the top switch between teams. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
 
 **Over MCP.** The same read-only tools, with the same cited results, from any MCP client. No token needed: read-only, the company-wide scope, 30 calls a minute per address, shared with the ask page. A token, where one was issued, lifts the limit.

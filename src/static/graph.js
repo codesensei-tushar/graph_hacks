@@ -285,7 +285,7 @@
       nodeEls.set(node.id, group);
       asks.set(node.id, { name: node.name, kind, question });
     }
-    return { svg, edgeEls, nodeEls, starts, asks };
+    return { svg, edgeEls, nodeEls, starts, asks, links: { ins, outs, column, y: (id) => box(id).y } };
   }
 
   // Labels that share a column gap are nudged apart vertically so none sits on another.
@@ -343,7 +343,7 @@
     container.append(head);
 
     const canvas = el("div", { class: "canvas go" });
-    const { svg, edgeEls, nodeEls, starts, asks } = drawPath(nodes, edges, meta.onAsk);
+    const { svg, edgeEls, nodeEls, starts, asks, links } = drawPath(nodes, edges, meta.onAsk);
     canvas.append(svg);
     // On a phone the drawing keeps a readable size and scrolls sideways: a fade at each edge with
     // more beyond it, and a "scroll →" cue until the reader starts scrolling, say so.
@@ -393,6 +393,7 @@
       }
     }
 
+    walkWithKeys(nodeEls, links);
     if (meta.onAsk) askFromNodes(frame, canvas, nodeEls, asks, meta.onAsk);
 
     replay.addEventListener("click", () => {
@@ -400,6 +401,34 @@
       void canvas.offsetWidth; // restart the CSS animations
       for (const part of [canvas, list]) part.classList.add("go");
     });
+  }
+
+  // The arrow keys walk the drawing from a focused node: Right along an edge to what it points at,
+  // Left back to what points at it, Up and Down to the node above or below in its column. Of
+  // several edges, the one to the node drawn nearest in height is taken. Focus moves; nothing is asked.
+  function walkWithKeys(nodeEls, { ins, outs, column, y }) {
+    const columns = new Map();
+    for (const id of nodeEls.keys()) {
+      if (!columns.has(column(id))) columns.set(column(id), []);
+      columns.get(column(id)).push(id);
+    }
+    for (const ids of columns.values()) ids.sort((a, b) => y(a) - y(b));
+    const nearest = (id, others) => others.filter((other) => nodeEls.has(other) && other !== id).sort((a, b) => Math.abs(y(a) - y(id)) - Math.abs(y(b) - y(id)))[0];
+    const MOVES = {
+      ArrowRight: (id) => nearest(id, outs.get(id)),
+      ArrowLeft: (id) => nearest(id, ins.get(id)),
+      ArrowDown: (id) => { const ids = columns.get(column(id)); return ids[ids.indexOf(id) + 1]; },
+      ArrowUp: (id) => { const ids = columns.get(column(id)); return ids[ids.indexOf(id) - 1]; },
+    };
+    for (const [id, group] of nodeEls) {
+      group.addEventListener("keydown", (event) => {
+        const move = MOVES[event.key];
+        const to = move && move(id);
+        if (!to) return;
+        event.preventDefault();
+        nodeEls.get(to).focus();
+      });
+    }
   }
 
   // A node with a question asks it on click, Enter or Space. Hovering or focusing any node shows

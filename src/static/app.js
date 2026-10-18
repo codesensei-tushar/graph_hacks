@@ -42,6 +42,10 @@
 
   let company = null;
   let catalogue = null;
+  // The example chips that answer on this graph; a refusal with no near name offers the first two.
+  // ``toolsReady`` settles once they are in, for a refusal that arrives first (a deep link).
+  let examplesAnswered = [];
+  let toolsReady = Promise.resolve();
   let teamIds = null;
   // The stats' label counts once they arrive; {} when that call failed.
   let counted = null;
@@ -70,6 +74,7 @@
   // belongs with the refusal card, so every chip in the hero answers with a path.
   function renderChips(examples) {
     const answered = examples.slice(0, -1);
+    examplesAnswered = answered;
     const refusal = examples[examples.length - 1];
     chips.replaceChildren();
     const hidden = [];
@@ -234,20 +239,108 @@
     ask(question, true);
   }
 
-  async function ask(question, scroll) {
+  // --- The walk ----------------------------------------------------------------------------------
+
+  // Every question asked from the page is a step in the browser's history, so Back and Forward move
+  // between answers and a shared link still opens on its one question. ``walk`` mirrors that history
+  // for the "Your walk" row: each step's question and the answer it showed, and which step is on
+  // screen. A deep link starts the walk with replaceState, never a second entry; asking after
+  // stepping back drops the steps ahead, as the browser does. The walk lives in memory only, so a
+  // reload starts a new one. Each history entry's state carries its question and its step.
+  const walk = { steps: [], at: -1, scroll: false };
+  const SHOWN_STEPS = 5;
+  const emptyAnswer = Array.from(out.childNodes, (node) => node.cloneNode(true));
+
+  function stepTo(q, how, step) {
+    const address = `?q=${encodeURIComponent(q)}`;
+    if (how === "back") {
+      // Only after a reload: the entry outlived the walk, which starts again here.
+      walk.steps = [{ q }];
+      walk.at = 0;
+    } else if (how === "start") {
+      walk.steps = [{ q }];
+      walk.at = 0;
+      history.replaceState({ q, step: 0 }, "", address);
+    } else if (walk.at >= 0 && walk.steps[walk.at].q === q) {
+      history.replaceState({ q, step: walk.at }, "", address);
+    } else {
+      walk.steps = walk.steps.slice(0, walk.at + 1).concat({ q });
+      walk.at = walk.steps.length - 1;
+      history.pushState({ q, step: walk.at }, "", address);
+    }
+    return walk.steps[walk.at];
+  }
+
+  // Back to the page as it loaded, before anything was asked.
+  function showEmpty() {
+    walk.at = -1;
+    input.value = "";
+    answerQ.textContent = "";
+    statusLine.textContent = "";
+    statusLine.classList.remove("error");
+    out.replaceChildren(...emptyAnswer.map((node) => node.cloneNode(true)));
+  }
+
+  // Back and Forward show the answer the step showed, from memory: no new ask and no pinning. A
+  // step from the "Your walk" row also brings the answer into view.
+  window.addEventListener("popstate", (event) => {
+    const state = event.state || {};
+    const q = state.q || new URLSearchParams(location.search).get("q");
+    const scroll = walk.scroll;
+    walk.scroll = false;
+    if (!q) { showEmpty(); return; }
+    input.value = q;
+    const entry = walk.steps[state.step];
+    if (!entry || entry.q !== q || !entry.data) { ask(q, false, "back", state.step); return; }
+    unpin();
+    walk.at = state.step;
+    answerQ.textContent = q;
+    statusLine.textContent = "";
+    statusLine.classList.remove("error");
+    render(entry.data, q);
+    if (scroll) answerBox.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+  });
+
+  // The steps before the one on screen, most recent last, each a button that goes back to it
+  // through the browser's history; the one on screen closes the row, as plain text.
+  function walkRow() {
+    if (walk.at < 1) return null;
+    const first = Math.max(0, walk.at - SHOWN_STEPS + 1);
+    const row = el("nav", { class: "next walk", "aria-label": "Your walk" });
+    row.append(el("p", { class: "next-label", "aria-hidden": "true" }, "Your walk"));
+    const list = el("ol", { class: "walk-steps" });
+    walk.steps.slice(first, walk.at + 1).forEach(({ q }, index) => {
+      const step = first + index;
+      const item = el("li");
+      if (step === walk.at) {
+        item.setAttribute("aria-current", "step");
+        item.append(el("span", { class: "walk-here", title: q }, q));
+      } else {
+        const back = el("button", { type: "button", class: "walk-step", title: q }, q);
+        back.addEventListener("click", () => { walk.scroll = true; history.go(step - walk.at); });
+        item.append(back);
+      }
+      list.append(item);
+    });
+    row.append(list);
+    return row;
+  }
+
+  async function ask(question, scroll, how = "ask", step = 0) {
     const q = question.trim();
     if (!q) return;
     button.disabled = true;
     answerQ.textContent = q;
     statusLine.textContent = "Walking the graph…";
     statusLine.classList.remove("error");
-    history.replaceState(null, "", `?q=${encodeURIComponent(q)}`);
+    const entry = stepTo(q, how, step);
     if (scroll) pinAnswer();
     try {
       const hit = answered.get(q);
       const fresh = hit && Date.now() - hit.at < CACHE_MS;
       const data = fresh ? hit.data : await getJson(`/api/ask?q=${encodeURIComponent(q)}`);
       if (!fresh) answered.set(q, { at: Date.now(), data });
+      entry.data = data;
       render(data, q);
     } catch (error) {
       out.replaceChildren();
@@ -395,6 +488,22 @@
     return offered;
   }
 
+  // A refusal offers its nearest names as questions. With no name near, it offers the first
+  // example chips, which /api/ask/tools lists only when they answer on this graph.
+  function insteadOf(data, asked) {
+    const near = (data.candidates || []).map((name) => BrainGraph.questionsFor({ name })[0]);
+    const offered = near.length ? near : examplesAnswered.filter((q) => spoken(q) !== spoken(asked));
+    return offered.slice(0, near.length ? MAX_NEXT : 2);
+  }
+
+  // The examples came after the refusal: add its row in place, if that refusal is still on screen.
+  function insteadLater(data, asked) {
+    const footer = $(".footer-line", out);
+    if (answerQ.textContent !== asked || !footer || $(".next-list", out)) return;
+    const next = insteadOf(data, asked);
+    if (next.length) out.insertBefore(chipRow("Try instead", next), $(".walk", out) || footer);
+  }
+
   // "Ask next" after an answer, "Try instead" after a refusal: a labelled row of question chips.
   // Each chip asks from the page, so the address, the cache, Copy link and the depth buttons follow.
   function chipRow(label, questions) {
@@ -435,8 +544,11 @@
 
     // After the edge lines and before the footer, so the answer text, the drawing and its head
     // stay where the recording frames them. A refusal offers its nearest names as questions.
-    const next = data.found ? nextQuestions(data, question) : (data.candidates || []).slice(0, MAX_NEXT).map((name) => BrainGraph.questionsFor({ name })[0]);
+    const next = data.found ? nextQuestions(data, question) : insteadOf(data, question);
     if (next.length) out.append(chipRow(data.found ? "Ask next" : "Try instead", next));
+    else if (!data.found) toolsReady.then(() => insteadLater(data, question));
+    const trail = walkRow();
+    if (trail) out.append(trail);
 
     const picker = data.picked_by === "model" ? "the model" : data.picked_by === "caller" ? "you" : "keywords";
     const read = (data.scopes || []).map((scope) => SCOPE_LABEL[scope] || scope).join(", ");
@@ -487,7 +599,11 @@
       const outcome = (side) => (side.found ? plural(side.steps, "edge", "edges") : "refused");
       for (const row of data.rows || []) {
         const line = el("tr", { class: row.collapsed ? "" : "kept" });
-        line.append(el("td", { class: "q", "data-label": "Question" }, row.question));
+        const question = el("td", { class: "q", "data-label": "Question" });
+        const askIt = el("button", { type: "button", class: "proof-ask", title: `Ask: ${row.question}` }, row.question);
+        askIt.addEventListener("click", () => askFromPage(row.question));
+        question.append(askIt);
+        line.append(question);
         const toolCell = el("td", { class: "name", "data-label": "Tool" });
         toolCell.append(el("code", {}, row.tool));
         line.append(toolCell);
@@ -550,12 +666,12 @@
   // --- Wiring ------------------------------------------------------------------------------------
 
   form.addEventListener("submit", (event) => { event.preventDefault(); ask(input.value, true); });
-  loadTools();
+  toolsReady = loadTools();
   loadStats();
   loadSample();
   loadTeams();
   watchProof();
   watchHero();
   const initial = new URLSearchParams(location.search).get("q");
-  if (initial) { input.value = initial; ask(initial, true); }
+  if (initial) { input.value = initial; ask(initial, true, "start"); }
 })();
