@@ -90,6 +90,27 @@ class WhatChangedTest(unittest.TestCase):
     def _remove(self, node_id: str) -> None:
         self.addCleanup(self.graph.query, "MATCH (n {id: $id}) DETACH DELETE n", {"id": node_id})
 
+    def test_synced_tickets_are_read_from_the_widest_window_on_and_unstamped_ones_always(self):
+        day = 24 * 60 * 60 * 1000
+        self.graph.query(
+            """
+            CREATE (:Ticket {id: 'sync-new', name: 'PAY-901', scope: 'org_shared', source_updated_at: '2026-10-17T12:00:00Z', changed_at_ms: $new}),
+                   (:Ticket {id: 'sync-old', name: 'PAY-902', scope: 'org_shared', source_updated_at: '2026-01-01T12:00:00Z', changed_at_ms: $old}),
+                   (:Ticket {id: 'unstamped', name: 'PAY-903', scope: 'org_shared', source_updated_at: '2026-10-16T12:00:00Z'})
+            """,
+            {"new": NOW - day, "old": NOW - 290 * day},
+        )
+        for node_id in ("sync-new", "sync-old", "unstamped"):
+            self._remove(node_id)
+        windowed = {change.id for change in what_changed._tickets(self.graph, ORG, NOW - what_changed.WIDER_DAYS * day)}
+        every = {change.id for change in what_changed._tickets(self.graph, ORG)}
+        self.assertIn("sync-new", windowed)
+        self.assertIn("unstamped", windowed)  # no changed_at_ms (written before #207): still read
+        self.assertNotIn("sync-old", windowed)  # read only without a window
+        self.assertEqual(every - windowed, {"sync-old"})
+        self.assertIn("PAY-901", _changed("what changed this week").answer)
+        self.assertNotIn("PAY-902", _changed("what changed this week").answer)
+
     def test_an_empty_week_widens_to_a_month_across_the_company(self):
         result = _changed("what changed this week")
         self.assertTrue(result.found)

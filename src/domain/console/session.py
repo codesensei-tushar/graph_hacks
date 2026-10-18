@@ -319,8 +319,18 @@ def _operator_session(request: Request) -> Session:
     )
 
 
-async def console_session(request: Request) -> Session:
-    """A signed-in person, with or without an org yet (``/console/start``)."""
+def promoted(sid: str, before: Session, after: Session) -> tuple[str, Session] | None:
+    """A pending creator the refresh just made owner gains privileges: a new session id and CSRF token
+    (``rotate``), as at sign-in. None when nothing was promoted."""
+    if before.role == ROLE_PENDING and after.role != ROLE_PENDING:
+        return rotate(sid, after)
+    return None
+
+
+async def console_session(request: Request, response: Response = None) -> Session:
+    """A signed-in person, with or without an org yet (``/console/start``). When FastAPI hands in the
+    ``response`` and the refresh promoted a pending creator, the session is rotated and the new cookie set
+    on it; a caller without one keeps the old id until the next request that has one."""
     require_console()
     if _bearer(request):
         if not is_operator(request):
@@ -334,6 +344,9 @@ async def console_session(request: Request) -> Session:
             raise HTTPException(status_code=401, detail="signed_out")
         # A cookie rides along on cross-site requests; a bearer token doesn't, so only cookies need CSRF checks.
         csrf.check(request, session.csrf)
+        if response is not None and (rotated := await run_in_threadpool(promoted, sid, loaded, session)):
+            sid, session = rotated
+            set_cookie(response, sid)
     request.state.console_session = session
     if session.org:
         ref = await run_in_threadpool(orgs.get_org_ref, session.org)
@@ -345,9 +358,9 @@ async def console_session(request: Request) -> Session:
     return session
 
 
-async def console_pending(request: Request) -> Session:
+async def console_pending(request: Request, response: Response = None) -> Session:
     """An org's creator before its Slack install, or its owner: for the Add to Slack step."""
-    session = await console_session(request)
+    session = await console_session(request, response)
     if not session.org:
         raise HTTPException(status_code=403, detail="no_org")
     if session.role not in (ROLE_PENDING, roles.ROLE_OWNER):
@@ -355,9 +368,9 @@ async def console_pending(request: Request) -> Session:
     return session
 
 
-async def console_user(request: Request) -> Session:
+async def console_user(request: Request, response: Response = None) -> Session:
     """A verified member of an org; the request runs in that org's context."""
-    session = await console_session(request)
+    session = await console_session(request, response)
     if not session.org:
         raise HTTPException(status_code=403, detail="no_org")
     if session.role == ROLE_PENDING:
@@ -365,9 +378,9 @@ async def console_user(request: Request) -> Session:
     return session
 
 
-async def console_admin(request: Request) -> Session:
+async def console_admin(request: Request, response: Response = None) -> Session:
     """An owner or admin of an org: connect, disconnect and sync."""
-    session = await console_user(request)
+    session = await console_user(request, response)
     if not roles.role_at_least(session.role, roles.ROLE_ADMIN):
         raise HTTPException(status_code=403, detail="admin_only")
     return session

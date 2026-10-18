@@ -16,7 +16,7 @@ from src.domain.knowledge.dto import MemoryLine, ToolResult, ToolSpec, day_from
 from src.domain.knowledge.memories import attached
 from src.domain.memory.writeback import SHARED_TEAM_BRAIN_CONTAINER_TAG, scope_label, slack_memory_container_tag
 from src.domain.slack import format
-from src.domain.slack.compute import TurnApproval, TurnOutcome, TurnRequest, channel_names
+from src.domain.slack.compute import TurnApproval, TurnOutcome, TurnRequest, channel_names, withheld_from_room
 
 MEMORY_LINES = 3
 
@@ -34,6 +34,8 @@ def answer_turn(request: TurnRequest) -> TurnOutcome:
     choice = for_the_asker(choice, question, request)
     result, choice = run_choice(choice, question, request.read_tags, request.thread, bot_ids)
     result = asker.in_slack(result)
+    if not result.found and (withheld := withheld_from_room(question, request)) is not None:
+        return TurnOutcome(reply=withheld)
     # A refusal shows no memories, so it never reads like a guess; an answer shows only memories that
     # mention what it is about or something one hop from it, never a loose text match.
     memories = result.memories or (memories_about(result, request) if result.found else [])

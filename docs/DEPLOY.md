@@ -8,7 +8,7 @@ doesn't come up healthy.
 | --- | --- |
 | App | https://brain.noobsurd.space (health: [`/healthz`](https://brain.noobsurd.space/healthz)) |
 | Slack | Events `https://brain.noobsurd.space/slack/events`, interactivity `https://brain.noobsurd.space/slack/interactions` |
-| Graph browser | https://gdb.noobsurd.space (two logins, see [gdb](#the-graph-browser-gdb)) |
+| Graph browser | https://falkordb.noobsurd.space (two logins, see [the graph browser](#the-graph-browser-falkordb)); the old https://gdb.noobsurd.space redirects there |
 | GCP project | `graphhacks-brain-8490` (org wattcycle.ai, account admin@wattcycle.ai) |
 | VM | `brain-vm`, `asia-south1-c`, e2-medium, Ubuntu 24.04, static IP `35.200.189.204` |
 | Images | `asia-south1-docker.pkg.dev/graphhacks-brain-8490/brain/backend:<git sha>` |
@@ -23,7 +23,7 @@ project. Never `gcloud config configurations activate` it on a shared machine; p
   Slack servers ───────┐                     you, in a browser ───────────┐
   (signed POSTs)       │                     (basic auth, then the        │
                        ▼                      FalkorDB password)          ▼
-        brain.noobsurd.space                             gdb.noobsurd.space
+        brain.noobsurd.space                        falkordb.noobsurd.space
                        │      A records, DNS only (no Cloudflare proxy)   │
                        └───────────► 35.200.189.204 ◄─────────────────────┘
                                      brain-vm firewall: tcp 80, 443 from anywhere;
@@ -35,8 +35,9 @@ project. Never `gcloud config configurations activate` it on a shared machine; p
   │     │  TLS 1.2+, :80 → https, ACME challenges from the certbot webroot       │
   │     ├── brain.* ─────────────► backend :8000 (FastAPI, src/)                 │
   │     │                          /slack/*, /healthz, /api/*, /mcp (public)     │
-  │     └── gdb.* (basic auth, ──► falkordb-browser :3000                        │
-  │          rate limited)                 │                                     │
+  │     └── falkordb.* ─────────► falkordb-browser :3000                         │
+  │          (basic auth, rate limited;    │                                     │
+  │          gdb.* answers 301 to it)      │                                     │
   │                       backend ──► falkordb :6379 ◄──┘  (requirepass, AOF,    │
   │                                                         volume falkordb-data)│
   │   certbot: idles; issues and renews into the letsencrypt volume              │
@@ -57,7 +58,7 @@ loopback. They exist only on the Compose network.
 | `deploy/docker-compose.yml` | The production stack, pinned images |
 | `deploy/nginx/` | `nginx.conf`, `http.conf` (pre-TLS), `https.conf`, shared TLS and proxy snippets |
 | `deploy/deploy.sh` | Deploy one SHA, health-check, roll back. Lives at `/opt/brain/deploy.sh` |
-| `deploy/bootstrap-tls.sh` | First certificate and the switch to HTTPS (repeatable) |
+| `deploy/bootstrap-tls.sh` | First certificate and the switch to HTTPS (repeatable); `--ensure` adds new names once their DNS is ready |
 | `deploy/systemd/` | Twice-daily renewal timer, nightly FalkorDB backup timer |
 | `deploy/backup/` | `falkordb-backup.py` (nightly backup, restore check) and the bucket's `lifecycle.json` |
 | `deploy/vm/startup.sh` | VM startup script: Docker, log caps, swap, registry credential helper |
@@ -154,9 +155,9 @@ Rotation notes:
 - Values can't contain a single quote or a newline. `deploy.sh` refuses them, because they
   would break the `.env` quoting.
 
-## The graph browser (gdb)
+## The graph browser (falkordb)
 
-Open https://gdb.noobsurd.space. Two locks:
+Open https://falkordb.noobsurd.space. Two locks:
 
 1. **Basic auth** (nginx): user `admin`, password from
    ```bash
@@ -173,12 +174,61 @@ Open https://gdb.noobsurd.space. Two locks:
 Once logged in you have full read and write access to every graph. The app's graph is
 `company`.
 
-nginx rate-limits gdb per client IP: 10 requests/s with a burst of 200 for the page,
+nginx rate-limits the browser per client IP (zones `gdb` and `gdb_login`, kept from its old name): 10 requests/s with a burst of 200 for the page,
 and 6/min with a burst of 5 on the sign-in endpoint (`/api/auth/callback/`).
+
+The site is `deploy/nginx/browser.conf`, included by the `falkordb.noobsurd.space` server.
+The old name, `gdb.noobsurd.space`, stays on the certificate and answers with a 301 to the same
+path on `falkordb.*`. Until the certificate covers the new name it keeps serving the browser,
+as before (see "Moving the browser to falkordb.noobsurd.space" below). Its basic-auth file
+is still `gdb.htpasswd`, and the secret is still `GDB_BASIC_AUTH_PASSWORD`.
 
 The htpasswd is mode 0640, group 101: that's the nginx user in the container. On the VM host,
 gid 101 is the `messagebus` system group. It holds only an apr1 hash of a 64-character
 random password.
+
+### Moving the browser to falkordb.noobsurd.space
+
+The browser used to live at `gdb.noobsurd.space`. The deploy moves it by itself once DNS is
+ready, so the only manual step is the DNS record.
+
+1. In Cloudflare (zone `noobsurd.space`), add a record next to the existing `gdb` one:
+
+   | Type | Name | Content | Proxy status | TTL |
+   | --- | --- | --- | --- | --- |
+   | A | `falkordb` | `35.200.189.204` | DNS only (grey cloud), like `gdb` and `brain` | Auto |
+
+   Keep it **DNS only**. With the proxy on, the name resolves to Cloudflare, the check below
+   never passes, and nginx's certificate is not the one visitors see. Check it with
+   `dig +short falkordb.noobsurd.space`, which should print `35.200.189.204`.
+2. Nothing else. On every deploy, and before each twice-daily renewal check,
+   `bootstrap-tls.sh --ensure` compares the certificate with its `DOMAINS`
+   (`brain`, `falkordb`, `gdb`):
+   - If `falkordb.noobsurd.space` does not resolve to the VM yet, it logs one line
+     (`[tls] falkordb.noobsurd.space resolves to ..., not this VM`, then "not adding ... yet")
+     and changes nothing. The deploy succeeds and the current certificate keeps serving.
+   - Once it resolves, it expands the `brain` certificate to all three names (a staging
+     dry run first, then the real request). If that fails, the current certificate stays and
+     the next deploy or renewal tries again.
+   - With the new name on the certificate, it points `gdb.*` at the 301
+     (`nginx/gdb-active.conf` → `gdb-redirect.conf`), sets `BROWSER_HOST` in `.env`, and
+     recreates `falkordb-browser`, so the browser's sign-in URLs use the new name.
+3. To do it right away rather than at the next deploy, run on the VM:
+   `sudo /opt/brain/bootstrap-tls.sh --ensure`.
+
+Check with:
+
+```bash
+curl -sI https://gdb.noobsurd.space/ | head -3            # 301, location: https://falkordb.noobsurd.space/
+curl -sI https://falkordb.noobsurd.space/ | head -1       # 401 (basic auth)
+sudo docker compose -f /opt/brain/docker-compose.yml exec certbot certbot certificates   # Domains: all three
+journalctl -u brain-certbot-renew | grep '\[tls\]'
+```
+
+Later, once nobody uses the old name, delete the `gdb` record, remove
+`gdb.noobsurd.space` from `DOMAINS` and from the two nginx server blocks in one PR, and run
+`sudo /opt/brain/bootstrap-tls.sh` on the VM. Dropping a name needs that one manual run;
+`--ensure` only adds names.
 
 ## Local access to production FalkorDB
 
@@ -198,14 +248,19 @@ recreated, so look it up again after a deploy.
 
 ## Certificates
 
-- One Let's Encrypt certificate, named `brain`, covers both names; it's in the
-  `brain_letsencrypt` volume.
-- First issuance: `sudo /opt/brain/bootstrap-tls.sh` on the VM. It checks that both
-  names resolve to the VM, serves the HTTP-only site, does a staging `--dry-run`, then
+- One Let's Encrypt certificate, named `brain`, covers every name in `bootstrap-tls.sh`'s
+  `DOMAINS`: `brain`, `falkordb` and `gdb.noobsurd.space`. It's in the `brain_letsencrypt`
+  volume.
+- First issuance: `sudo /opt/brain/bootstrap-tls.sh` on the VM. It checks that every
+  name resolves to the VM, serves the HTTP-only site, does a staging `--dry-run`, then
   the real `certonly --webroot`, and switches nginx to `https.conf`. It's safe to re-run.
 - Renewal: `brain-certbot-renew.timer` runs at 00:00 and 12:00 UTC (plus up to 1 h jitter).
-  It runs `certbot renew` (a no-op until 30 days before expiry), and on success reloads
-  nginx.
+  It runs `bootstrap-tls.sh --ensure` first, then `certbot renew` (a no-op until 30 days
+  before expiry), and on success reloads nginx.
+- New names: `deploy.sh` also runs `bootstrap-tls.sh --ensure` after every good deploy. It
+  adds any name in `DOMAINS` that the certificate lacks, but only once that name resolves to
+  the VM. It never fails a deploy and never replaces a certificate unless the new one was
+  issued.
 - Check: `sudo docker compose -f /opt/brain/docker-compose.yml exec certbot certbot certificates`,
   `sudo docker compose -f /opt/brain/docker-compose.yml exec certbot certbot renew --dry-run`,
   `systemctl list-timers brain-certbot-renew.timer`, `journalctl -u brain-certbot-renew`.
@@ -542,7 +597,7 @@ for v in GCP_PROJECT_ID GCP_REGION GCP_ZONE GCP_VM GCP_DEPLOYER_SA GCP_WIF_PROVI
   gh variable delete $v -R codesensei-tushar/graph_hacks
 done
 
-# DNS: delete only the brain and gdb A records in Cloudflare (noobsurd.space).
+# DNS: delete only the brain, falkordb and gdb A records in Cloudflare (noobsurd.space).
 
 # The local gcloud configuration
 gcloud config configurations delete graphhacks

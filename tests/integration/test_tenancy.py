@@ -381,17 +381,32 @@ class TenancyTest(unittest.TestCase):
         app = FastAPI()
         app.include_router(slack_routes.router)
         team, channel = f"TAUD{uuid.uuid4().hex[:6].upper()}", "CAUD1"
-        kv().set(f"brain:slack:audience:{team}:{channel}", "1", ex=60)
-        kv().set(f"brain:slack:directory:{team}", "{}", ex=60)
+        from src.domain.slack import channel_audience
+
+        for event in (
+            {"type": "member_joined_channel", "user": "UGUEST", "channel": channel, "channel_type": "C", "ts": "1.1"},
+            {"type": "channel_shared", "connected_team_id": "TPARTNER", "channel": channel, "event_ts": "1.2"},
+            {"type": "channel_unshared", "previously_connected_team_id": "TPARTNER", "channel": channel, "event_ts": "1.3"},
+        ):
+            with self.subTest(event=event["type"]):
+                kv().set(channel_audience._verdict_key(team, channel), "1", ex=60)
+                kv().set(f"brain:slack:directory:{team}", "{}", ex=60)
+                body = {"type": "event_callback", "team_id": team, "event_id": f"Ev{uuid.uuid4().hex}", "event": event}
+                raw, headers = self._signed(body)
+                with mock.patch.object(slack_routes, "get_workspace_by_team_id", return_value=None):
+                    self.assertEqual(TestClient(app).post("/slack/events", content=raw, headers=headers).status_code, 200)
+                self.assertIsNone(kv().get(channel_audience._verdict_key(team, channel)))
+                self.assertIsNone(kv().get(f"brain:slack:directory:{team}"))
+        # user_change: every channel verdict of the team, through a new epoch.
+        kv().set(channel_audience._verdict_key(team, channel), "1", ex=60)
         body = {
             "type": "event_callback", "team_id": team, "event_id": f"Ev{uuid.uuid4().hex}",
-            "event": {"type": "member_joined_channel", "user": "UGUEST", "channel": channel, "channel_type": "C", "ts": "1.1"},
+            "event": {"type": "user_change", "user": {"id": "UALICE", "team_id": team, "is_restricted": True}},
         }
         raw, headers = self._signed(body)
         with mock.patch.object(slack_routes, "get_workspace_by_team_id", return_value=None):
             TestClient(app).post("/slack/events", content=raw, headers=headers)
-        self.assertIsNone(kv().get(f"brain:slack:audience:{team}:{channel}"))
-        self.assertIsNone(kv().get(f"brain:slack:directory:{team}"))
+        self.assertIsNone(kv().get(channel_audience._verdict_key(team, channel)))
 
     def test_deactivated_users_are_not_members(self):
         from src.integrations.slack.client import _slack_user_info_from_member

@@ -57,6 +57,9 @@ log = logging.getLogger(__name__)
 
 STEP_DELAY_SECONDS = 1
 MAX_TARGET_ATTEMPTS = 3
+# Every try of a team_join / user_change retry counts, Retry-After or not: a Slack outage that keeps
+# answering Retry-After must not keep the job alive forever. Retry-After only sets the next delay.
+MAX_LIFECYCLE_TRIES = 10
 MAX_WAVE_MEMBERS = 5000
 ACTIVE_AUTOMATIC_RUN_STATUSES = ("enumerating", "provisioning", "preparing", "running")
 
@@ -823,18 +826,26 @@ def on_slack_team_join(team_id: str, user: dict) -> bool:
     return True
 
 
+def _retry_lifecycle(job: str, payload: dict, retry_after: float | None, failed: bool = False) -> None:
+    """Try ``job`` again, unless it has had ``MAX_LIFECYCLE_TRIES`` tries (all of them count) or, with no
+    Retry-After, ``MAX_TARGET_ATTEMPTS`` failed ones. Retry-After sets the delay, never the count."""
+    attempt = payload["attempt"]
+    tries = int(payload.get("tries") or attempt)
+    if tries >= MAX_LIFECYCLE_TRIES or (not retry_after and attempt >= MAX_TARGET_ATTEMPTS):
+        log.error("[slack] %s gave up after %d tries team=%s user=%s", job, tries, payload["team_id"], (payload.get("user") or {}).get("id"))
+        return
+    scheduler.schedule(
+        retry_after or STEP_DELAY_SECONDS * 5 * attempt,
+        job,
+        {**payload, "attempt": attempt if retry_after and not failed else attempt + 1, "tries": tries + 1},
+    )
+
+
 def run_slack_team_join_retry(payload: dict) -> None:
     outcome = process_slack_team_join(payload["team_id"], payload["user"])
     if outcome["terminal"]:
         return
-    retry_after = outcome.get("retry_after_seconds")
-    attempt = payload["attempt"]
-    if retry_after or attempt < MAX_TARGET_ATTEMPTS:
-        scheduler.schedule(
-            retry_after or STEP_DELAY_SECONDS * 5 * attempt,
-            RUN_TEAM_JOIN_RETRY,
-            {**payload, "attempt": attempt if retry_after else attempt + 1},
-        )
+    _retry_lifecycle(RUN_TEAM_JOIN_RETRY, payload, outcome.get("retry_after_seconds"))
 
 
 def process_slack_user_change(team_id: str, user: dict) -> dict:
@@ -876,24 +887,15 @@ def on_slack_user_change(team_id: str, user: dict) -> None:
 
 
 def run_slack_user_change_retry(payload: dict) -> None:
-    attempt = payload["attempt"]
     try:
         outcome = process_slack_user_change(payload["team_id"], payload["user"])
-        if outcome["terminal"]:
-            return
-        retry_after = outcome.get("retry_after_seconds")
-        if not retry_after and attempt >= MAX_TARGET_ATTEMPTS:
-            return
-        scheduler.schedule(
-            retry_after or STEP_DELAY_SECONDS * 5 * attempt,
-            RUN_USER_CHANGE_RETRY,
-            {**payload, "attempt": attempt if retry_after else attempt + 1},
-        )
     except Exception:
-        if attempt >= MAX_TARGET_ATTEMPTS:
-            log.error("[slack] user_change lifecycle sync failed team=%s user=%s", payload["team_id"], payload["user"].get("id"))
-            return
-        scheduler.schedule(STEP_DELAY_SECONDS * 5 * attempt, RUN_USER_CHANGE_RETRY, {**payload, "attempt": attempt + 1})
+        log.warning("[slack] user_change lifecycle sync failed team=%s user=%s", payload["team_id"], payload["user"].get("id"), exc_info=True)
+        _retry_lifecycle(RUN_USER_CHANGE_RETRY, payload, None, failed=True)
+        return
+    if outcome["terminal"]:
+        return
+    _retry_lifecycle(RUN_USER_CHANGE_RETRY, payload, outcome.get("retry_after_seconds"))
 
 
 def _reset_team_invite_state(team_id: str) -> None:

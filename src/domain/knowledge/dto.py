@@ -97,7 +97,23 @@ class ToolResult:
             result["grid"] = self.grid
         if self.parts:
             result["parts"] = [dict(part) for part in self.parts]
+        sources = self.sources()
+        if sources:
+            result["sources"] = sources
         return result
+
+    def sources(self) -> list[str]:
+        """The connected tools whose nodes the path cites ("jira", "hubspot"), from the node ids: a
+        connector's ids are ``<source>:<install>:...`` (src/connectors/base.py)."""
+        from src.connectors.registry import KNOWN_MODULES
+
+        found = set()
+        for step in self.path:
+            for node_id in (step.from_id, step.to_id):
+                prefix = node_id.split(":", 1)[0] if isinstance(node_id, str) and node_id.count(":") >= 2 else None
+                if prefix in KNOWN_MODULES:
+                    found.add(prefix)
+        return sorted(found)
 
 
 @dataclass

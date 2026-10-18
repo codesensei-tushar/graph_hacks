@@ -101,7 +101,7 @@ class GitHubIngestTest(unittest.TestCase):
             0
         ]
         self.assertEqual(pr[0], SCOPE)
-        self.assertEqual(pr[1], ["memory-layer"])
+        self.assertEqual(pr[1], ["cb-memory"])
         closes = graph.query("MATCH (:PullRequest {id: 'github:4242:pr:3'})-[:CLOSES]->(t:Ticket) RETURN t.id").result_set
         self.assertEqual(closes, [["github:4242:issue:1"]])
         # The PR listed by the issues API is not a ticket.
@@ -189,7 +189,7 @@ class GitHubWebhookRouteTest(unittest.TestCase):
         self.assertEqual(self._post("issues", payload, delivery).status_code, 200)
         _, graph = connect()
         rows = graph.query("MATCH (t:Ticket {id: 'github:4242:issue:10'})-[:ABOUT]->(s:Service) RETURN t.scope, s.id").result_set
-        self.assertEqual(rows, [[SCOPE, "slack-events"]])
+        self.assertEqual(rows, [[SCOPE, "cb-slack"]])
         self.assertEqual(self._post("issues", payload, delivery).json().get("duplicate"), True)
 
     def test_bad_signature_is_rejected(self):

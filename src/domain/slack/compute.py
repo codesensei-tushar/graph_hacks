@@ -120,6 +120,32 @@ def compute_turn(request: TurnRequest) -> TurnOutcome:
 
 # --- default answerer ------------------------------------------------------------------
 
+WITHHELD_REPLY = (
+    "{name} comes from a connected tool, and I don't show that in channels with guests or people from "
+    "other companies. Ask me in a DM."
+)
+
+
+def withheld_from_room(question: str, request: "TurnRequest") -> str | None:
+    """The miss that is only this room's: the question names something in connected-tool data the asker
+    may read (``org_internal``), but the room has a guest or another company in it, so it was read
+    without it. The reply says so, naming only what the question names: no title, no owner, nothing a
+    tool would have told. None when the room is internal, the asker is not a full member of the
+    workspace, or the name means nothing to them either (``resolve.withheld_name``)."""
+    from src.domain.memory.writeback import ORG_INTERNAL_CONTAINER_TAG
+    from src.domain.knowledge import resolve
+    from src.domain.slack import channel_audience
+
+    scope = request.memory_scope
+    if scope is None or getattr(scope, "internal_audience", True) is not False or ORG_INTERNAL_CONTAINER_TAG in request.read_tags:
+        return None
+    workspace = request.workspace
+    if not channel_audience.is_full_member(workspace.client, workspace.team_id, request.asker_slack_user_id):
+        return None
+    name = resolve.withheld_name(question, request.read_tags, [*request.read_tags, ORG_INTERNAL_CONTAINER_TAG])
+    return WITHHELD_REPLY.format(name=name) if name else None
+
+
 
 def _answer_from_graph(request: TurnRequest) -> TurnOutcome:
     if request.passive_investigation:
@@ -132,6 +158,8 @@ def _answer_from_graph(request: TurnRequest) -> TurnOutcome:
     choice = asker.for_the_asker(agent.choose_with_keywords(question), question, request.asker_slack_user_id, request.read_tags)
     result, choice = agent.run_choice(choice, question, request.read_tags, request.thread, bot_ids)
     result = asker.in_slack(result)
+    if not result.found and (withheld := withheld_from_room(question, request)) is not None:
+        return TurnOutcome(reply=withheld)
     # Only memories that mention what the answer is about, or something one hop from it.
     memories = result.memories or (knowledge_memories.attached(result, request.read_tags) if result.found else [])
     memories = [memory.to_dict() for memory in memories]

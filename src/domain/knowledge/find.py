@@ -118,6 +118,37 @@ FILTERS: dict[str, dict[str, Filter]] = {
     },
     "Team": {},
 }
+
+
+# Every filter starts from what was named, through its label's id index, and walks to the things
+# listed: "MATCH (s:Service {id: $value}) WITH s MATCH (x:Ticket)-[r:ABOUT]->(s)". Written the other
+# way round, the planner scans every ticket and keeps those that reach the one service.
+_NAMED = re.compile(r"\((\w+):(\w+) \{id: \$value\}\)")
+_ACCOUNTS_IN = re.compile(r"^MATCH \((a)(:\w+)?\)(.*?) WHERE a\.id IN \$accounts AND (.*)$", re.S)
+# The labels a person's $accounts (their id and every account linked to them) may carry.
+ACCOUNT_LABELS = ("Person", "ExternalUser", "GitHubUser")
+
+
+def _anchored(query: str) -> str:
+    accounts = _ACCOUNTS_IN.match(query)
+    if accounts:
+        _var, label, rest, where = accounts.groups()
+        labels = [label[1:]] if label else list(ACCOUNT_LABELS)
+        return " UNION ALL ".join(
+            f"UNWIND $accounts AS account_id MATCH (a:{one} {{id: account_id}}) WITH a MATCH (a){rest} WHERE {where}" for one in labels
+        )
+    named = _NAMED.search(query)
+    if named is None or not query.startswith("MATCH "):
+        return query
+    var, label = named.groups()
+    rest = query[len("MATCH "):].replace(named.group(0), f"({var})", 1)
+    return f"MATCH ({var}:{label} {{id: $value}}) WITH {var} MATCH {rest}"
+
+
+for _filters in FILTERS.values():
+    for _key, _spec in list(_filters.items()):
+        if _spec.query:
+            _filters[_key] = Filter(_spec.name, _spec.target, _anchored(_spec.query), _spec.words)
 FILTER_NAMES = tuple(dict.fromkeys(name for filters in FILTERS.values() for name in filters))
 
 # The edge that places each listed node, cited when no filter walks one.
@@ -130,6 +161,24 @@ CONTEXT = {
     "Person": _q("MATCH (x:Person)-[r:MEMBER_OF]->(t:Team) WHERE x.id IN $ids RETURN x.id, [[x.id, x.name, 'Person', type(r), t.id, t.name, 'Team']]"),
     "Team": _q("MATCH (x:Team)-[r:RUNS]->(s:Service) WHERE x.id IN $ids AND {scoped_s} RETURN x.id, [[x.id, x.name, 'Team', type(r), s.id, s.name, 'Service']]"),
 }
+_IDS_IN = re.compile(r"^\s*MATCH (.*?)\s+WHERE x\.id IN \$ids(?: AND (.*?))?\s+(RETURN .*)$", re.S)
+
+
+def _from_ids(query: str) -> str:
+    """``MATCH ... (x:Label) ... WHERE x.id IN $ids ...`` as one id-index seek per id, then the walk:
+    ``UNWIND $ids AS id MATCH (x:Label {id: id}) WITH x MATCH ... (x) ...``. A label scan filtered by
+    ``IN`` reads every ticket to keep a few."""
+    found = _IDS_IN.match(query)
+    label = re.search(r"\(x:(\w+)\)", query)
+    if found is None or label is None:
+        raise ValueError(f"not a query over $ids: {query[:80]}")
+    pattern, rest, tail = found.groups()
+    pattern = pattern.replace(label.group(0), "(x)", 1)
+    where = f" WHERE {rest}" if rest else ""
+    return f"UNWIND $ids AS id MATCH (x:{label.group(1)} {{id: id}}) WITH x MATCH {pattern}{where} {tail}"
+
+
+CONTEXT = {label: _from_ids(query) for label, query in CONTEXT.items()}
 _ROWS = _q(
     """
     MATCH (x:{label})
@@ -137,6 +186,11 @@ _ROWS = _q(
     RETURN x.id, x.name, coalesce(x.title, ''), x.kind, x.state, x.merged, x.decided_at, coalesce(x.role, ''), coalesce(x.status, ''), coalesce(x.industry, '')
     """
 )
+
+
+def _rows_by_ids(label: str) -> str:
+    """``_ROWS`` for the rows in $ids only, each by id seek, with the node's internal id first."""
+    return _rows_query(label).replace(f"MATCH (x:{label})", f"UNWIND $ids AS id MATCH (x:{label} {{id: id}})", 1).replace("RETURN x.id,", "RETURN ID(x), x.id,", 1)
 
 
 def _rows_query(label: str) -> str:
@@ -158,7 +212,7 @@ _DEALS = _q(
     """
 )
 # The open tickets that block each of $ids, as cited edges.
-_BLOCKERS = _q(
+_BLOCKERS = _from_ids(
     """
     MATCH (b:Ticket)-[r:BLOCKS]->(x:Ticket)
     WHERE x.id IN $ids AND coalesce(b.scope, 'org_shared') IN $scopes AND coalesce(b.state, 'open') <> 'closed'
@@ -167,7 +221,7 @@ _BLOCKERS = _q(
 )
 _ACCOUNTS_OF ="MATCH (a)-[:IS]->(p:Person {id: $id}) RETURN a.id"
 # Owned by a person, or by a connector user (an unlinked HubSpot owner is an owner all the same).
-_OWNED = (
+_OWNED = _from_ids(
     "MATCH (o)-[:OWNS]->(x:Service) WHERE x.id IN $ids AND labels(o)[0] IN ['Person', 'ExternalUser']"
     " AND coalesce(o.scope, 'org_shared') IN $scopes RETURN DISTINCT x.id, labels(o)[0], o.name, o.source"
 )
@@ -254,8 +308,9 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
         named[key] = resolution.entity
         candidates.extend(name for name in resolution.candidate_names() if name not in candidates)
 
-    rows = {row[0]: Row(row[0], row[1], row[2], row[3], _state(row[4], row[5]), row[6], row[7], row[8], row[9]) for row in graph.ro_query(_rows_query(chosen), {"scopes": scopes}).result_set}
     edges: dict[str, list[list]] = {}
+    # What each named filter lets through, first: then only those rows are read, not every one of the label.
+    allowed_ids: set[str] | None = None
     for key, entity in named.items():
         passing: dict[str, list[list]] = {}
         params = {
@@ -264,9 +319,15 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
         }
         for node_id, cited in graph.ro_query(allowed[key].query, params).result_set:
             passing.setdefault(node_id, []).extend(cited)
-        rows = {node_id: row for node_id, row in rows.items() if node_id in passing}
+        allowed_ids = set(passing) if allowed_ids is None else allowed_ids & set(passing)
         for node_id, cited in passing.items():
             edges.setdefault(node_id, []).extend(cited)
+    if allowed_ids is None:
+        read = graph.ro_query(_rows_query(chosen), {"scopes": scopes}).result_set
+    else:
+        # In the label scan's order (internal id), as the full read returned them.
+        read = [row[1:] for row in sorted(graph.ro_query(_rows_by_ids(chosen), {"scopes": scopes, "ids": sorted(allowed_ids)}).result_set)]
+    rows = {row[0]: Row(row[0], row[1], row[2], row[3], _state(row[4], row[5]), row[6], row[7], row[8], row[9]) for row in read}
     rows = _apply_enums(graph, chosen, rows, enums, scopes)
     if "blocked" in enums:
         # Blocked: an open ticket the asker can read BLOCKS it. Each blocker's edge is cited.

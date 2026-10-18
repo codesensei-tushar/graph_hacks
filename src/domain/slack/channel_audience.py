@@ -11,8 +11,15 @@ reads ``org_internal`` only when the room's whole audience is internal:
   not in this team's directory).
 
 Every lookup failure answers False (fail closed). Results are cached in kv for two minutes:
-the team directory per team, the verdict per channel. A member joining a channel, or a new
-person joining the team, drops the cached answers at once (``forget``).
+the team directory per team, the verdict per channel. ``forget`` drops them at once:
+
+- ``member_joined_channel`` / ``member_left_channel``: that channel's verdict;
+- ``channel_shared`` / ``channel_unshared`` (Slack Connect): that channel's verdict;
+- ``team_join`` / ``user_change`` (someone joined, became a guest, was deactivated): the team's
+  directory and **every** channel verdict of the team, through a per-team epoch in the verdict keys.
+
+A channel of ``MAX_CHANNEL_MEMBERS`` (5,000) people or more, in a team that has any guest or
+external account, is always treated as external: its member list is not read whole.
 """
 
 import json
@@ -66,11 +73,26 @@ def _directory(client, team_id: str) -> tuple[frozenset[str], bool] | None:
     return frozenset(members), outsiders
 
 
+def _epoch_key(team_id: str) -> str:
+    return f"brain:slack:audience-epoch:{team_id}"
+
+
+def _verdict_key(team_id: str, channel: str) -> str:
+    """The cached verdict's key, under the team's current epoch: a new epoch leaves every old one unread."""
+    epoch = kv().get(_epoch_key(team_id)) or "0"
+    return f"brain:slack:audience:{team_id}:{epoch}:{channel}"
+
+
 def forget(team_id: str, channel: str | None = None) -> None:
-    """Drop the cached directory of ``team_id`` and, with ``channel``, its verdict."""
-    keys = [f"brain:slack:directory:{team_id}"] + ([f"brain:slack:audience:{team_id}:{channel}"] if channel else [])
+    """With ``channel``: drop that channel's verdict (its members or its sharing changed). Without: drop the
+    team's directory and every channel verdict of the team (a person joined, left or changed kind)."""
     try:
-        kv().delete(*keys)
+        if channel:
+            kv().delete(_verdict_key(team_id, channel), f"brain:slack:directory:{team_id}")
+        else:
+            kv().delete(f"brain:slack:directory:{team_id}")
+            kv().incr(_epoch_key(team_id))
+            kv().expire(_epoch_key(team_id), 7 * 24 * 60 * 60)
     except Exception:
         log.warning("[slack] audience cache not cleared team=%s", team_id)
 
@@ -102,13 +124,13 @@ def is_internal_audience(client, team_id: str, channel: str, info=None, *, is_dm
 def _channel_is_internal(client, team_id: str, channel: str, info) -> bool:
     if not channel:
         return False
-    key = f"brain:slack:audience:{team_id}:{channel}"
     try:
+        key = _verdict_key(team_id, channel)
         cached = kv().get(key)
         if cached is not None:
             return (cached.decode() if isinstance(cached, bytes) else cached) == "1"
     except Exception:
-        pass
+        key = None
     # The live lookup, not the cached identity: is_ext_shared is what this check is for.
     info = client.get_slack_conversation_info(channel)
     if info is None:
@@ -129,7 +151,8 @@ def _channel_is_internal(client, team_id: str, channel: str, info) -> bool:
                 return False
             verdict = all(user in members for user in in_channel)
     try:
-        kv().set(key, "1" if verdict else "0", ex=CACHE_SECONDS)
+        if key:
+            kv().set(key, "1" if verdict else "0", ex=CACHE_SECONDS)
     except Exception:
         pass
     return verdict

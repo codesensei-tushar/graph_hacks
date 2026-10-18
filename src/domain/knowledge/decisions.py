@@ -458,11 +458,18 @@ def uncited_work(graph, decision_id: str, service_ids: list[str], scopes: list[s
     decision = _decision(graph, decision_id)
     decided_at = to_millis(decision.decided_at) if decision else None
     words = _tokens(f"{decision.name} {decision.summary}") if decision else set()
+    # Each read starts from the services by id and walks in: started from the tickets, the planner
+    # scans every ticket. What the decision cites is collected once, not looked up per ticket.
     tickets = graph.ro_query(
         f"""
-        MATCH (ticket:Ticket)-[:ABOUT]->(service:Service)
-        WHERE service.id IN $services AND {SCOPED.format(var="ticket")}
-          AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(ticket)
+        OPTIONAL MATCH (decision:Decision {{id: $id}})
+        OPTIONAL MATCH (decision)-[:BASED_ON|CITES]->(cited)
+        WITH collect(DISTINCT ID(cited)) AS cited
+        UNWIND $services AS service_id
+        MATCH (service:Service {{id: service_id}})
+        WITH cited, service
+        MATCH (ticket:Ticket)-[:ABOUT]->(service)
+        WHERE {SCOPED.format(var="ticket")} AND NOT ID(ticket) IN cited
         RETURN ticket.id, ticket.name, service.id, service.name, coalesce(ticket.title, '') + ' ' + coalesce(ticket.summary, ''),
                [ticket.created_at, ticket.source_updated_at, ticket.updated_at]
         ORDER BY CASE WHEN coalesce(ticket.state, 'open') = 'closed' THEN 1 ELSE 0 END,
@@ -472,9 +479,14 @@ def uncited_work(graph, decision_id: str, service_ids: list[str], scopes: list[s
     ).result_set
     pull_requests = graph.ro_query(
         f"""
-        MATCH (pr:PullRequest)-[:TOUCHES]->(service:Service)
-        WHERE service.id IN $services AND {SCOPED.format(var="pr")}
-          AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(pr)
+        OPTIONAL MATCH (decision:Decision {{id: $id}})
+        OPTIONAL MATCH (decision)-[:BASED_ON|CITES]->(cited)
+        WITH collect(DISTINCT ID(cited)) AS cited
+        UNWIND $services AS service_id
+        MATCH (service:Service {{id: service_id}})
+        WITH cited, service
+        MATCH (pr:PullRequest)-[:TOUCHES]->(service)
+        WHERE {SCOPED.format(var="pr")} AND NOT ID(pr) IN cited
         RETURN pr.id, pr.name, service.id, service.name, coalesce(pr.title, '') + ' ' + coalesce(pr.summary, ''),
                [pr.created_at, pr.merged_at, pr.updated_at]
         ORDER BY pr.name
@@ -553,8 +565,11 @@ def superseded_decision(graph, title: str, supersedes: str | None, about: list[E
         return Supersession()
     rows = graph.ro_query(
         f"""
-        MATCH (d:Decision)-[:ABOUT]->(s:Service)
-        WHERE s.id IN $services AND {SCOPED.format(var="d")}
+        UNWIND $services AS service_id
+        MATCH (s:Service {{id: service_id}})
+        WITH s
+        MATCH (d:Decision)-[:ABOUT]->(s)
+        WHERE {SCOPED.format(var="d")}
           AND NOT (:Decision)-[:SUPERSEDES]->(d)
           AND coalesce(d.decided_at, 0) < $before
         RETURN DISTINCT d.id, d.name, coalesce(d.summary, ''), d.decided_at, coalesce(d.aliases, '')

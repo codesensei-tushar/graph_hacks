@@ -198,11 +198,12 @@ class ProductionSeedTicketTest(unittest.TestCase):
     def test_the_claude_api_resolves_here_and_an_unknown_database_does_not(self):
         # The production seed has a Claude API node, so step 4 of the demo still answers.
         self.assertTrue(ask_service.ask("what breaks if the claude api goes down, one hop", ORG).answer.startswith("If Claude API goes down"))
-        # "database" is FalkorDB's alias, and nothing here is called "stripe".
+        # Nothing here is called "stripe", and "database" is no alias: the self-seed shares a graph with
+        # Quillfern, whose Postgres and Graph Store hold the database words.
         stripe = ask_service.ask("what breaks if the stripe database goes down", ORG)
         self.assertFalse(stripe.found)
-        self.assertEqual(stripe.answer, "Nothing in the graph matches “stripe database”. Nearest: FalkorDB (known as “database”).")
+        self.assertTrue(stripe.answer.startswith("Nothing in the graph matches “stripe database”."), stripe.answer)
 
     def test_matched_title_links_to_the_seeded_service(self):
-        text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Memory layer recall misses DM notes"}, "org_shared")
-        self.assertIn("about Memory layer", text)
+        text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Slack memory layer recall misses DM notes"}, "org_shared")
+        self.assertIn("about Slack memory layer", text)

@@ -96,7 +96,7 @@ DEMO: dict[str, list[dict[str, str]]] = {
         {"prompt": "who owns the memory layer, and who else has worked on it", "expect": "The owner, then pull requests that touched the memory layer, with the path."},
         {"prompt": "why do we store memory in FalkorDB instead of a hosted memory API", "expect": "The decision, who proposed it, and the documents and chat it is based on."},
         {"prompt": "why did we cut vector recall", "expect": "The standing decision, the vector-index decision it superseded, and both dates."},
-        {"prompt": "what breaks if the claude api goes down", "expect": "Dependents grouped by hop, and the main connector: LLM gateway, 4 of the 5 reach Claude API through it."},
+        {"prompt": "what breaks if the claude api goes down", "expect": "Dependents grouped by hop, and the main connector: LLM gateway, 10 of the 11 reach Claude API through it."},
         {"prompt": "is the vector recall decision still the last word", "expect": "The standing recall decision, what it cites, and any ticket or pull request on that service it does not cite."},
         {"prompt": "who owns the linear integration", "expect": "Not in the graph. The answer says so and names the nearest matches. It never guesses."},
     ],

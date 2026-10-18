@@ -23,11 +23,11 @@ from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.api.v1.slack_install import _admin_denial
-from src.core import query_metrics
+from src.core import query_metrics, tenancy
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.onboarding.team_import import MAX_FILE_BYTES, TeamFileError, check_team, contents, describe, import_team
-from src.seed.seed import company_module, seed_company
+from src.seed.seed import SEED_NAMES, company_module, seed_company
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["ops"])
@@ -68,14 +68,24 @@ def metrics(request: Request):
 
 
 @router.post("/ops/seed")
-def seed(request: Request):
-    """Refresh the configured company's seed in place. Merges by id and never deletes, so
-    memories, workspaces and GitHub history survive; the counts say what changed."""
+def seed(request: Request, company: str | None = None):
+    """Refresh a seed in place in the legacy org's graph. Merges by id and never deletes, so
+    memories, workspaces and GitHub history survive; the counts say what changed.
+
+    ``?company=`` names the seed (``company_brain`` or ``quillfern``); without it, the configured
+    ``SEED_COMPANY``. Each seed's ids are its own, so ``company_brain`` merges next to Quillfern
+    without touching it. Always the legacy org: the route is legacy-only (``LegacyOrgRoutes``), and
+    the merge runs inside ``org_context(legacy_org())`` as well, so it never lands in another org."""
     if denied := _admin_denial(request):
         return denied
-    report = seed_company(company_module(settings.seed_company))
+    name = company or settings.seed_company
+    if name not in SEED_NAMES:
+        return JSONResponse({"error": "unknown_company", "companies": list(SEED_NAMES)}, status_code=400)
+    with tenancy.org_context(tenancy.legacy_org()):
+        report = seed_company(company_module(name))
     log.info("[ops] seed merged company=%s created nodes=%d edges=%d set=%d", report.company, report.nodes_created, report.edges_created, report.properties_set)
-    return {"company": settings.seed_company, "mode": "merge", **dataclasses.asdict(report)}
+    # ``company`` is the seed's name, as asked; ``company_id`` the Company node it merged.
+    return {**dataclasses.asdict(report), "company": name, "company_id": report.company, "mode": "merge"}
 
 
 @router.post("/ops/import")

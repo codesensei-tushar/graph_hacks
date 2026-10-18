@@ -70,6 +70,8 @@ settings:
       - reaction_removed
       - team_join
       - user_change
+      - channel_shared
+      - channel_unshared
   interactivity:
     is_enabled: true
     request_url: https://sharpie-iodine-girdle.ngrok-free.dev/slack/interactions

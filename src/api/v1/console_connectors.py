@@ -142,12 +142,29 @@ def _row(install: Install, status: str, *, account=None, site=None, created_by=N
     }
 
 
+# A Jira connect whose consent covered several sites waits, with no site and no account, for the
+# admin to pick one. Left longer than the OAuth state lives, nobody will: it is deleted.
+ABANDONED_SECONDS = 600
+
+
+def _abandoned(stored: store.ConnectorInstall, now_ms: int) -> bool:
+    return stored.status == "connecting" and not stored.site and not stored.external_account and stored.auth == "oauth" and (
+        now_ms - int(stored.created_at or now_ms) > ABANDONED_SECONDS * 1000
+    )
+
+
 def list_connections(org: tenancy.OrgRef) -> list[dict]:
     rows = []
     if tenancy.is_legacy(org):
         for _connector_, install in registry.installs():
             rows.append(_row(install, "active"))
+    now = int(time.time() * 1000)
     for stored in store.list_installs():
+        if _abandoned(stored, now):
+            # Nothing was claimed, read or written for it: only the record and its tokens go.
+            store.delete(stored.id)
+            log.info("[console] abandoned connect removed install=%s", stored.id)
+            continue
         install = Install(source=stored.source, id=stored.install, org=stored.org, auth=stored.auth)
         rows.append(
             _row(
@@ -304,6 +321,11 @@ def disconnect(install_key: str, request: Request, session=Depends(console_admin
             return JSONResponse({"error": "no such connection"}, status_code=404)
         if stored.status == "removing":
             return JSONResponse({"ok": True, "status": "removing"}, status_code=202)
+        if stored.status == "connecting" and not stored.site and not stored.external_account:
+            # A connect that never chose a site: nothing to remove but the record, so it goes at once.
+            store.delete(stored.id)
+            _audit(org.id, session, "connector.discard", install_key)
+            return {"ok": True, "status": "removed"}
         sync.remove_install(install_key, actor=_actor(session))
         _audit(org.id, session, "connector.disconnect.start", install_key)
         return JSONResponse({"ok": True, "status": "removing"}, status_code=202)

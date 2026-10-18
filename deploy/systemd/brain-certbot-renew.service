@@ -1,11 +1,14 @@
 [Unit]
-Description=Renew the brain/gdb Let's Encrypt certificate, then reload nginx
+Description=Renew the brain/falkordb/gdb Let's Encrypt certificate, then reload nginx
 Requires=docker.service
 After=docker.service
 
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/brain
+# First add any name in bootstrap-tls.sh's DOMAINS the certificate lacks, if its DNS is
+# ready. It always exits 0 (the leading "-" ignores even a crash), so renewal still runs.
+ExecStartPre=-/usr/bin/timeout 600 /opt/brain/bootstrap-tls.sh --ensure
 # certbot only renews when the certificate is within 30 days of expiry.
 ExecStart=/usr/bin/docker compose exec -T certbot certbot renew --quiet --no-random-sleep-on-renew
 # Runs only if the renew step succeeded.

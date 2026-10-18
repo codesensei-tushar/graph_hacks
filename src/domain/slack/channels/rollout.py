@@ -253,7 +253,13 @@ def _ensure_home_welcome(team_id: str, client, payload: dict) -> None:
         return
     start = min(max(int(row.get("next_message_index") or 0), 0), len(messages))
     for index in range(start, len(messages)):
-        ts = client.post_slack_message(payload["home_channel_id"], messages[index])
+        # A deterministic client_msg_id: a step run again (a worker died after posting, before recording)
+        # gets Slack's original message back instead of posting it twice.
+        posted = client.post_slack_message_idempotent(
+            payload["home_channel_id"], messages[index],
+            deterministic_uuid(f"rollout-home-welcome:{team_id}:{payload['home_channel_id']}:v{version}:{index}"),
+        )
+        ts = posted.ts if posted.ok else None
         if not ts:
             raise RuntimeError(f"home_welcome_message_{index + 1}_failed")
         row["next_message_index"] = index + 1
@@ -377,9 +383,11 @@ def ensure_public_channel_rollout_card(payload: dict) -> None:
     _ensure_home_welcome(team_id, ws.client, payload)
     if existing and existing["team_id"] == team_id and existing["home_channel_id"] == payload["home_channel_id"]:
         return
-    ts = ws.client.post_slack_message(
-        payload["home_channel_id"], "Getting to know your Slack", None, public_channel_rollout_card_blocks("idle")
+    posted = ws.client.post_slack_message_idempotent(
+        payload["home_channel_id"], "Getting to know your Slack",
+        deterministic_uuid(f"rollout-card:{team_id}:{payload['home_channel_id']}"), public_channel_rollout_card_blocks("idle"),
     )
+    ts = posted.ts if posted.ok else None
     if not ts:
         return
     _put(

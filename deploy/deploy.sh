@@ -10,7 +10,10 @@
 # it reports <sha> with FalkorDB ok (120 s). On failure it redeploys the SHA in
 # /opt/brain/last_good_sha and exits non-zero; on success it records <sha> there.
 #
-# It never touches certificates: bootstrap-tls.sh issues them, the systemd timer renews.
+# Certificates: bootstrap-tls.sh issues the first one, the systemd timer renews. After a
+# good deploy this script runs `bootstrap-tls.sh --ensure`, which adds any name in its DOMAINS
+# the certificate lacks (falkordb.noobsurd.space), but only once DNS points it at this VM; it
+# never fails the deploy and never touches a certificate it cannot replace.
 # It installs the nightly FalkorDB backup (backup/falkordb-backup.py and its timer) the same way.
 set -euo pipefail
 umask 077
@@ -78,7 +81,17 @@ activate() {
   install -m 0755 "$rel/bootstrap-tls.sh" "$BRAIN/bootstrap-tls.sh"
   install -m 0755 "$rel/backup/falkordb-backup.py" "$BRAIN/falkordb-backup.py"
   if [ ! -e "$BRAIN/nginx/active.conf" ]; then ln -s http.conf "$BRAIN/nginx/active.conf"; fi
+  # gdb.noobsurd.space serves the browser until --ensure switches it to the redirect.
+  if [ ! -e "$BRAIN/nginx/gdb-active.conf" ]; then ln -s browser.conf "$BRAIN/nginx/gdb-active.conf"; fi
   install_units "$rel/systemd"
+}
+
+browser_host() {
+  if [ "$(readlink "$BRAIN/nginx/gdb-active.conf" 2>/dev/null)" = gdb-redirect.conf ]; then
+    echo falkordb.noobsurd.space
+  else
+    echo gdb.noobsurd.space
+  fi
 }
 
 write_env() {
@@ -102,6 +115,8 @@ write_env() {
     env_line IMAGE_TAG "$1"
     env_line FALKORDB_PASSWORD "$falkordb"
     env_line NEXTAUTH_SECRET "$nextauth"
+    # The browser's public name: falkordb.* once gdb.* redirects there (bootstrap-tls.sh --ensure).
+    env_line BROWSER_HOST "$(browser_host)"
     env_line SLACK_SIGNING_SECRET "$signing"
     env_line SLACK_BOT_TOKEN "$bot"
     # The app reads LLM_API_KEY; MODEL_API_KEY is the Secret Manager name, kept for parity.
@@ -210,6 +225,8 @@ if "$SELF" --apply "$SHA"; then
   chmod 0644 "$BRAIN/last_good_sha"
   prune
   log "deployed $SHA"
+  # Add new certificate names if their DNS is ready. Never fails the deploy.
+  timeout 600 "$BRAIN/bootstrap-tls.sh" --ensure || log "certificate check failed (see above); the deploy stands"
   exit 0
 fi
 

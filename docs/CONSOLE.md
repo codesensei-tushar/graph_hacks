@@ -156,7 +156,9 @@ An owner or admin clicks **Connect** in the console.
      A tool with nothing to pick (HubSpot reads the whole portal) starts syncing from the callback
      itself: the install is loaded and its first step armed at once. It shows `connecting` until that
      step works, then `active`.
-   - `/console/connect/jira/site?id=<connection id>` when the Jira consent covers several sites.
+   - `/console/connect/jira/site?id=<connection id>` when the Jira consent covers several sites. Until a
+     site is chosen the connection has no site and no account; **Disconnect** discards it at once, and one
+     left unchosen past the OAuth state's ten minutes is deleted the next time the connections are listed.
    - `/console?error=<code>` on a failure.
    - Nothing from the vendor (an error description, a site name) is put in a URL or a page.
    - The redirect is `no-store`, and nginx logs paths without query strings.

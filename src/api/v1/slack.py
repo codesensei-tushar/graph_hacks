@@ -123,6 +123,9 @@ def _org_for_team(team_id: str | None) -> OrgRef:
 
 
 _ROUTE_UNAVAILABLE = {"error": "temporarily unavailable"}
+# Events that change who reads a channel. The sharing ones need nothing more than the cache dropped.
+SHARING_EVENTS = ("channel_shared", "channel_unshared")
+AUDIENCE_EVENTS = ("member_joined_channel", "member_left_channel", *SHARING_EVENTS)
 
 
 def _workspace_user_event(body: dict) -> tuple[str, str, str, dict] | None:
@@ -170,7 +173,7 @@ async def slack_events(request: Request, background: BackgroundTasks):
         key = f"slack:evt:{event_id}"
         if _seen(key):
             return {"ok": True}
-        # A new person: the audience caches (org_internal readers) start over.
+        # A new person, or one who became a guest or left: every audience verdict of the team starts over.
         channel_audience.forget(team_id)
         try:
             org = _org_for_team(team_id)
@@ -205,9 +208,13 @@ async def slack_events(request: Request, background: BackgroundTasks):
         _mark_seen(key)
         return {"ok": True}
 
-    if event.type in ("member_joined_channel", "member_left_channel") and event.channel:
-        # Who reads the channel changed: its org_internal verdict is asked again.
+    if event.type in AUDIENCE_EVENTS and event.channel:
+        # Who reads the channel changed (a member, or another organisation through Slack Connect):
+        # its org_internal verdict is asked again.
         channel_audience.forget(team_id, event.channel)
+        if event.type in SHARING_EVENTS:
+            _mark_seen(key)
+            return {"ok": True}
     try:
         org = _org_for_team(team_id)
     except orgs.RouteUnavailable:
