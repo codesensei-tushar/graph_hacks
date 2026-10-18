@@ -17,6 +17,12 @@ class Settings:
     falkordb_graph: str = field(default_factory=lambda: os.getenv("FALKORDB_GRAPH", "company"))
     # Empty locally (the dev docker-compose has no password); set in production.
     falkordb_password: str = field(default_factory=lambda: os.getenv("FALKORDB_PASSWORD", ""))
+    # The control graph: orgs, Slack workspace routes, external accounts, invite codes, audit (src/core/tenancy.py).
+    control_graph: str = field(default_factory=lambda: os.getenv("BRAIN_CONTROL_GRAPH", "") or "brain_control")
+    # A graph call with no org in context raises instead of falling back to the legacy org. Tests only.
+    tenancy_strict: bool = field(default_factory=lambda: os.getenv("TENANCY_STRICT", "").lower() in ("1", "true", "yes"))
+    # The org console (/console, /auth). Off by default: production is unchanged until it is turned on.
+    console_enabled: bool = field(default_factory=lambda: os.getenv("CONSOLE_ENABLED", "").lower() in ("1", "true", "yes"))
     # Seed the company graph on startup when it's empty. Local development only; off in production.
     seed_on_startup: bool = field(default_factory=lambda: os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"))
     # Post a heads-up to the Slack home channel when a new public pull request reaches people who weren't on it.
@@ -41,6 +47,10 @@ class Settings:
     public_url: str = field(default_factory=lambda: os.getenv("PUBLIC_URL", "").rstrip("/"))
     # Fernet key for bot tokens stored in FalkorDB. Needs the `cryptography` package.
     token_encryption_key: str = field(default_factory=lambda: os.getenv("TOKEN_ENCRYPTION_KEY", ""))
+    # MultiFernet keys, comma-separated; the first encrypts, all decrypt. TOKEN_ENCRYPTION_KEY is tried last.
+    token_encryption_keys: tuple[str, ...] = field(
+        default_factory=lambda: tuple(key.strip() for key in os.getenv("TOKEN_ENCRYPTION_KEYS", "").split(",") if key.strip()), repr=False
+    )
     # Bearer token for the install/status/disconnect routes; there is no web login.
     brain_admin_token: str = field(default_factory=lambda: os.getenv("BRAIN_ADMIN_TOKEN", ""))
     # The web console (sign in with Slack, /console/api, /ops/invites). Off by default:

@@ -31,7 +31,11 @@ def client() -> FalkorDB:
 
 
 def graph_name() -> str:
-    return settings.falkordb_graph
+    """The graph of the org in context (src/core/tenancy.py); with none, the legacy org's,
+    ``settings.falkordb_graph``. Under ``TENANCY_STRICT`` a missing org raises instead."""
+    from src.core.tenancy import current_org_ref
+
+    return current_org_ref().graph
 
 
 class EmptyResult:
