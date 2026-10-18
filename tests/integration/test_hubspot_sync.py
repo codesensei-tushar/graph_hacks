@@ -71,6 +71,7 @@ class HubSpotSyncTest(unittest.TestCase):
         seed.reset_and_seed(quillfern)
         quillfern_sales.seed_sales()
         type(self).fake = FakeHubSpot()
+        registry.get("hubspot")._directories.clear()
         sync._containers.clear()
         registry.configure(INSTALL)
         self._drain()
@@ -167,6 +168,14 @@ class HubSpotSyncTest(unittest.TestCase):
         owner = _ask("who owns Bramblecote Analytics")
         self.assertEqual(owner.answer, "The Bramblecote Analytics account is owned by Riley Chen.")
         self.assertEqual(_cites(owner), ["Riley Chen -[OWNS]-> Bramblecote Analytics"])
+
+    def test_a_deactivated_owner_loses_their_accounts_at_the_next_poll(self):
+        self.fake.active_owners = [owner for owner in self.fake.active_owners if owner["id"] != "102"]
+        registry.get("hubspot")._directories.clear()  # the owners list is read again
+        sync.sync_now("hubspot")
+        self._drain()
+        self.assertEqual(_rows("MATCH (:Person {id: 'dev'})-[r]->(s:Service {source: 'hubspot'}) RETURN type(r), s.name"), [])
+        self.assertEqual(_ask("who owns Saltwick Outfitters").answer, "The Saltwick Outfitters account is in the graph, and no owner or team is recorded for it.")
 
     def test_a_second_full_sync_changes_nothing(self):
         def counts():

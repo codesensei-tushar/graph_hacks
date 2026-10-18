@@ -74,6 +74,26 @@ class DatedPathsTest(unittest.TestCase):
         self.assertEqual(http.calls[0][3], {"inputs": [{"id": "9001"}, {"id": "9002"}, {"id": "9003"}, {"id": "9004"}]})
 
 
+class PagingTest(unittest.TestCase):
+    def test_owners_stop_when_the_paging_cursor_repeats(self):
+        page = load("owners.json")  # always answers "after": "3"
+        client, http = _client({("GET", "/crm/owners/2026-09"): page})
+        self.assertEqual(len(client.owners()), 6)
+        self.assertEqual(len(http.calls), 2)
+
+    def test_associations_follow_each_records_own_paging(self):
+        first = {"results": [{"from": {"id": "9001"}, "to": [{"toObjectId": 1}], "paging": {"next": {"after": "a1"}}}, {"from": {"id": "9002"}, "to": [{"toObjectId": 3}]}]}
+        second = {"results": [{"from": {"id": "9001"}, "to": [{"toObjectId": 2}]}]}
+        path = "/crm/associations/2026-09/companies/deals/batch/read"
+        http = FakeJson({})
+        answers = iter([first, second])
+        http.request = lambda method, p, params=None, body=None: (http.calls.append((method, p, params, body)) or next(answers), {})
+        client = HubSpotClient("pat-fake", http=http)
+        self.assertEqual(client.associations("companies", "deals", ["9001", "9002"]), {"9001": ["1", "2"], "9002": ["3"]})
+        self.assertEqual([call[3] for call in http.calls], [{"inputs": [{"id": "9001"}, {"id": "9002"}]}, {"inputs": [{"id": "9001", "after": "a1"}]}])
+        self.assertEqual({call[1] for call in http.calls}, {path})
+
+
 class LegacyPathsTest(unittest.TestCase):
     def test_v3_uses_the_numbered_paths(self):
         client, http = _client({}, version="v3")

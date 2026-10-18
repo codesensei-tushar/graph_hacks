@@ -5,11 +5,13 @@ One code path for the backfill and every poll: the CRM search API, filtered and 
 
 - ``{"mode": "backfill", "after": ..., "start": ms, "count": n}``: accounts newest first,
   100 a page, until ``MAX_COMPANIES``; then the first poll starts from ``start``;
-- ``{"mode": "poll", "phase": "companies"|"deals", "since": ms, "after": ..., "next": ms}``:
+- ``{"mode": "poll", "phase": "companies"|"deals", "since": ms, "after": ..., "next": ms, "owners": [...]}``:
   accounts changed since ``since``, then deals changed since ``since`` (a new deal or a stage
   or owner change), each re-sent as its company with every edge it has. A cycle's ``next``
   is HubSpot's clock when the cycle began, less ``OVERLAP_MS``, because a change takes a
-  few moments to reach search.
+  few moments to reach search. ``window`` is where a long query started again, since search
+  stops at 10,000 results. ``owners`` are the active owners when the cycle began: one gone
+  by the next cycle has the accounts they held re-sent without them.
 
 Writing a company replaces its edges, so a page always carries a company with all of them:
 OWNS from its owner and WORKED_ON from each owner of a deal that counts (``mapping.py``).
@@ -28,6 +30,8 @@ from src.connectors.http import HttpError
 MAX_COMPANIES = 500
 PAGE_SIZE = BATCH
 OVERLAP_MS = 2 * 60 * 1000
+# HubSpot search returns at most this many results for one query.
+SEARCH_LIMIT = 10_000
 # How long the owners list and the deal stage labels are reused.
 DIRECTORY_SECONDS = 600
 
@@ -78,8 +82,9 @@ class HubSpotConnector(Connector):
         companies = [company for company in companies if mapping.in_scope(company)][: MAX_COMPANIES - state.get("count", 0)]
         count = state.get("count", 0) + len(companies)
         page = self._page(install, container, client, companies)
+        owners, _ = self._directory(install, client)
         # Polling resumes from when the backfill began, wherever the framework ends it.
-        page.poll_cursor = _encode(mode="poll", phase="companies", since=start - OVERLAP_MS)
+        page.poll_cursor = _encode(mode="poll", phase="companies", since=start - OVERLAP_MS, owners=sorted(owners))
         if after and count < MAX_COMPANIES:
             page.next_cursor, page.has_more = _encode(mode="backfill", after=after, start=start, count=count), True
         else:
@@ -88,35 +93,62 @@ class HubSpotConnector(Connector):
 
     def _poll_companies(self, install: Install, container: Container, client: HubSpotClient, state: dict) -> Page:
         since = int(state["since"])
-        companies, after, headers = client.search("companies", _search_body(mapping.scope_filters(since), "ASCENDING", state.get("after")))
+        window = int(state.get("window") or since)
+        companies, after, headers = client.search("companies", _search_body(mapping.scope_filters(window), "ASCENDING", state.get("after")))
         upcoming = state.get("next") or self._server_ms(headers) - OVERLAP_MS
-        page = self._page(install, container, client, [company for company in companies if mapping.in_scope(company)])
-        if not state.get("after"):
+        changed = [company for company in companies if mapping.in_scope(company)]
+        owners = state.get("owners")
+        cycle_start = not state.get("after") and state.get("next") is None
+        if cycle_start:
+            active, _ = self._directory(install, client)
+            if owners is not None:
+                # Deactivating a user changes none of their records, so their accounts are asked for here.
+                changed += self._held_by(client, sorted(set(owners) - set(active)))
+            owners = sorted(active)
+        page = self._page(install, container, client, list({str(company["id"]): company for company in changed}.values()))
+        if cycle_start:
             # Every active owner once a cycle, so one whose Person arrives later is linked within a poll.
-            owners, _ = self._directory(install, client)
+            active, _ = self._directory(install, client)
             sent = {user.external_id for user in page.users}
-            page.users += self._users(install, owners, [owner for owner in owners if owner not in sent])
+            page.users += self._users(install, active, [owner for owner in active if owner not in sent])
         if after:
-            page.next_cursor = _encode(mode="poll", phase="companies", since=since, after=after, next=upcoming)
+            window, after = _window(window, after, companies)
+            page.next_cursor = _encode(mode="poll", phase="companies", since=since, window=window, after=after, next=upcoming, owners=owners)
         else:
-            page.next_cursor = _encode(mode="poll", phase="deals", since=since, next=upcoming)
+            page.next_cursor = _encode(mode="poll", phase="deals", since=since, next=upcoming, owners=owners)
         page.has_more = True
         return page
 
     def _poll_deals(self, install: Install, container: Container, client: HubSpotClient, state: dict) -> Page:
         since = int(state["since"])
-        changed = [{"filters": [{"propertyName": "hs_lastmodifieddate", "operator": "GTE", "value": str(since)}]}]
+        window = int(state.get("window") or since)
+        changed = [{"filters": [{"propertyName": "hs_lastmodifieddate", "operator": "GTE", "value": str(window)}]}]
         body = _search_body(changed, "ASCENDING", state.get("after"), properties=["hs_lastmodifieddate"])
         deals, after, _ = client.search("deals", body)
+        page = self._page(install, container, client, self._companies_of(client, deals))
+        if after:
+            window, after = _window(window, after, deals)
+            page.next_cursor = _encode(mode="poll", phase="deals", since=since, window=window, after=after, next=state.get("next"), owners=state.get("owners"))
+            page.has_more = True
+        else:
+            page.next_cursor = _encode(mode="poll", phase="companies", since=max(since, int(state.get("next") or since)), owners=state.get("owners"))
+        return page
+
+    def _companies_of(self, client: HubSpotClient, deals: list[dict]) -> list[dict]:
+        """The accounts these deals belong to."""
         linked = client.associations("deals", "companies", [str(deal["id"]) for deal in deals]) if deals else {}
         company_ids = list(dict.fromkeys(company for deal in deals for company in linked.get(str(deal["id"]), [])))
         companies = client.batch_read("companies", company_ids, mapping.COMPANY_PROPERTIES) if company_ids else []
-        page = self._page(install, container, client, [company for company in companies if mapping.in_scope(company)])
-        if after:
-            page.next_cursor, page.has_more = _encode(mode="poll", phase="deals", since=since, after=after, next=state.get("next")), True
-        else:
-            page.next_cursor = _encode(mode="poll", phase="companies", since=max(since, int(state.get("next") or since)))
-        return page
+        return [company for company in companies if mapping.in_scope(company)]
+
+    def _held_by(self, client: HubSpotClient, owner_ids: list[str]) -> list[dict]:
+        """Accounts owned by these owners, or with a deal they own: up to a page of each, re-sent without them."""
+        if not owner_ids:
+            return []
+        owned = [{"filters": [{"propertyName": "hubspot_owner_id", "operator": "IN", "values": owner_ids}]}]
+        companies, _, _ = client.search("companies", _search_body(owned, "DESCENDING", None))
+        deals, _, _ = client.search("deals", _search_body(owned, "DESCENDING", None, properties=["hs_lastmodifieddate"]))
+        return [company for company in companies if mapping.in_scope(company)] + self._companies_of(client, deals)
 
     def _page(self, install: Install, container: Container, client: HubSpotClient, companies: list[dict]) -> Page:
         """The companies as accounts, each with all its edges, and the owners those edges name."""
@@ -172,6 +204,16 @@ class HubSpotConnector(Connector):
             return int(email.utils.parsedate_to_datetime(headers["date"]).timestamp() * 1000)
         except (KeyError, TypeError, ValueError):
             return int(self._clock() * 1000)
+
+
+def _window(since: int, after: str | None, records: list[dict]) -> tuple[int, str | None]:
+    """The next page's ``since`` and ``after``. HubSpot answers 400 past 10,000 results of one query, so
+    before that the query starts again from the last record's time (GTE, so nothing is skipped)."""
+    if after and int(after) + PAGE_SIZE > SEARCH_LIMIT and records:
+        last = mapping.parse_time((records[-1].get("properties") or {}).get("hs_lastmodifieddate"))
+        if last is not None and int(last * 1000) > since:
+            return int(last * 1000), None
+    return since, after
 
 
 def _search_body(filter_groups: list[dict], direction: str, after: str | None, properties: list[str] | None = None) -> dict:

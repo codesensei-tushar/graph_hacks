@@ -39,7 +39,9 @@ stage, or a company whose deals were all lost. `status` keeps the stage HubSpot 
 
 **Who left.** Only active users hold edges. A deal or company owned by a deactivated user
 adds no edge, so an account whose owner has left reads as having no owner, and a person who
-left is never named "next in line".
+left is never named "next in line". Deactivating a user changes none of their records, so each
+poll compares the active owners with the last poll's, and re-sends the accounts a departed
+owner owned or had a deal on (up to 100 of each) without them.
 
 ## Who can read it
 
@@ -88,7 +90,10 @@ One code path, HubSpot's CRM search sorted on `hs_lastmodifieddate`, 100 compani
   has, since writing an account replaces its edges. A poll starts two minutes before the last
   one began, by HubSpot's clock, because a change takes a moment to reach search.
 
-The owners list and the deal stage labels are read once every ten minutes.
+The owners list and the deal stage labels are read once every ten minutes. HubSpot search stops
+at 10,000 results for one query, so a poll after a bulk edit starts its query again from the
+last record's time before reaching that. A company's deals are read 500 associations a page,
+up to its first 5,000.
 
 **Not yet:** webhooks (polling only). A company deleted or merged in HubSpot, or one that stops
 being an account (no longer a customer, and its deals deleted), stays in the graph as it was

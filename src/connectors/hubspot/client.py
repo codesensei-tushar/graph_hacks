@@ -15,6 +15,8 @@ BASE_URL = "https://api.hubapi.com"
 API_VERSION = "2026-09"
 # Search and batch reads take at most 100 ids or results per call.
 BATCH = 100
+# Association pages read per record: 500 associations each, so a company's first 5,000 deals.
+MAX_ASSOCIATION_PAGES = 10
 
 
 class HubSpotClient:
@@ -47,7 +49,7 @@ class HubSpotClient:
 
     def owners(self, archived: bool = False) -> list[dict]:
         owners: list[dict] = []
-        after = None
+        after, seen = None, set()
         while True:
             params = {"limit": BATCH, "archived": "true" if archived else "false"}
             if after:
@@ -55,8 +57,9 @@ class HubSpotClient:
             data = self.http.get(self.path("owners"), params) or {}
             owners.extend(data.get("results") or [])
             after = ((data.get("paging") or {}).get("next") or {}).get("after")
-            if not after:
+            if not after or after in seen:  # a paging cursor that repeats would loop forever
                 return owners
+            seen.add(after)
 
     def deal_stages(self) -> dict[str, str]:
         """Every deal stage id to its label, across pipelines: ``closedwon`` -> ``Closed won``."""
@@ -80,13 +83,22 @@ class HubSpotClient:
         return records
 
     def associations(self, from_type: str, to_type: str, ids: list[str]) -> dict[str, list[str]]:
-        """Each record id to the ids of the ``to_type`` records it is associated with."""
+        """Each record id to the ids of the ``to_type`` records it is associated with. A record with more
+        than one page of them (500) is asked again with its own ``after``, up to ``MAX_ASSOCIATION_PAGES``."""
         linked: dict[str, list[str]] = {}
-        for start in range(0, len(ids), BATCH):
-            chunk = ids[start : start + BATCH]
-            body = {"inputs": [{"id": str(record_id)} for record_id in chunk]}
-            data = self.http.post(self.path("associations", f"{from_type}/{to_type}/batch/read"), body) or {}
-            for row in data.get("results") or []:
-                source = str((row.get("from") or {}).get("id"))
-                linked.setdefault(source, []).extend(str(to["toObjectId"]) for to in row.get("to") or [] if to.get("toObjectId") is not None)
+        pending = [{"id": str(record_id)} for record_id in ids]
+        for _ in range(MAX_ASSOCIATION_PAGES):
+            if not pending:
+                break
+            more = []
+            for start in range(0, len(pending), BATCH):
+                body = {"inputs": pending[start : start + BATCH]}
+                data = self.http.post(self.path("associations", f"{from_type}/{to_type}/batch/read"), body) or {}
+                for row in data.get("results") or []:
+                    source = str((row.get("from") or {}).get("id"))
+                    linked.setdefault(source, []).extend(str(to["toObjectId"]) for to in row.get("to") or [] if to.get("toObjectId") is not None)
+                    after = ((row.get("paging") or {}).get("next") or {}).get("after")
+                    if after:
+                        more.append({"id": source, "after": str(after)})
+            pending = more
         return linked

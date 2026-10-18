@@ -13,6 +13,7 @@ from tests.fixtures.hubspot.fake_hubspot import SERVER_MS, FakeHubSpot
 INSTALL = Install("hubspot", config={"token": "pat-test"})
 NOW = SERVER_MS / 1000
 LARKSPUR = "hubspot:default:company:9001"
+OWNERS = ["101", "102", "103", "104"]
 
 
 class Clock:
@@ -90,7 +91,7 @@ class BackfillTest(unittest.TestCase):
             ("104", "Riley Chen", "riley@partner.example.org"),
         ])
         self.assertEqual((page.has_more, page.deleted_ids, page.retry_after), (False, [], None))
-        self.assertEqual(_cursor(page), {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS})
+        self.assertEqual(_cursor(page), {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS, "owners": OWNERS})
 
     def test_the_backfill_asks_only_for_accounts_newest_first(self):
         self.connector.fetch(INSTALL, self.container, None)
@@ -115,11 +116,11 @@ class BackfillTest(unittest.TestCase):
             with mock.patch.object(hubspot, "MAX_COMPANIES", 3):
                 capped = self.connector.fetch(INSTALL, self.container, first.next_cursor)
         self.assertEqual(([item.external_id for item in capped.items], capped.has_more), (["company:9003"], False))
-        self.assertEqual(_cursor(capped), {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS})
+        self.assertEqual(_cursor(capped), {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS, "owners": OWNERS})
 
     def test_every_backfill_page_says_where_polling_resumes(self):
         # The framework may end a backfill at its own cap; polling then starts from when the backfill began.
-        poll = {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS}
+        poll = {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS, "owners": OWNERS}
         with mock.patch.object(hubspot, "PAGE_SIZE", 2):
             first = self.connector.fetch(INSTALL, self.container, None)
             second = self.connector.fetch(INSTALL, self.container, first.next_cursor)
@@ -153,14 +154,14 @@ class PollTest(unittest.TestCase):
         self.assertEqual((companies.items, companies.has_more), ([], True))
         # Every active owner comes once a cycle, so a Person who arrived since is linked now.
         self.assertEqual([user.external_id for user in companies.users], ["101", "102", "103", "104"])
-        self.assertEqual(_cursor(companies), {"mode": "poll", "phase": "deals", "since": self.SINCE, "next": SERVER_MS - hubspot.OVERLAP_MS})
+        self.assertEqual(_cursor(companies), {"mode": "poll", "phase": "deals", "since": self.SINCE, "next": SERVER_MS - hubspot.OVERLAP_MS, "owners": OWNERS})
         body = self.fake.searches("companies")[-1]
         self.assertEqual(body["sorts"][0]["direction"], "ASCENDING")
         self.assertEqual(body["filterGroups"], hubspot.mapping.scope_filters(self.SINCE))
 
         deals = self.connector.fetch(INSTALL, self.container, companies.next_cursor)
         self.assertEqual((deals.items, deals.has_more), ([], False))
-        self.assertEqual(_cursor(deals), {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS})
+        self.assertEqual(_cursor(deals), {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS, "owners": OWNERS})
         self.assertEqual(self.fake.searches("deals")[-1]["filterGroups"], [{"filters": [{"propertyName": "hs_lastmodifieddate", "operator": "GTE", "value": str(self.SINCE)}]}])
 
     def test_a_company_that_changed_is_sent_with_every_edge_it_has(self):
@@ -184,6 +185,35 @@ class PollTest(unittest.TestCase):
     def test_the_window_never_moves_back(self):
         cursor = json.dumps({"mode": "poll", "phase": "deals", "since": self.SINCE, "next": self.SINCE - 1})
         self.assertEqual(_cursor(self.connector.fetch(INSTALL, self.container, cursor))["since"], self.SINCE)
+
+    def test_a_deactivated_owner_has_their_accounts_resent_without_them(self):
+        # Dev (102) is deactivated: none of his records change, so only the owners list says so.
+        self.fake.active_owners = [owner for owner in self.fake.active_owners if owner["id"] != "102"]
+        cursor = json.dumps({"mode": "poll", "phase": "companies", "since": self.SINCE, "owners": OWNERS})
+        page = self.connector.fetch(INSTALL, self.container, cursor)
+        # Larkspur and Saltwick are his accounts; Larkspur also has his won renewal.
+        self.assertEqual(sorted(item.name for item in page.items), ["Larkspur Freightways", "Saltwick Outfitters"])
+        self.assertFalse([edge for edge in page.edges if edge.from_id == "hubspot:default:user:102"])
+        self.assertEqual([(edge.rel, edge.from_id) for edge in page.edges if edge.to_id == LARKSPUR], [("WORKED_ON", "hubspot:default:user:101")])
+        self.assertEqual(_cursor(page)["owners"], ["101", "103", "104"])
+        self.assertEqual(self.fake.searches("companies")[-1]["filterGroups"], [{"filters": [{"propertyName": "hubspot_owner_id", "operator": "IN", "values": ["102"]}]}])
+
+    def test_nothing_is_resent_when_no_owner_left_or_the_cursor_predates_owners(self):
+        for cursor in ({"mode": "poll", "phase": "companies", "since": self.SINCE, "owners": OWNERS}, {"mode": "poll", "phase": "companies", "since": self.SINCE}):
+            self.assertEqual(self.connector.fetch(INSTALL, self.container, json.dumps(cursor)).items, [])
+        self.assertFalse([body for body in self.fake.searches() if body["filterGroups"][0]["filters"][0]["propertyName"] == "hubspot_owner_id"])
+
+    def test_a_query_past_ten_thousand_results_starts_again_from_the_last_record(self):
+        cursor = json.dumps({"mode": "poll", "phase": "companies", "since": 0, "owners": OWNERS})
+        with mock.patch.object(hubspot, "PAGE_SIZE", 2), mock.patch.object(hubspot, "SEARCH_LIMIT", 4):
+            first = self.connector.fetch(INSTALL, self.container, cursor)
+            self.assertEqual(_cursor(first)["after"], "2")
+            second = self.connector.fetch(INSTALL, self.container, first.next_cursor)
+        # Ascending, the second page ends on Tidewhistle (2026-10-12T10:00Z); "after" 4 would pass the limit.
+        state = _cursor(second)
+        self.assertEqual((state["phase"], state["since"], state["window"], state.get("after")), ("companies", 0, 1791799200000, None))
+        self.assertEqual(self.fake.searches("companies")[-1]["filterGroups"], hubspot.mapping.scope_filters(0))
+        self.assertEqual(hubspot._window(5, None, []), (5, None))
 
 
 class DirectoryTest(unittest.TestCase):
