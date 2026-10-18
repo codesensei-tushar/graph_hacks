@@ -23,10 +23,9 @@ A section with nothing in it is not shown as an empty box: the payload names the
 
 from dataclasses import dataclass, field
 
-from src.db import falkordb_client
 from src.db.falkordb_client import connect
 from src.domain.knowledge import kinds, people
-from src.domain.knowledge.ask_api import ANSWERS, graph_of
+from src.domain.knowledge.ask_api import ANSWERS, cache_key, graph_of
 from src.domain.knowledge.decisions import format_date, to_millis
 from src.domain.knowledge.dto import PathStep, day_from
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, join_names
@@ -237,12 +236,12 @@ class TeamPage:
 
 def public_teams() -> list[TeamSummary]:
     """Every team a public channel can see, computed at most once per cache period."""
-    return ANSWERS.get_or_compute(("teams", falkordb_client.graph_name()), list_teams)
+    return ANSWERS.get_or_compute(cache_key("teams"), list_teams)
 
 
 def public_team_page(team_id: str) -> TeamPage | None:
     """One team's page for a public reader, computed at most once per cache period."""
-    return ANSWERS.get_or_compute(("team", falkordb_client.graph_name(), team_id), lambda: team_page(team_id))
+    return ANSWERS.get_or_compute(cache_key("team", team_id), lambda: team_page(team_id))
 
 
 def list_teams(scopes=DEFAULT_SCOPES) -> list[TeamSummary]:
