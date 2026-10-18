@@ -61,11 +61,14 @@ _BRIEF = re.compile(
     re.IGNORECASE,
 )
 # A change and the people it should reach: "who should know about notebook#45", "who else should
-# review it", "who should we loop in". Before blast radius and owners, which share its words.
+# review it", "who should we loop in". After the decision and memory routes, so "who needs to know
+# why we moved off postgres" stays a decision question; before blast radius and owners, which share
+# its words. A ticket is asked about, not changed: "who should I ping about TKT-101" stays on who_knows.
 _SHOULD_KNOW = re.compile(
     r"\bwho (?:else )?(?:should|needs to) (?:know|review|be told|hear)\b|\bwho should (?:i|we) (?:loop in|tell|ping)\b",
     re.IGNORECASE,
 )
+_TICKET_ID = re.compile(r"\b[a-z]{2,}-\d+\b", re.IGNORECASE)
 # People between teams. "how is maya connected to the invoice worker" is a path question.
 _CONNECTORS = re.compile(r"\bwho (?:connects|bridges|links)\b|\b(?:bridges?|connectors?|go-betweens?) between\b", re.IGNORECASE)
 
@@ -82,8 +85,6 @@ def route(question: str) -> tuple[str, dict]:
         return "if_person_leaves", {"name": text}
     if _BRIEF.search(text):
         return "onboarding_brief", {"name": text}
-    if _SHOULD_KNOW.search(text):
-        return "who_should_know", {"name": text}
     if _PRESSURE.search(text):
         return "decision_pressure", {"topic": text}
     if _LOAD_BEARING.search(text):
@@ -99,6 +100,8 @@ def route(question: str) -> tuple[str, dict]:
         return "related_memories", {"name": text}
     if _RECALL.search(text):
         return "recall", {"query": text}
+    if _SHOULD_KNOW.search(text) and not _TICKET_ID.search(text):
+        return "who_should_know", {"name": text}
     if _BLAST.search(text):
         args = {"name": text}
         depth = algorithms.depth_in(text)

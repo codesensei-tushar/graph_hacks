@@ -204,9 +204,9 @@ register(
     ToolSpec(
         name="who_should_know",
         description=(
-            "Who should know about a change but wasn't involved: owners of everything that depends on what a pull request "
-            "or service change touches, up to two hops, minus the author and reviewers, with whether each has worked with "
-            "the author before."
+            "Who should know about a change but wasn't involved: owners of what a pull request or service change touches "
+            "and of everything that depends on it, up to two hops, minus the author and reviewers, with whether each has "
+            "worked with the author before."
         ),
         args_schema=_schema(
             {

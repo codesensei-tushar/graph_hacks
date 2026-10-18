@@ -3,7 +3,11 @@
 The setup adds a private ticket Lena and Maya both worked on, a second pull request
 numbered 45 in another repo, an open pull request on HubSpot by a GitHub account that is
 linked to no one, and a chain of its own for the unowned cases: Tax report (a process, no
-owner) depends on Payouts (Arjun's), which depends on Ledger (no owner).
+owner) depends on Payouts (Arjun's), which depends on Ledger (no owner). For the review
+fixes: Lena's open notebook#77 touches Auth and Search (Search depends on Auth); docs#12345
+is titled like a service and is one digit longer than docs#1234; docs#12 shares a number
+with the issue notebook#12; a second GitHub account linked to Maya worked with Lena in a
+private repo; and Audit log, co-owned by Maya and Sara, has a dependent Kofi owns.
 """
 
 import unittest
@@ -12,7 +16,7 @@ from unittest import mock
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_service, catalogue, coordination, mcp_tools  # noqa: E402
+from src.domain.knowledge import agent, ask_service, catalogue, coordination, mcp_tools  # noqa: E402
 from src.seed import quillfern, quillfern_sales, seed  # noqa: E402
 from scripts.replay.driver import load_github_history  # noqa: E402
 
@@ -20,6 +24,7 @@ GRAPH = f"company_coordination_test{tests.TEST_GRAPH_SUFFIX}"
 ORG = ["org_shared"]
 PRIVATE_REPO = "github_repo_9002"
 PRIVATE_ROOM = "slack_channel_GCOORD"
+SIDE_REPO = "github_repo_9005"
 
 
 def _ask(name: str, scopes=None):
@@ -58,6 +63,22 @@ class WhoShouldKnowTest(unittest.TestCase):
                    (arjun)-[:OWNS]->(payouts)
             """,
             {"room": PRIVATE_ROOM},
+        )
+        graph.query(
+            """
+            MATCH (auth:Service {id: 'auth-service'}), (search:Service {id: 'search-service'}), (lena:GitHubUser {login: 'lena-fischer'}),
+                  (maya:Person {id: 'maya'}), (sara:Person {id: 'sara'}), (kofi:Person {id: 'kofi'})
+            CREATE (pr77:PullRequest {id: 'github:9001:pr:77', name: 'notebook#77', number: 77, title: 'Share the session cache with search', state: 'open', merged: false}),
+                   (lena)-[:AUTHORED]->(pr77), (pr77)-[:TOUCHES]->(auth), (pr77)-[:TOUCHES]->(search),
+                   (:PullRequest {id: 'github:9003:pr:12345', name: 'docs#12345', number: 12345, title: 'Auth service', state: 'open', merged: false}),
+                   (:PullRequest {id: 'github:9003:pr:12', name: 'docs#12', number: 12, title: 'Fix a broken link', state: 'open', merged: false}),
+                   (alt:GitHubUser {id: '9201', login: 'maya-alt', name: 'maya-alt'})-[:IS]->(maya),
+                   (side:PullRequest {id: 'github:9005:pr:60', name: 'side#60', number: 60, title: 'Try a faster tokenizer', state: 'closed', merged: true, scope: $side}),
+                   (alt)-[:AUTHORED]->(side), (lena)-[:REVIEWED]->(side),
+                   (audit:Service {id: 'audit-log', name: 'Audit log'}), (maya)-[:OWNS]->(audit), (sara)-[:OWNS]->(audit),
+                   (kofi)-[:OWNS]->(:Service {id: 'audit-export', name: 'Audit export'})-[:DEPENDS_ON]->(audit)
+            """,
+            {"side": SIDE_REPO},
         )
 
     @classmethod
@@ -108,7 +129,7 @@ class WhoShouldKnowTest(unittest.TestCase):
             "on the pull request. Maya Ortiz owns API Gateway (1 hop) and has never worked with Lena Fischer on a pull request, "
             "ticket or decision: introduce them now, since it has already merged.",
         )
-        for name in ("PR 52", "pr #52", "pull request 52", "#52", "notebook#52", "52"):
+        for name in ("PR 52", "pr #52", "PR#52", "who should know about pr#52", "pull request 52", "#52", "notebook#52", "52"):
             with self.subTest(name=name):
                 self.assertEqual(_ask(name).answer, expected)
         self.assertEqual(
@@ -125,12 +146,32 @@ class WhoShouldKnowTest(unittest.TestCase):
         result = _ask("who else should review crm-sync#3")
         self.assertEqual(
             result.answer,
-            "crm-sync#3 changes the HubSpot system. 1 person who owns something that depends on it wasn't on the pull request. "
-            "Priya Shah runs the Renewals process (1 hop), owns the Pricing playbook (2 hops) and has never worked with "
-            "@outside-dev on a pull request, ticket or decision: introduce them before this merges.",
+            "crm-sync#3 changes the HubSpot system. 2 people who own what it changes or something that depends on it weren't on "
+            "the pull request. Noor Haddad owns the HubSpot system (which it changes) and has never worked with @outside-dev on a "
+            "pull request, ticket or decision: introduce them before this merges. Priya Shah runs the Renewals process (1 hop), "
+            "owns the Pricing playbook (2 hops) and has never worked with @outside-dev on a pull request, ticket or decision: "
+            "introduce them before this merges.",
         )
         self.assertIn("Pricing playbook -[DEPENDS_ON]-> Renewals", _cites(result))
         self.assertIn("Priya Shah -[OWNS]-> Pricing playbook", _cites(result))
+        self.assertEqual(_cites(result)[:2], ["crm-sync#3 -[TOUCHES]-> HubSpot", "Noor Haddad -[OWNS]-> HubSpot"])
+
+    def test_owners_of_what_changes_come_first_even_when_one_changed_thing_depends_on_another(self):
+        result = _ask("who should know about notebook#77")
+        self.assertEqual(
+            result.answer,
+            "notebook#77 changes Auth Service and Search Service. 3 people who own what it changes or something that depends on "
+            "them weren't on the pull request. Maya Ortiz owns Auth Service (which it changes) and API Gateway (1 hop) and has "
+            "never worked with Lena Fischer on a pull request, ticket or decision: introduce them before this merges. Kofi Mensah "
+            "owns Search Service (which it changes) and has never worked with Lena Fischer on a pull request, ticket or decision: "
+            "introduce them before this merges. Arjun Mehta owns Billing Service (1 hop) and worked with Lena Fischer on "
+            "notebook#52, so a quick ping is enough.",
+        )
+        cites = _cites(result)
+        self.assertIn("Maya Ortiz -[OWNS]-> Auth Service", cites)
+        self.assertIn("Kofi Mensah -[OWNS]-> Search Service", cites)
+        # Search depends on Auth, but it changed too: no DEPENDS_ON edge is cited for it.
+        self.assertNotIn("Search Service -[DEPENDS_ON]-> Auth Service", cites)
 
     def test_a_pull_request_that_touches_no_service(self):
         result = _ask("who should know about docs#45")
@@ -158,7 +199,8 @@ class WhoShouldKnowTest(unittest.TestCase):
         result = _ask("who should know about notebook#999")
         self.assertFalse(result.found)
         self.assertEqual(result.path, [])
-        self.assertEqual(sorted(result.candidates), ["notebook#41", "notebook#45", "notebook#52"])
+        self.assertEqual(len(result.candidates), 3)
+        self.assertTrue(all(name.startswith("notebook#") for name in result.candidates), result.candidates)
         self.assertTrue(result.answer.startswith("Nothing in the graph matches “notebook 999”. Nearest: notebook#"), result.answer)
         bare = _ask("who should know about #999")
         self.assertFalse(bare.found)
@@ -177,6 +219,61 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertFalse(result.found)
         self.assertEqual(result.candidates, [])
         self.assertEqual(result.answer, "I can't tell what that refers to. Name a pull request or service.")
+
+    def test_a_repo_named_apart_from_the_number_picks_that_repo(self):
+        expected = _ask("notebook#45").answer
+        for name in ("who should know about notebook #45", "who should know about PR 45 in notebook", "notebook PR 45"):
+            with self.subTest(name=name):
+                self.assertEqual(_ask(name).answer, expected)
+
+    def test_a_number_one_digit_longer_is_a_different_pull_request(self):
+        result = _ask("who should know about docs#1234")
+        self.assertFalse(result.found)
+        self.assertEqual(result.candidates[0], "docs#12345")
+        self.assertTrue(result.answer.startswith("Nothing in the graph matches “docs 1234”. Nearest: docs#12345"), result.answer)
+        self.assertEqual(_ask("docs#12345").answer, "docs#12345 touches no service in the graph, so nothing depends on what it changes.")
+
+    def test_an_issue_number_is_not_a_pull_request_number(self):
+        self.assertEqual(_ask("who should know about #12").answer, "docs#12 touches no service in the graph, so nothing depends on what it changes.")
+        issue = _ask("who should know about issue #12")
+        self.assertFalse(issue.found)
+        self.assertNotIn("docs#12", issue.answer)
+
+    def test_a_pull_request_title_never_hides_a_service(self):
+        # docs#12345 is titled "Auth service".
+        self.assertTrue(_ask("who should know if the auth service changes").answer.startswith("Auth Service is owned by Maya Ortiz."))
+
+    def test_a_ticket_or_a_document_is_not_a_change(self):
+        document = _ask("who should I tell about the billing runbook")
+        self.assertFalse(document.found)
+        self.assertEqual(document.candidates, ["Billing runbook"])
+        self.assertEqual(
+            document.answer,
+            "Billing runbook is a document, not a change. Name the pull request or service that changes, or ask who knows Billing runbook.",
+        )
+        ticket = _ask("who should know about TKT-101")
+        self.assertEqual(ticket.answer, "TKT-101 is a ticket, not a change. Name the pull request or service that changes, or ask who knows TKT-101.")
+
+    # --- in a thread ------------------------------------------------------------------------
+
+    def test_a_follow_up_takes_the_pull_request_the_thread_named(self):
+        thread = [{"user": "UMAYA", "text": "auth session refresh rotates tokens every hour now, see notebook#45"}]
+        question = "who should know about it"
+        choice = agent.ToolChoice("who_should_know", {"name": question}, "keywords")
+        result, used = agent.run_choice(choice, question, ORG, thread=thread)
+        self.assertEqual(used.args, {"name": "notebook#45"})
+        self.assertEqual(result.answer, _ask("notebook#45").answer)
+        self.assertNotIn("Arjun", result.answer)
+
+    def test_a_pull_request_that_is_not_there_is_never_swapped_for_the_thread_subject(self):
+        thread = [{"user": "UTOMAS", "text": "who owns billing"}]
+        for question in ("who should know about #999", "who should know about notebook#999"):
+            with self.subTest(question=question):
+                choice = agent.ToolChoice("who_should_know", {"name": question}, "keywords")
+                result, used = agent.run_choice(choice, question, ORG, thread=thread)
+                self.assertFalse(result.found)
+                self.assertEqual(used.args, {"name": question})
+                self.assertNotIn("Billing Service", result.answer)
 
     # --- privacy --------------------------------------------------------------------------
 
@@ -206,7 +303,20 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertIn("Maya Ortiz -[WORKED_ON]-> TKT-PRIV", _cites(private))
         self.assertNotIn("TKT-PRIV", " ".join(_cites(_ask("notebook#45"))))
 
+    def test_work_under_another_account_linked_to_the_author_counts(self):
+        result = _ask("notebook#45", ORG + [SIDE_REPO])
+        self.assertIn("Lena Fischer owns Notification Service (1 hop) and Invoice Worker (2 hops) and worked with Maya Ortiz on side#60", result.answer)
+        self.assertIn("Maya Ortiz -[AUTHORED]-> side#60", _cites(result))
+        self.assertIn("Lena Fischer -[REVIEWED]-> side#60", _cites(result))
+
     # --- a service ------------------------------------------------------------------------
+
+    def test_co_owners_who_share_the_same_work_are_named_the_same_way_every_time(self):
+        self.assertEqual(
+            _ask("who should know if the audit log changes").answer,
+            "Audit log is owned by Maya Ortiz and Sara Lindqvist. If it changes, 1 other person owns something that depends on it. "
+            "Kofi Mensah owns Audit export (1 hop) and worked with Maya Ortiz on notebook#41, so a quick ping is enough.",
+        )
 
     def test_a_service_change_measures_past_work_against_its_owner(self):
         result = _ask("who should know if auth changes")

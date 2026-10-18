@@ -24,7 +24,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from src.domain.knowledge import algorithms, ask_service, catalogue, resolve
+from src.domain.knowledge import algorithms, ask_service, catalogue, coordination, resolve
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 from src.domain.knowledge.resolve import Entity
 from src.integrations.llm.model import ModelRequest, ModelUnavailable, generate_object
@@ -205,6 +205,21 @@ def thread_subject(thread: list[dict] | None, scopes: list[str], bot_ids: frozen
     return ThreadSubject(named[0], tool, depth)
 
 
+def thread_pull_request(thread: list[dict] | None, scopes: list[str], bot_ids: frozenset[str] = frozenset(), skip_text: str = "") -> Entity | None:
+    """The pull request a person named most recently in the thread ("see notebook#45"), for who_should_know.
+
+    Looked up by number and repo, like the tool itself. Bot replies are skipped, as in
+    ``thread_entities``: they name many things at once.
+    """
+    for message in reversed(thread or []):
+        text = str(message.get("text") or "")
+        if not text or (skip_text and skip_text in text) or _is_bot(message, bot_ids):
+            continue
+        if (named := coordination.pull_request_in(text, scopes)) is not None:
+            return named
+    return None
+
+
 def follow_up_choice(question: str, choice: ToolChoice, subject: ThreadSubject) -> ToolChoice | None:
     """The same question asked about the thread's subject. Depth words, or a thread about blast radius, mean blast_radius."""
     about_blast = subject.tool == "blast_radius" and choice.tool in ("who_knows", "who_owns")
@@ -231,6 +246,17 @@ def run_choice(
     result = catalogue.get_tool(choice.tool).run(choice.args, scopes)
     if result.found or result.candidates or not thread:
         return result, choice
+    if choice.tool == coordination.TOOL:
+        if coordination.pr_reference(question) or coordination.pr_reference(str(choice.args.get("name") or "")):
+            # A pull request the graph does not have is said so, never swapped for the thread's subject.
+            return result, choice
+        named = thread_pull_request(thread, scopes, bot_ids, skip_text=question)
+        if named is not None:
+            retry = ToolChoice(choice.tool, {**choice.args, "name": named.name}, "thread")
+            log.info("[agent] %r named nothing; asking %s about %s from the thread", question, retry.tool, named.name)
+            retried = catalogue.get_tool(retry.tool).run(retry.args, scopes)
+            if retried.found:
+                return retried, retry
     subject = thread_subject(thread, scopes, bot_ids, skip_text=question)
     if subject is None:
         return result, choice

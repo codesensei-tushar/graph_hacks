@@ -93,6 +93,9 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("who should look at it")[0], "who_knows")
         # A person leaving is still about the person.
         self.assertEqual(ask_service.route("who should know if arjun leaves")[0], "if_person_leaves")
+        # A ticket is asked about, not changed; "why" is a decision question.
+        self.assertEqual(ask_service.route("who should I ping about TKT-101")[0], "who_knows")
+        self.assertEqual(ask_service.route("who needs to know why we moved off postgres")[0], "decision_trace")
 
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)

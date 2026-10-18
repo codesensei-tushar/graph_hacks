@@ -11,7 +11,7 @@ Ask it in Slack and it answers from the graph, then prints the edges it walked:
 | Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, pull requests and reviews |
 | Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[BASED_ON]-> Document`, the decision it `SUPERSEDES`, and the chat it came from |
 | What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
-| Who should know about notebook#45? | `PullRequest -[TOUCHES]-> Service`, back two `DEPENDS_ON` hops to the owners who were not on the pull request, each tagged by whether they have worked with its author |
+| Who should know about notebook#45? | `PullRequest -[TOUCHES]-> Service`, then back two `DEPENDS_ON` hops: the owners of what it changes and of what depends on it who were not on the pull request, each tagged by whether they have worked with its author |
 | A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
 | What if Priya Shah leaves? | What only they own or know, ranked by what depends on it, and who is next in line by the same edges `who_knows` ranks |
 
@@ -158,7 +158,7 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `who_knows` | Everyone connected to a service, document or ticket, and through which edge | no |
 | `decision_trace` | Why a decision was made: the one that stands today, quoted from the message it was recorded from, who proposed and approved it, what it rests on, and what it replaced | no |
 | `blast_radius` | What stops working if a service goes down, grouped by hop, with the main connector | no |
-| `who_should_know` | Who should know about a pull request or service change but wasn't involved: owners of what depends on it within two hops, minus the author and reviewers, each tagged by past work with the author | no |
+| `who_should_know` | Who should know about a pull request or service change but wasn't involved: owners of what it changes and of what depends on it within two hops, minus the author and reviewers, each tagged by past work with the author | no |
 | `path_between` | Why two things are connected: the shortest route, each hop cited in its true direction | no |
 | `load_bearing` | Which services the company leans on most, by PageRank, with dependent counts | no |
 | `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
@@ -265,7 +265,7 @@ RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n
 ORDER BY length(path), dependent.name
 ```
 
-**who_should_know** (who a change should reach but did not). What changed is every service a pull request `TOUCHES`, or the named service; its dependents within two hops, at their shortest hop count, are found as in `blast_radius` with every node on the route readable, and their owners are named unless they authored or reviewed the pull request (matched through `(:GitHubUser)-[:IS]->(:Person)`; for a service, unless they own it). Each is tagged by the pull requests, tickets and decisions they share with the author, only those the asker may read: an owner of a dependent who has never worked with the author is the coordination gap that Cataldo & Herbsleb tie to software failures ("Coordination Breakdowns and Their Impact on Development Productivity and Software Failures", IEEE TSE 39(3), 2013).
+**who_should_know** (who a change should reach but did not). What changed is every service a pull request `TOUCHES`, or the named service; its owners come first (0 hops), then its dependents within two hops, at their shortest hop count, found as in `blast_radius` with every node on the route readable, and each owner is named unless they authored or reviewed the pull request (matched through `(:GitHubUser)-[:IS]->(:Person)`, over every account linked to them; for a service, unless they own it). A pull request is looked up by number and repo (`notebook#45`, `#45`, `PR 45 in notebook`), never matched loosely, and a document or ticket is refused as not a change. Each is tagged by the pull requests, tickets and decisions they share with the author, only those the asker may read: an owner of a dependent who has never worked with the author is the coordination gap that Cataldo & Herbsleb tie to software failures ("Coordination Breakdowns and Their Impact on Development Productivity and Software Failures", IEEE TSE 39(3), 2013).
 
 ```cypher
 MATCH path = (dep:Service)-[:DEPENDS_ON*1..2]->(changed:Service)

@@ -1,20 +1,24 @@
-"""Who should know about a change but wasn't involved: owners a change reaches through ``DEPENDS_ON``.
+"""Who should know about a change but wasn't involved: the owners a change reaches.
 
 ``who_should_know`` takes a pull request (``notebook#45``, ``#45``, ``PR 45``) or a service.
 For a pull request, what changed is every service it ``TOUCHES`` and the people in the loop
 are its author and reviewers. For a service, what changed is the service and the people in
-the loop are its owners. Either way the walk follows ``DEPENDS_ON`` back from what changed
-for up to two hops, with every node readable and accounts kept off every route as in
-``blast_radius``, and names the owners of each dependent who were not in the loop.
+the loop are its owners. The owners of what changed come first (0 hops); then the walk
+follows ``DEPENDS_ON`` back from what changed for up to two hops, with every node readable
+and accounts kept off every route as in ``blast_radius``, and names the owners of each
+dependent who were not in the loop.
 
 Each one is tagged by whether they have worked with the author (for a service, its owner)
-before: pull requests both wrote or reviewed, tickets both worked on, decisions both
-proposed or approved, counted only where the asker may read them. Someone who owns a
-dependent and has never worked with the author is the gap Cataldo & Herbsleb measured:
-coordination the dependencies call for that nobody does (IEEE TSE 2013).
+before: pull requests both wrote or reviewed under any GitHub account linked to them,
+tickets both worked on, decisions both proposed or approved, counted only where the asker
+may read them. Someone who owns a dependent and has never worked with the author is the
+gap Cataldo & Herbsleb measured: coordination the dependencies call for that nobody does
+(IEEE TSE 2013).
 
-Hops and shared work are counted from the edges the reply cites, so the answer is exact
-and the same on every run. Nothing is ranked by a graph algorithm.
+A pull request is looked up by its number and repo, never matched loosely: ``docs#1234``
+is not ``docs#12345``. A document or ticket is not a change and is refused as one. Hops and
+shared work are counted from the edges the reply cites, so the answer is exact and the
+same on every run. Nothing is ranked by a graph algorithm.
 """
 
 import re
@@ -23,7 +27,7 @@ from dataclasses import dataclass, field
 from src.db.falkordb_client import connect
 from src.domain.knowledge import kinds, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
-from src.domain.knowledge.resolve import SCOPED, Entity, Resolution, join_names
+from src.domain.knowledge.resolve import SCOPED, Candidate, Entity, Resolution, join_names
 
 TOOL = "who_should_know"
 MAX_HOPS = 2
@@ -31,13 +35,19 @@ MAX_HOPS = 2
 MAX_LISTED = 3
 # Shared pull requests, tickets or decisions named for one person.
 MAX_EXAMPLES = 2
-LABELS = ("PullRequest", "Service")
+# What a question that names no pull request is resolved against. Pull requests are looked up
+# by number instead, so a pull request's title never hides a service. A document or ticket
+# resolves only to be refused: it is asked about, not changed.
+LABELS = ("Service", "Document", "Ticket")
 WHAT = "pull request or service"
 
-# "notebook#45": a pull request named with its repo, resolved against pull requests only.
-_IN_REPO = re.compile(r"[a-z0-9][\w.-]*#\d+", re.IGNORECASE)
-# "#45", "PR 45", "pr #45", "pull request 45", or the bare number a model may fill in.
+# "notebook#45" or "acme/notebook#45": a pull request named with its repo.
+_IN_REPO = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)?[\w.-]+)#(\d+)\b")
+# "#45", "PR 45", "PR#45", "pull request 45", or the bare number a model may fill in.
 _NUMBER = re.compile(r"(?:\b(?:pr|pull request)\s*#?\s*|(?<![\w#])#)(\d+)\b|^\s*(\d+)\s*$", re.IGNORECASE)
+# Words that sit before "#45" without naming a repo; after "issue" the number is not a pull request's.
+_NOT_A_REPO = frozenset({"pr", "pull", "issue", "issues"})
+_ISSUE_BEFORE = re.compile(r"\bissues?\s*$", re.IGNORECASE)
 # Past work in this order when a person shares several: pull requests, tickets, decisions.
 _WORK_ORDER = {"PullRequest": 0, "Ticket": 1, "Decision": 2}
 
@@ -66,6 +76,7 @@ class Who:
     name: str
     rel: str
     person_id: str | None
+    # Every GitHub account linked to them, the one on this pull request first.
     github_ids: tuple[str, ...]
 
     @property
@@ -76,12 +87,14 @@ class Who:
 
 @dataclass(frozen=True)
 class Dependent:
+    """Something a person owns that the change reaches: 0 hops when it is what changed."""
+
     id: str
     name: str
     kind: str
     hops: int
-    # Every shortest route as (ids, names), from the dependent to what changed.
-    routes: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]
+    # Every shortest route as (ids, names), from the dependent to what changed; none at 0 hops.
+    routes: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -108,6 +121,16 @@ class Owner:
     shared: list[Shared] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class Covered:
+    """An owner of a dependent who was in the loop, and how."""
+
+    thing: Dependent
+    person_id: str
+    name: str
+    who: Who
+
+
 @dataclass
 class Change:
     """What changed, who was in the loop, and whose past work the rest are measured against."""
@@ -122,9 +145,13 @@ class Change:
     # What to do about someone who has never worked with the author, given where the change stands.
     introduce: str
 
+    @property
+    def is_pull_request(self) -> bool:
+        return self.subject.label == "PullRequest"
+
 
 def who_should_know(question: str, scopes: list[str]) -> ToolResult:
-    """Owners of what depends on a change, up to two hops, who were not in the loop, and whether they know the author."""
+    """Owners of what a change touches and of what depends on it, up to two hops, who were not in the loop."""
     _, graph = connect()
     named = _resolve(graph, question, scopes)
     if isinstance(named, ToolResult):
@@ -142,56 +169,122 @@ def who_should_know(question: str, scopes: list[str]) -> ToolResult:
 
     result.depth = MAX_HOPS
     dependents = _dependents(graph, [thing.id for thing in change.changed], scopes)
-    owners = _owners(graph, list(dependents), scopes)
-    missing, covered, unowned = _split(change, dependents, owners)
-    _shared_work(graph, change, missing, scopes)
+    # A service's own owners are its anchors, already in the loop; a pull request's are not.
+    changed = [Dependent(thing.id, thing.name, thing.kind, 0) for thing in change.changed] if change.is_pull_request else []
+    owners = _owners(graph, [thing.id for thing in changed] + list(dependents), scopes)
+    missing, covered, unowned = _split(change, [*changed, *dependents.values()], owners)
+    # Past work is only ever named for the people told in full.
+    _shared_work(graph, change, missing[:MAX_LISTED], scopes)
     result.answer = _answer(change, dependents, missing, covered, unowned)
     _cite(result, change, missing, covered, unowned)
     return result
 
 
-def bare_pr_number(text: str) -> int | None:
-    """The number in "#45", "PR 45" or a bare "45"; None when the text names a repo ("notebook#45") or no number."""
-    if _IN_REPO.search(text or ""):
+def pr_reference(text: str) -> tuple[str | None, int] | None:
+    """The pull request a text names, as (repo, number); the repo is None for "#45" or "PR 45". None when it names none.
+
+    "PR#45" names no repo, and "issue #12" names an issue, not pull request 12.
+    """
+    text = text or ""
+    for match in _IN_REPO.finditer(text):
+        if match.group(1).lower() not in _NOT_A_REPO:
+            return match.group(1), int(match.group(2))
+    for match in _NUMBER.finditer(text):
+        if not _ISSUE_BEFORE.search(text[: match.start()]):
+            return None, int(match.group(1) or match.group(2))
+    return None
+
+
+def pull_request_in(text: str, scopes: list[str], graph=None) -> Entity | None:
+    """The one readable pull request a text names, or None. For a thread follow-up to find its subject."""
+    reference = pr_reference(text)
+    if reference is None:
         return None
-    match = _NUMBER.search(text or "")
-    return int(match.group(1) or match.group(2)) if match else None
+    if graph is None:
+        _, graph = connect()
+    named = _pull_request_named(graph, text, reference, scopes)
+    return named[0] if isinstance(named, tuple) else None
 
 
 # --- resolving -----------------------------------------------------------------------------
 
 
 def _resolve(graph, question: str, scopes: list[str]):
-    """The pull request or service named, with the resolver's other candidates, or a refusal.
-
-    A pull request named with its repo is matched against pull requests only, so a private
-    one the asker cannot read is refused exactly like one that does not exist, never
-    answered as the service its repo name sounds like. A bare number is looked up among the
-    pull requests the asker can read; two repos with the same number are both offered.
-    """
-    number = bare_pr_number(question)
-    if number is not None:
-        rows = graph.ro_query(
-            f"""
-            MATCH (pr:PullRequest {{number: $number}})
-            WHERE {SCOPED.format(var="pr")}
-            RETURN pr.id, pr.name
-            ORDER BY pr.name
-            """,
-            {"number": number, "scopes": scopes},
-        ).result_set
-        if len(rows) == 1:
-            return Entity(rows[0][0], rows[0][1], "PullRequest"), []
-        if rows:
-            names = [name for _id, name in rows][: resolve.MAX_CANDIDATES]
-            answer = f"More than one pull request is #{number}: {join_names(names)}. Name the repo, as in {names[0]}."
-            return ToolResult(tool=TOOL, answer=answer, found=False, candidates=names)
-        return _miss(Resolution(query=question, reason="no_match"))
-    labels = ("PullRequest",) if _IN_REPO.search(question) else LABELS
-    resolution = resolve.resolve_name(question, labels, scopes, graph=graph)
+    """The pull request or service named, with the resolver's other candidates, or a refusal."""
+    reference = pr_reference(question)
+    if reference is not None:
+        return _pull_request_named(graph, question, reference, scopes)
+    resolution = resolve.resolve_name(question, LABELS, scopes, graph=graph)
     if not resolution.found:
         return _miss(resolution)
-    return resolution.entity, resolution.candidate_names()
+    entity = resolution.entity
+    if entity.label != "Service":
+        return _not_a_change(entity)
+    return entity, resolution.candidate_names()
+
+
+def _pull_request_named(graph, question: str, reference: tuple[str | None, int], scopes: list[str]):
+    """Look a pull request up by number, then by repo when one is named, among those the asker can read.
+
+    A private pull request the asker cannot read is refused exactly like one that does not
+    exist. A number two repos share is narrowed by a repo the question names anywhere
+    ("notebook #45", "PR 45 in notebook"), else both are offered.
+    """
+    repo, number = reference
+    rows = graph.ro_query(
+        f"""
+        MATCH (pr:PullRequest {{number: $number}})
+        WHERE {SCOPED.format(var="pr")}
+        OPTIONAL MATCH (pr)-[:IN_REPO]->(r:Repo)
+        WHERE {SCOPED.format(var="r")}
+        RETURN pr.id, pr.name, coalesce(r.full_name, '')
+        ORDER BY pr.name, coalesce(r.full_name, '')
+        """,
+        {"number": number, "scopes": scopes},
+    ).result_set
+    if repo is not None:
+        rows = [row for row in rows if _in_repo(row, repo)]
+        if not rows:
+            return _near_miss(graph, question, f"{repo}#{number}", scopes)
+    elif len(rows) > 1:
+        words = set(resolve.tokens(question))
+        rows = [row for row in rows if set(resolve.tokens(_repo_of(row))) <= words] or rows
+    if len(rows) == 1:
+        return Entity(rows[0][0], rows[0][1], "PullRequest"), []
+    if rows:
+        names = [name for _id, name, _full in rows]
+        if len(set(names)) < len(names):
+            names = [f"{full}#{number}" if full else name for _id, name, full in rows]
+        names = names[: resolve.MAX_CANDIDATES]
+        answer = f"More than one pull request is #{number}: {join_names(names)}. Name the repo, as in {names[0]}."
+        return ToolResult(tool=TOOL, answer=answer, found=False, candidates=names)
+    return _miss(Resolution(query=question, reason="no_match"))
+
+
+def _in_repo(row: tuple, repo: str) -> bool:
+    wanted, short, full = repo.lower(), _repo_of(row).lower(), row[2].lower()
+    return wanted in (short, full) or (bool(full) and full.endswith("/" + wanted))
+
+
+def _repo_of(row: tuple) -> str:
+    """The repo part of a pull request's name: "notebook" for notebook#45."""
+    return row[1].rsplit("#", 1)[0]
+
+
+def _near_miss(graph, question: str, named: str, scopes: list[str]) -> ToolResult:
+    """A repo#number that is no readable pull request: an issue by that name is refused as one; else the nearest names."""
+    near = resolve.resolve_name(question, ("PullRequest", "Ticket"), scopes, graph=graph)
+    if near.found and near.entity.label == "Ticket" and near.entity.name.lower() == named.lower():
+        return _not_a_change(near.entity)
+    # A loose match is never taken: "docs#1234" is not docs#12345, it is the nearest name.
+    candidates = ([Candidate(near.entity, near.entity.name)] if near.found else []) + near.candidates
+    return _miss(Resolution(query=question, reason="no_match", candidates=candidates[: resolve.MAX_CANDIDATES]))
+
+
+def _not_a_change(entity: Entity) -> ToolResult:
+    what = "document" if entity.label == "Document" else "ticket"
+    answer = f"{entity.name} is a {what}, not a change. Name the pull request or service that changes, or ask who knows {entity.name}."
+    return ToolResult(tool=TOOL, answer=answer, found=False, candidates=[entity.name])
 
 
 def _miss(resolution: Resolution) -> ToolResult:
@@ -221,12 +314,17 @@ def _pull_request(graph, pr: Entity, scopes: list[str]) -> Change:
         WHERE {SCOPED.format(var="gh")}
         OPTIONAL MATCH (gh)-[:IS]->(p:Person)
         WHERE {SCOPED.format(var="p")}
-        RETURN type(r), gh.id, gh.login, p.id, p.name
+        OPTIONAL MATCH (p)<-[:IS]-(other:GitHubUser)
+        WHERE {SCOPED.format(var="other")}
+        RETURN type(r), gh.id, gh.login, p.id, p.name, collect(DISTINCT other.id)
         ORDER BY type(r), gh.login
         """,
         params,
     ).result_set
-    in_loop = [Who(name or f"@{login}", rel, person_id, (github_id,)) for rel, github_id, login, person_id, name in people]
+    in_loop = [
+        Who(name or f"@{login}", rel, person_id, (github_id, *sorted(set(others) - {github_id})))
+        for rel, github_id, login, person_id, name, others in people
+    ]
     if merged:
         introduce = "introduce them now, since it has already merged"
     elif state == "closed":
@@ -289,40 +387,45 @@ def _owners(graph, ids: list[str], scopes: list[str]) -> dict[str, list[tuple[st
     return owners
 
 
-def _split(change: Change, dependents: dict[str, Dependent], owners: dict[str, list]) -> tuple[list[Owner], list[tuple[Dependent, Who]], list[Dependent]]:
-    """Owners not in the loop, grouped by person in the order of their nearest dependent; the owners who were; and the unowned.
+def _split(change: Change, things: list[Dependent], owners: dict[str, list]) -> tuple[list[Owner], list[Covered], list[Dependent]]:
+    """Owners not in the loop, grouped by person in the order of their nearest thing; the dependents' owners who were; and the unowned dependents.
 
     Someone is in the loop when they are the same Person as an author or reviewer, or one
     of the GitHub accounts linked to them is. An owner with no linked account stays out of
     the loop: nothing ties them to the pull request.
     """
     rows: list[tuple[int, str, str, Dependent, str, tuple[str, ...]]] = []
-    covered: list[tuple[Dependent, Who]] = []
+    covered: list[Covered] = []
     unowned: list[Dependent] = []
-    for dep in sorted(dependents.values(), key=lambda dep: (dep.hops, dep.name)):
-        if not owners.get(dep.id):
-            unowned.append(dep)
+    for thing in sorted(things, key=lambda thing: (thing.hops, thing.name)):
+        if not owners.get(thing.id):
+            if thing.hops:
+                unowned.append(thing)
             continue
-        for person_id, name, github_ids in owners[dep.id]:
+        for person_id, name, github_ids in owners[thing.id]:
             who = next((who for who in change.in_loop if who.person_id == person_id or set(who.github_ids) & set(github_ids)), None)
-            if who is not None:
-                covered.append((dep, who))
-            else:
-                rows.append((dep.hops, dep.name, name, dep, person_id, github_ids))
+            if who is None:
+                rows.append((thing.hops, thing.name, name, thing, person_id, github_ids))
+            elif thing.hops:
+                covered.append(Covered(thing, person_id, name, who))
     missing: dict[str, Owner] = {}
-    for _hops, _thing, name, dep, person_id, github_ids in sorted(rows, key=lambda row: row[:3]):
-        missing.setdefault(person_id, Owner(person_id, name, github_ids)).things.append(dep)
+    for _hops, _thing, name, thing, person_id, github_ids in sorted(rows, key=lambda row: row[:3]):
+        missing.setdefault(person_id, Owner(person_id, name, github_ids)).things.append(thing)
     return list(missing.values()), covered, unowned
 
 
-def _shared_work(graph, change: Change, missing: list[Owner], scopes: list[str]) -> None:
-    """Fill each missing owner's past work with the anchors: pull requests, then tickets, then decisions."""
-    if not missing or not change.anchors:
+def _shared_work(graph, change: Change, owners: list[Owner], scopes: list[str]) -> None:
+    """Fill each owner's past work with the anchors: pull requests, then tickets, then decisions, by name.
+
+    When co-owners of a service share the same work with someone, the one named and cited
+    is the first by name, so the answer does not depend on the order rows come back in.
+    """
+    if not owners or not change.anchors:
         return
     anchors_by_github = {github_id: who for who in change.anchors for github_id in who.github_ids}
     anchors_by_person = {who.person_id: who for who in change.anchors if who.person_id}
-    owners_by_github = {github_id: owner for owner in missing for github_id in owner.github_ids}
-    owners_by_person = {owner.id: owner for owner in missing}
+    owners_by_github = {github_id: owner for owner in owners for github_id in owner.github_ids}
+    owners_by_person = {owner.id: owner for owner in owners}
     rows = graph.ro_query(
         _SHARED_WORK,
         {
@@ -330,14 +433,18 @@ def _shared_work(graph, change: Change, missing: list[Owner], scopes: list[str])
             "anchor_github": list(anchors_by_github),
             "owners": list(owners_by_person),
             "anchor_people": list(anchors_by_person),
-            "skip": [change.subject.id] if change.subject.label == "PullRequest" else [],
+            "skip": [change.subject.id] if change.is_pull_request else [],
             "scopes": scopes,
         },
     ).result_set
+    found = []
     for label, mine, theirs, work_id, name, mine_rel, their_rel in rows:
         owner = owners_by_github.get(mine) if label == "PullRequest" else owners_by_person.get(mine)
         anchor = anchors_by_github.get(theirs) if label == "PullRequest" else anchors_by_person.get(theirs)
-        if owner is None or anchor is None or any(shared.id == work_id for shared in owner.shared):
+        if owner is not None and anchor is not None:
+            found.append((_WORK_ORDER[label], name, anchor.name, mine_rel, their_rel, work_id, label, owner, anchor))
+    for _order, name, _anchor, mine_rel, their_rel, work_id, label, owner, anchor in sorted(found, key=lambda row: row[:6]):
+        if any(shared.id == work_id for shared in owner.shared):
             continue
         anchor_id, anchor_label = anchor.node
         steps = (
@@ -345,27 +452,28 @@ def _shared_work(graph, change: Change, missing: list[Owner], scopes: list[str])
             PathStep(anchor.name, their_rel, name, from_id=anchor_id, to_id=work_id, from_label=anchor_label, to_label=label),
         )
         owner.shared.append(Shared(label, work_id, name, anchor.name, steps))
-    for owner in missing:
-        owner.shared.sort(key=lambda shared: (_WORK_ORDER[shared.label], shared.name))
 
 
 # --- the reply -----------------------------------------------------------------------------
 
 
-def _answer(change: Change, dependents: dict, missing: list[Owner], covered: list, unowned: list[Dependent]) -> str:
+def _answer(change: Change, dependents: dict, missing: list[Owner], covered: list[Covered], unowned: list[Dependent]) -> str:
     subject = change.subject
     named = [kinds.subject(thing.name, thing.kind) for thing in change.changed]
     it = "it" if len(named) == 1 else "them"
-    if subject.label == "PullRequest":
+    if change.is_pull_request:
         lead = f"{subject.name} changes {join_names(named)}."
-        if not dependents:
+        if missing:
+            count = len(missing)
+            owns_changed = any(thing.hops == 0 for owner in missing for thing in owner.things)
+            what = f"what it changes or something that depends on {it}" if owns_changed else f"something that depends on {it}"
+            lead += f" {count} {'person who owns' if count == 1 else 'people who own'} {what} {'wasn' if count == 1 else 'weren'}'t on the pull request."
+        elif not dependents:
             return f"{lead} Nothing in the graph depends on {it}, so no one else needs to hear about it."
-        if not missing and covered:
+        elif covered:
             return _with_unowned(f"Everyone who owns something that depends on {_either(named)} was on {subject.name}.", unowned)
-        if not missing:
+        else:
             return f"{lead} Nothing that depends on {it} has a named owner: {_unowned_list(unowned)}."
-        count = len(missing)
-        lead += f" {count} {'person who owns' if count == 1 else 'people who own'} something that depends on {it} {'wasn' if count == 1 else 'weren'}'t on the pull request."
     else:
         thing = kinds.capitalized(named[0])
         if change.anchors:
@@ -392,7 +500,8 @@ def _sentence(owner: Owner, change: Change) -> str:
     by_verb: dict[str, list[str]] = {}
     for thing in owner.things:
         verb = "runs" if kinds.kind_or_default(thing.kind) == "process" else "owns"
-        by_verb.setdefault(verb, []).append(f"{kinds.subject(thing.name, thing.kind)} ({_hops(thing.hops)})")
+        where = "which it changes" if thing.hops == 0 else _hops(thing.hops)
+        by_verb.setdefault(verb, []).append(f"{kinds.subject(thing.name, thing.kind)} ({where})")
     clauses = [f"{verb} {join_names(things)}" for verb, things in by_verb.items()]
     if not change.anchors:
         return f"{owner.name} {join_names(clauses)}."
@@ -432,11 +541,11 @@ def _either(names: list[str]) -> str:
 # --- the path ------------------------------------------------------------------------------
 
 
-def _cite(result: ToolResult, change: Change, missing: list[Owner], covered: list[tuple[Dependent, Who]], unowned: list[Dependent]) -> None:
+def _cite(result: ToolResult, change: Change, missing: list[Owner], covered: list[Covered], unowned: list[Dependent]) -> None:
     """For each person told in full: the route to each thing they own, their OWNS edge, then the shared work named.
 
-    When nobody is missing, the owners who were in the loop and the edge that put them
-    there. Things with no owner get their route, so every name in the reply has an edge.
+    When nobody is missing, the dependents' owners who were in the loop and the edge that
+    put them there. Things with no owner get their route, so every name in the reply has an edge.
     """
     listed, rest = missing[:MAX_LISTED], missing[MAX_LISTED:]
     for owner in listed:
@@ -451,18 +560,20 @@ def _cite(result: ToolResult, change: Change, missing: list[Owner], covered: lis
             result.add(_owns(owner.id, owner.name, thing))
     if not missing:
         subject = change.subject
-        for thing, who in covered:
-            _cite_route(result, thing)
-            result.add(_owns(who.person_id, who.name, thing))
-            if subject.label == "PullRequest":
-                who_id, who_label = who.node
-                result.add(PathStep(who.name, who.rel, subject.name, from_id=who_id, to_id=subject.id, from_label=who_label, to_label="PullRequest"))
+        for entry in covered:
+            _cite_route(result, entry.thing)
+            result.add(_owns(entry.person_id, entry.name, entry.thing))
+            if change.is_pull_request:
+                who_id, who_label = entry.who.node
+                result.add(PathStep(entry.who.name, entry.who.rel, subject.name, from_id=who_id, to_id=subject.id, from_label=who_label, to_label="PullRequest"))
     for thing in unowned:
         _cite_route(result, thing)
 
 
 def _cite_route(result: ToolResult, thing: Dependent) -> None:
     """One shortest route, preferring one through things the path already cites, so the drawing stays small."""
+    if not thing.routes:
+        return
     cited = {node for step in result.path for node in (step.from_id, step.to_id)}
     ids, names = min(thing.routes, key=lambda route: (-sum(node in cited for node in route[0][1:-1]), route[1]))
     for index in range(len(ids) - 1):
