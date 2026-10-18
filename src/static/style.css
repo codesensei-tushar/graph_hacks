@@ -386,7 +386,7 @@ h3 { letter-spacing: -0.01em; }
 
 /* --- The answer (2.2) ------------------------------------------------------------------------ */
 
-.answer { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; scroll-margin-top: calc(var(--header) + 16px); }
+.answer { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
 .answer-bar { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 8px 16px; border-bottom: 1px solid var(--line); font: 500 0.75rem/1.3 var(--mono); color: var(--ink-3); }
 .answer-bar .q { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .answer-body { padding: 20px 22px 22px; min-height: 152px; }
@@ -595,6 +595,12 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 .cards b { display: block; margin-bottom: 4px; font-weight: 600; }
 .cards p { margin: 0; color: var(--ink-2); font-size: 0.93rem; }
 .owns-line { margin-top: 6px !important; font-size: 0.88rem !important; }
+/* One column grid for every kind's table, so the names and owners line up down the page. */
+#owns table.tools { table-layout: fixed; }
+#owns table.tools th:nth-child(1) { width: 26%; }
+#owns table.tools th:nth-child(2) { width: 22%; }
+#owns table.tools td { overflow-wrap: anywhere; }
+#owns table.tools td.name { white-space: normal; }
 .kind-title { font: 500 0.78rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; margin: 22px 0 10px; color: var(--ink-2); }
 .decisions, .plain { margin: 0; padding: 0; list-style: none; }
 .decisions li { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin: 0 0 10px; background: var(--surface); }
