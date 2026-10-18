@@ -17,7 +17,7 @@ on the framework in [CONNECTORS.md](CONNECTORS.md); the code is `src/connectors/
 
 `OWNS` and `WORKED_ON` start at the owner's Person when their account is linked, so
 `who_owns`, `who_knows` and `if_person_leaves` count them like any other ownership. An unlinked
-owner still counts in `who_knows`, under their HubSpot name.
+owner still counts in `who_owns` and `who_knows`, named with its tool: "Riley Chen (HubSpot)".
 
 An account node carries `name`, `url` (the record in HubSpot), `state`, `status` (the raw
 lifecycle stage), `source_updated_at`, `summary` ("HubSpot company, lifecycle stage customer;
@@ -98,8 +98,8 @@ last synced until a later version notices removals.
 
 An owner becomes a Person's account only when their email is the email of exactly one Person
 in the graph; the connector never creates a Person. Until then the owner is an account of its
-own: `who_knows` names them under their HubSpot name, while `who_owns` and `if_person_leaves`
-only count Persons. Once a Person with that email arrives (a team file, `onboard team:` or Slack),
+own: `who_owns` and `who_knows` name them "Name (HubSpot)", so they are never taken for a
+namesake, and `if_person_leaves` only counts Persons. Once a Person with that email arrives (a team file, `onboard team:` or Slack),
 the next poll links them, since every poll sends every active owner, and their `OWNS` and
 `WORKED_ON` edges move onto the Person. The same people then cover Jira and HubSpot alike.
 

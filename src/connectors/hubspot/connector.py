@@ -78,10 +78,12 @@ class HubSpotConnector(Connector):
         companies = [company for company in companies if mapping.in_scope(company)][: MAX_COMPANIES - state.get("count", 0)]
         count = state.get("count", 0) + len(companies)
         page = self._page(install, container, client, companies)
+        # Polling resumes from when the backfill began, wherever the framework ends it.
+        page.poll_cursor = _encode(mode="poll", phase="companies", since=start - OVERLAP_MS)
         if after and count < MAX_COMPANIES:
             page.next_cursor, page.has_more = _encode(mode="backfill", after=after, start=start, count=count), True
         else:
-            page.next_cursor = _encode(mode="poll", phase="companies", since=start - OVERLAP_MS)
+            page.next_cursor = page.poll_cursor
         return page
 
     def _poll_companies(self, install: Install, container: Container, client: HubSpotClient, state: dict) -> Page:

@@ -126,8 +126,9 @@ class HubSpotSyncTest(unittest.TestCase):
         knows = _ask("who knows Larkspur Freightways")
         self.assertEqual(knows.answer, "The Larkspur Freightways account is owned by Dev Patel. Ask first: Dev Patel (owns it, worked on it), then Priya Shah (worked on it).")
         self.assertIn("Priya Shah -[WORKED_ON]-> Larkspur Freightways", _cites(knows))
-        # A HubSpot user with no Person stays under their own name.
-        self.assertIn("Riley Chen (owns it, worked on it)", _ask("who knows Bramblecote Analytics").answer)
+        # A HubSpot user with no Person is named with its tool, so it is never taken for a namesake.
+        self.assertEqual(_ask("who owns Bramblecote Analytics").answer, "The Bramblecote Analytics account is owned by Riley Chen (HubSpot).")
+        self.assertIn("Riley Chen (HubSpot) (owns it, worked on it)", _ask("who knows Bramblecote Analytics").answer)
 
     def test_the_public_page_never_sees_hubspot(self):
         for question in ("who owns Larkspur Freightways", "who knows Larkspur Freightways"):

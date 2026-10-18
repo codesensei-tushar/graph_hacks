@@ -117,6 +117,17 @@ class BackfillTest(unittest.TestCase):
         self.assertEqual(([item.external_id for item in capped.items], capped.has_more), (["company:9003"], False))
         self.assertEqual(_cursor(capped), {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS})
 
+    def test_every_backfill_page_says_where_polling_resumes(self):
+        # The framework may end a backfill at its own cap; polling then starts from when the backfill began.
+        poll = {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS}
+        with mock.patch.object(hubspot, "PAGE_SIZE", 2):
+            first = self.connector.fetch(INSTALL, self.container, None)
+            second = self.connector.fetch(INSTALL, self.container, first.next_cursor)
+            third = self.connector.fetch(INSTALL, self.container, second.next_cursor)
+        self.assertEqual([json.loads(page.poll_cursor) for page in (first, second, third)], [poll] * 3)
+        polled = self.connector.fetch(INSTALL, self.container, third.next_cursor)
+        self.assertIsNone(polled.poll_cursor)
+
     def test_the_people_setting_gives_an_owner_the_email_the_admin_names(self):
         install = Install("hubspot", config={"token": "pat-test", "people": "104=noor@quillfern.example.com,bad"})
         page = self.connector.fetch(install, self.container, None)
