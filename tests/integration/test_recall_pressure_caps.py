@@ -68,7 +68,7 @@ class RecallPressureCapsTest(unittest.TestCase):
     def test_a_saved_memory_answers_a_natural_question(self):
         result = _ask("when does the refund batch run")
         self.assertTrue(result.found, result.answer)
-        self.assertTrue(result.answer.startswith("From what was said in chat: “the refund batch runs at 02:00 UTC every night”"), result.answer)
+        self.assertTrue(result.answer.startswith("From what was said in chat: “the refund batch runs at 02:00 UTC every night” (someone, "), result.answer)
         said = _ask("what have we said about the refund batch")
         self.assertTrue(said.found, said.answer)
         self.assertIn("02:00 UTC", said.answer)

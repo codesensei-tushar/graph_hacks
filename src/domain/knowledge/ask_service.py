@@ -151,7 +151,8 @@ _TKT_ID = re.compile(r"^TKT-(\d+)$")
 # A ticket key and nothing else, written as a tracker writes it: "PAY-999", "PLAT-7?".
 _BARE_KEY = re.compile(r"^\s*(?!PR-\d)[A-Z][A-Z0-9]{1,9}-\d+\s*[?.!]*\s*$")
 # "what's open in PLAT", "what is open in the PAY project".
-_OPEN_IN = re.compile(r"^\s*what(?:'s|s| is) (?:still )?open in (?:the )?(?:jira )?(?:project )?([A-Za-z][A-Za-z0-9]{1,9})(?: project)?\s*[?.!]*\s*$", re.IGNORECASE)
+# The project is its key as the tracker writes it (uppercase): "what's open in billing" is not a project.
+_OPEN_IN = re.compile(r"^\s*[Ww]hat(?:'s|s| is) (?:still )?open in (?:the )?(?:[Jj]ira )?(?:project )?([A-Z][A-Z0-9]{1,9})(?: project)?\s*[?.!]*\s*$")
 # Someone to go to: "who should we ping about the auth outage" wants the people who know Auth,
 # not what breaks, so it is routed before blast radius, which shares "outage". Pinging about a
 # pull request ("who should I ping about notebook#45") is about a change.

@@ -400,6 +400,10 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
         self.assertNotEqual(ask_service.route("PR-45")[0], "ticket_status")
         self.assertEqual(ask_service.route("what's open in PLAT"), ("find", {"label": "Ticket", "state": "open", "project": "PLAT"}))
         self.assertEqual(ask_service.route("what is open in the PAY project"), ("find", {"label": "Ticket", "state": "open", "project": "PAY"}))
+        # A word that is not a project key keeps the route it had.
+        for question in ("what's open in billing", "what's open in payments"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("who_knows", {"name": question}))
 
     def test_other_ticket_questions_keep_their_tools(self):
         cases = {
