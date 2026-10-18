@@ -98,6 +98,46 @@ class ResolveRowsTest(unittest.TestCase):
         # A generic word the graph happens to know does not vouch for the unknown one beside it.
         self.assertEqual(resolve_rows("what breaks if the old claude api goes down", ROWS, SERVICES, known=lambda word: word == "old").reason, "partial")
 
+    def test_a_word_after_the_match_that_names_another_thing_makes_it_partial(self):
+        nothing = lambda _word: False  # noqa: E731
+        found = resolve_rows("what breaks if the search cache goes down", ROWS, SERVICES, known=nothing)
+        self.assertEqual((found.entity, found.reason), (None, "partial"))
+        self.assertEqual([(c.entity.name, c.via) for c in found.candidates], [("Search Service", "search")])
+        self.assertEqual(describe_miss(found, "service"), "Nothing in the graph matches “search cache”. Nearest: Search Service (known as “search”).")
+        for question, named in (
+            ("who knows the memory layer cache", "memory layer cache"),
+            ("who owns the billing dashboard", "billing dashboard"),
+            ("who owns the claude api cache", "claude api cache"),
+        ):
+            with self.subTest(question=question):
+                found = resolve_rows(question, ROWS, SERVICES, known=nothing)
+                self.assertEqual((found.entity, found.reason, found.query), (None, "partial", named))
+
+    def test_a_kind_a_predicate_or_a_known_word_after_the_match_keeps_it(self):
+        nothing = lambda _word: False  # noqa: E731
+        for question, expected in (
+            # What kind of thing, or what about it is asked.
+            ("who owns the billing system", "billing-service"),
+            ("who owns the billing accounts", "billing-service"),
+            ("is the memory layer decision still current", "memory-layer"),
+            ("A new ticket just landed about a billing bug. Who should look at it?", "billing-service"),
+            # What is said about it.
+            ("what breaks if the auth service fails", "auth-service"),
+            ("what breaks if the billing service dies", "billing-service"),
+            ("who should know if the auth service changes", "auth-service"),
+            ("is the memory layer decision current", "memory-layer"),
+            ("is the memory layer decision no longer valid", "memory-layer"),
+            ("what breaks if the auth service goes down 2 hops", "auth-service"),
+            ("who owns the invoice worker itself", "invoice-worker"),
+            # No determiner opens a noun phrase, as on the left.
+            ("what breaks if search cache goes down", "search-service"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(resolve_rows(question, ROWS, SERVICES, known=nothing).entity.id, expected)
+        # A word the graph knows keeps the match, and without a vocabulary (best_match) nothing changes.
+        self.assertEqual(resolve_rows("what breaks if the search cache goes down", ROWS, SERVICES, known=lambda word: word == "cache").entity.id, "search-service")
+        self.assertEqual(resolve_rows("what breaks if the search cache goes down", ROWS, SERVICES).entity.id, "search-service")
+
     def test_names_apart_in_the_sentence_pick_the_strongest_and_keep_the_rest(self):
         found = _resolve("the invoice worker and billing")
         self.assertEqual(found.entity.name, "Invoice Worker")

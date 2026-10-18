@@ -102,6 +102,16 @@ class KnowledgeCatalogueTest(unittest.TestCase):
         self.assertTrue(ask_service.ask("what breaks if the api goes down", ORG).found)
         self.assertTrue(ask_service.ask("who maintains billing", ORG).found)
 
+    def test_a_name_followed_by_a_word_for_another_thing_is_refused(self):
+        # Quillfern knows Search Service as "search" and nothing as "cache".
+        result = ask_service.ask("what breaks if the search cache goes down", ORG)
+        self.assertEqual((result.tool, result.found, result.path, result.candidates), ("blast_radius", False, [], ["Search Service"]))
+        self.assertEqual(result.answer, "Nothing in the graph matches “search cache”. Nearest: Search Service (known as “search”).")
+        # A kind of thing or a verb after the name keeps it.
+        for question in ("what breaks if the search service goes down", "what breaks if the auth service fails", "who owns the billing system"):
+            with self.subTest(question=question):
+                self.assertTrue(ask_service.ask(question, ORG).found)
+
     def test_a_typo_still_offers_the_nearest_name(self):
         result = _run("who_owns", {"name": "invoce worker"})
         self.assertFalse(result.found)

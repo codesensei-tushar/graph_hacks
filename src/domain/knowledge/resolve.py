@@ -7,9 +7,10 @@ known as "payments" and an API Gateway known as "gateway"), nothing resolves and
 come back as candidates, so the reply can say what the graph does know. Nor does a
 name resolve when it is only the end of what was named: in "if the claude api goes
 down", where the graph knows API Gateway as "api" and nothing as "claude", "api" is not
-the thing asked about, so it comes back as the nearest candidate. A word that only says
-which version, as in "the current billing service", does not count. Ingestion code that only
-needs a best guess for classification uses ``best_match`` instead.
+the thing asked about, so it comes back as the nearest candidate. The same holds for the
+start of what was named: "the search cache" is not Search Service. A word that only says
+which version ("the current billing service") or what kind ("the billing system") does not
+count. Ingestion code that only needs a best guess for classification uses ``best_match`` instead.
 """
 
 import re
@@ -17,7 +18,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge.kinds import kind_or_default
+from src.domain.knowledge.kinds import SERVICE_KINDS, kind_or_default
 
 ORG_SHARED = "org_shared"
 SCOPED = "coalesce({var}.scope, 'org_shared') IN $scopes"
@@ -51,6 +52,28 @@ DETERMINERS = frozenset({"the", "a", "an", "our", "my", "your", "their", "this"}
 # Words that say which version or how much of a thing, not which thing: "the current billing
 # service" is Billing Service. They sit inside a noun phrase but never make a match partial.
 GENERIC_MODIFIERS = frozenset({"old", "new", "legacy", "current", "existing", "latest", "main", "whole", "entire"})
+# Nouns that say what kind of thing was named, not which one ("the billing system", "the
+# billing retries decision"), or what about it is asked ("a billing bug"). After a match
+# they never make it partial; "cache" in "the search cache" does. The one list of them.
+GENERIC_HEADS = frozenset(
+    {
+        *SERVICE_KINDS, "team", "decision", "doc", "document", "runbook", "ticket", "layer", "worker", "gateway",
+        "api", "repo", "repository", "app", "application", "component", "integration", "tool", "issue", "rfc",
+        "bug", "problem", "error", "incident", "failure", "question", "request", "fix", "update",
+    }
+)
+# Words that start what is said about a name rather than more of the name: "if the auth
+# service fails", "is the memory layer decision still current". They end the noun phrase.
+PREDICATE_WORDS = frozenset(
+    {
+        "fails", "fail", "failed", "failing", "dies", "die", "died", "crashes", "crash", "crashed", "changes",
+        "change", "changed", "changing", "still", "itself", "slow", "outage", "impact", "gone", "went", "was",
+        "were", "be", "been", "now", "today", "anymore", "again", "too", "also", "really", "actually", "ever",
+        "matters", "matter", "mean", "means", "need", "needs", "use", "uses", "used", "rely", "relies", "gets",
+        "got", "have", "had", "last", "first", "next", "then", "there", "here", "no", "not", "never", "longer",
+        "valid", "true", "right", "wrong", "ok", "okay", "broken", "working", "live", "applies", "apply",
+    }
+)
 
 FUZZY_FLOOR = 0.6
 MAX_CANDIDATES = 3
@@ -254,11 +277,15 @@ def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEF
 
     best = min(kept, key=lambda match: (-(match.end - match.start), match.kind, match.start))
     words = tokens(text)
-    modifiers = _modifiers(words, best)
+    start = _phrase_start(words, best)
+    modifiers = words[start : best.start] if start is not None else []
+    trailing = _trailing(words, best) if start is not None else []
     named = [word for word in modifiers if word not in GENERIC_MODIFIERS]
-    if known is not None and named and not any(known(word) for word in named):
-        # "the claude api": the graph knows "api" and nothing called "claude". Name what was asked, offer the match.
-        resolution.query = " ".join(words[best.start - len(modifiers) : best.end])
+    described = [word for word in trailing if word not in GENERIC_MODIFIERS and not any(same_word(word, head) for head in GENERIC_HEADS)]
+    if known is not None and any(group and not any(known(word) for word in group) for group in (named, described)):
+        # "the claude api", "the search cache": the graph knows "api" and "search", and nothing
+        # called "claude" or "cache". Name what was asked, offer the match.
+        resolution.query = " ".join(words[best.start - len(modifiers) : best.end + len(trailing)])
         resolution.reason = "partial"
         resolution.candidates = [Candidate(best.entity, best.key, titled=best.kind == 3)]
         return resolution
@@ -267,9 +294,10 @@ def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEF
     return resolution
 
 
-def _modifiers(words: list[str], match: _Match) -> list[str]:
-    """The words between a determiner and the match ("claude" in "the claude api"), or none.
+def _phrase_start(words: list[str], match: _Match) -> int | None:
+    """Where the noun phrase holding the match starts, just after its determiner, or None.
 
+    The words from there to the match describe the thing ("claude" in "the claude api").
     Only a determiner opens the phrase: in "who maintains billing" or "why did we cut vector
     recall" the word before the match is a verb, not part of the name. A generic word such as
     "new" is walked past even though it is a stopword, so "the new claude api" still reaches
@@ -278,9 +306,17 @@ def _modifiers(words: list[str], match: _Match) -> list[str]:
     start = match.start
     while start > 0 and (words[start - 1] not in STOPWORDS or words[start - 1] in GENERIC_MODIFIERS):
         start -= 1
-    if start == match.start or start == 0 or words[start - 1] not in DETERMINERS:
-        return []
-    return words[start : match.start]
+    if start == 0 or words[start - 1] not in DETERMINERS:
+        return None
+    return start
+
+
+def _trailing(words: list[str], match: _Match) -> list[str]:
+    """The words after the match up to a stopword, a predicate or a number ("cache" in "the search cache goes down")."""
+    end = match.end
+    while end < len(words) and words[end] not in STOPWORDS and words[end] not in PREDICATE_WORDS and not words[end].isdigit():
+        end += 1
+    return words[match.end : end]
 
 
 def _keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int]]:
