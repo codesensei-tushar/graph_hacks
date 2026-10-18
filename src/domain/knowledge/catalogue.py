@@ -75,6 +75,13 @@ def _run_onboarding_brief(args: dict, scopes: list[str]) -> ToolResult:
     return brief.onboarding_brief(args["name"], scopes)
 
 
+def _run_reading_list(args: dict, scopes: list[str]) -> ToolResult:
+    # Imported here: the reading list follows decisions forward, and decisions registers into this catalogue.
+    from src.domain.knowledge import reading_list
+
+    return reading_list.reading_list(args["name"], scopes)
+
+
 def _run_connectors(args: dict, scopes: list[str]) -> ToolResult:
     return bridges.connectors(args["source"], args.get("target") or "", scopes)
 
@@ -255,13 +262,29 @@ register(
             "A brief for someone joining a team, any team: who is on it, what it runs grouped by kind (services, "
             "systems, processes, playbooks, accounts), its standing decisions and what each replaced, who to ask "
             "first (who_knows summed over everything the team runs), and its open tickets. Use when someone says "
-            "they just joined a team or asks to be briefed on or brought up to speed on a team."
+            "they just joined a team, asks to be briefed on or brought up to speed on a team, or asks what a team owns, runs or works on."
         ),
         args_schema=_schema(
             {"name": {"type": "string", "description": "The team the question is about, copied from the question."}},
             ["name"],
         ),
         run=_run_onboarding_brief,
+    )
+)
+register(
+    ToolSpec(
+        name="reading_list",
+        description=(
+            "What to read before working on or changing a service, system, or process: the documents that describe "
+            "it and everything it depends on, nearest first, the standing decisions about them and what each is based "
+            "on, and what nothing documents, with who to ask. Use for 'what should I read before…', 'reading list "
+            "for…', 'what docs cover…'. For who to ask about it, use who_knows; for a whole team, onboarding_brief."
+        ),
+        args_schema=_schema(
+            {"name": {"type": "string", "description": "The service, system, or process the question is about, copied from the question."}},
+            ["name"],
+        ),
+        run=_run_reading_list,
     )
 )
 register(

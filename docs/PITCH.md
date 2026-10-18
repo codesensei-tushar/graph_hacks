@@ -50,7 +50,7 @@ Every node written from Slack or GitHub carries the scope of the room or repo it
 
 No model-generated string ever reaches a query, so there is nothing to inject. **Fifteen read-only tools, three that write only after a human approves.**
 
-> Notes: read tools are who_owns, who_knows, decision_trace, decision_pressure, working_groups, blast_radius, who_should_know, if_person_leaves, onboarding_brief, connectors, path_between, load_bearing, risk_map, related_memories and recall; the writers are ingest_ticket, record_decision and onboard_team.
+> Notes: read tools are who_owns, who_knows, decision_trace, decision_pressure, working_groups, blast_radius, who_should_know, if_person_leaves, onboarding_brief, reading_list, connectors, path_between, load_bearing, risk_map, related_memories and recall; the writers are ingest_ticket, record_decision and onboard_team.
 
 ## 6. The answer is the path
 

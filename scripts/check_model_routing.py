@@ -1,7 +1,7 @@
 """Check the model's tool routing on the demo questions, once, by hand.
 
 The only place this project spends model calls on purpose: one structured call per
-question (28 in all, fast profile), printing the tool and arguments the model chose
+question (35 in all, fast profile), printing the tool and arguments the model chose
 next to what the keyword router would do and what the recording script expects. Run
 it after changing a tool description or the routing prompt, read the table, and paste
 it into the pull request. It is not a test and must never run in CI.
@@ -81,6 +81,20 @@ QUESTIONS = [
     # Risk across every team, not one person leaving or one service failing.
     ("risk 1", "what are our riskiest services", "risk_map", None),
     ("risk 2", "where are we one person away from an outage", "risk_map", None),
+    # reading_list: what to read before a change, and the neighbour it must not take.
+    ("read 1", "what should I read before touching the invoice worker", "reading_list", None),
+    ("read 2", "which docs describe the auth service", "reading_list", None),
+    ("read 3", "I'm about to change billing, which documents should I read first", "reading_list", None),
+    (
+        "read 4",
+        "what should I read before touching it",
+        "reading_list",
+        [
+            {"user": "ULENA", "text": f"{BOT} what breaks if billing goes down"},
+            {"user": "UBOT", "bot_id": "B1", "text": "If Billing Service goes down, these stop with it: API Gateway and Invoice Worker (1 hop).\n\n_Tool `blast_radius`, picked by the model. Read from: public channels_"},
+        ],
+    ),
+    ("read 5", "what should I know about billing", "who_knows", None),
 ]
 
 
