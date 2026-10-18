@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connection · Company Brain</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/static/console/icon.svg" type="image/svg+xml">
+<link rel="preload" href="/static/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<script src="/static/theme.js?v=1"></script>
+<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/console.css?v=1">
+</head>
+<body class="console" data-nav="connections">
+<a class="skip" href="#main">Skip to the content</a>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/console" aria-label="Company Brain console">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path class="mark-edge" d="M9.5 17.6 22.5 23.4" stroke-width="2.2" stroke-linecap="round"/><path class="mark-walk" d="M9.5 14.4 22.5 8.6" stroke-width="2.4" stroke-linecap="round"/><circle cx="6" cy="16" r="4.2" fill="var(--person)"/><rect x="21.5" y="3" width="8.5" height="8.5" rx="2" fill="var(--service)"/><path d="M25.8 20.5l4.5 4.5-4.5 4.5-4.5-4.5z" fill="var(--knowledge)"/></svg>
+      <span class="brand-name">Company Brain</span>
+    </a>
+    <nav aria-label="Console">
+      <a href="/console" data-nav="connections">Connections</a>
+      <a href="/console/ask" data-nav="ask">Ask</a>
+    </nav>
+    <div class="top-actions">
+      <span class="top-org" id="top-org" hidden></span>
+      <button class="top-signin" id="sign-out" type="button" hidden>Sign out</button>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="console-main">
+  <div class="wrap">
+    <section class="page-head" aria-labelledby="page-title">
+      <nav class="crumb" aria-label="Back"><a href="/console">← Connections</a></nav>
+      <div class="detail-head">
+        <span id="detail-tile"></span>
+        <h1 id="page-title">Loading the connection…</h1>
+        <span id="detail-pill"></span>
+      </div>
+      <p class="lede" id="detail-site"></p>
+      <div class="actions" id="detail-actions" hidden>
+        <button class="btn" id="sync-now" type="button">Sync now</button>
+        <a class="btn btn-ghost" id="choose-projects" href="/console" hidden>Choose projects</a>
+        <button class="btn btn-ghost" id="reconnect" type="button">Reconnect</button>
+      </div>
+      <p class="note" id="member-note" hidden>Only owners and admins can sync, reconnect or disconnect a tool.</p>
+      <p class="poll-note" id="poll-note" aria-live="polite"></p>
+      <noscript><p class="note">The console needs JavaScript.</p></noscript>
+    </section>
+
+    <div class="banner" id="banner" role="status" hidden></div>
+
+    <div id="detail-body" hidden>
+      <dl class="meta-list" id="meta"></dl>
+
+      <section class="block" aria-labelledby="containers-title">
+        <h2 id="containers-title">Projects</h2>
+        <p class="sub" id="containers-sub"></p>
+        <div class="table-wrap">
+          <table class="tools">
+            <thead><tr><th scope="col" id="containers-col">Project</th><th scope="col">Status</th><th scope="col" class="num">Items</th><th scope="col" class="when">Last fetched</th></tr></thead>
+            <tbody id="containers"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block" id="danger" aria-labelledby="danger-title" hidden>
+        <div class="panel danger-zone">
+          <h3 id="danger-title">Disconnect</h3>
+          <p id="danger-text">Stops syncing and deletes everything this tool brought into your graph, with its access tokens. Answers that used it will no longer find it. This cannot be undone.</p>
+          <button class="btn btn-danger" id="disconnect-open" type="button">Disconnect</button>
+        </div>
+      </section>
+    </div>
+
+    <dialog class="confirm" id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+      <form id="confirm-form" novalidate>
+        <h2 id="confirm-title">Disconnect?</h2>
+        <p id="confirm-text"></p>
+        <div class="form-row">
+          <label for="confirm-input">Type <code id="confirm-name"></code> to confirm</label>
+          <input class="input mono" id="confirm-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <p class="field-error" id="confirm-error" role="alert"></p>
+        <div class="actions">
+          <button class="btn btn-ghost" id="confirm-cancel" type="button">Cancel</button>
+          <button class="btn btn-danger solid" id="confirm-go" type="submit" disabled>Disconnect</button>
+        </div>
+      </form>
+    </dialog>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>Company Brain reads your tools read-only and keeps what it reads in your company's own graph.</p>
+    <p class="foot-links"><a href="/">Home</a><a href="/privacy">Privacy</a></p>
+  </div>
+</footer>
+<script src="/static/shell.js?v=4"></script>
+<script src="/static/console/console.js?v=1"></script>
+<script src="/static/console/connection.js?v=1"></script>
+</body>
+</html>

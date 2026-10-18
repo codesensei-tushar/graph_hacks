@@ -99,10 +99,10 @@ class StrictPageTest(unittest.TestCase):
     def test_console_scripts_set_no_style_attribute_and_insert_text_only(self):
         for script in sorted((STATIC / "console").glob("*.js")) + [STATIC / "theme.js"]:
             text = script.read_text()
-            self.assertNotRegex(text, r"""["']style["']\s*[:,]""", script.name)
+            self.assertIsNone(re.search(r"""["']style["']\s*[:,]""", text), script.name)
             self.assertNotIn("innerHTML", text, script.name)
             self.assertNotIn("insertAdjacentHTML", text, script.name)
-            self.assertNotRegex(text, r"https?://", script.name)
+            self.assertIsNone(re.search(r"https?://", text), script.name)
 
     def test_every_page_stamps_the_theme_before_its_stylesheets(self):
         for page in sorted(STATIC.glob("*.html")) + CONSOLE_PAGES:
