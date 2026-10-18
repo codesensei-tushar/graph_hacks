@@ -66,7 +66,7 @@ def ask(request: Request, q: str = "", tool: str | None = None, model: bool = Fa
     if model and (denied := _denial(request)):
         return denied
     try:
-        with tool_guard.guard("ask", q):
+        with tool_guard.guard("ask", q, timeout_ms=tool_guard.PUBLIC_QUERY_TIMEOUT_MS):
             answer = ask_api.answer_question(q, tool=tool, use_model=model)
     except (ask_api.ToolRefused, ask_api.QuestionTooLong) as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)

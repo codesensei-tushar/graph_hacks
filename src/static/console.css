@@ -104,7 +104,8 @@ a.conn-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
 .conn-stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .conn-stats b { color: var(--ink); font-weight: 500; }
 .conn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--ink-3); }
-.conn-foot .go { color: var(--path-ink); font-weight: 500; }
+.conn-foot .go { color: var(--path-ink); font-weight: 500; text-decoration: none; }
+.conn-foot a.go:hover { text-decoration: underline; }
 .conn-error { margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
 /* A monogram tile per tool, in a node family's colour. */
 .tile {
@@ -114,6 +115,9 @@ a.conn-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
 }
 .tile.jira { --c: var(--person); }
 .tile.hubspot { --c: var(--service); }
+.tile.slack { --c: var(--knowledge); }
+.conn-note { margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
+table.tools td.restricted { color: var(--ink); font-weight: 500; }
 .tile.lg { width: 52px; height: 52px; border-radius: 14px; font-size: var(--fs-lg); }
 .bar { height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
 .bar > span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--path); transition: width var(--slow) var(--ease); }
@@ -258,5 +262,14 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
   .signin-panel .btn { width: 100%; }
   /* The containers table keeps three columns on a phone; when it was fetched is on the wide view. */
   table.tools .when { display: none; }
+  /* Each container is a small card: its name on top, then status, visibility and items. */
+  table.containers, table.containers tbody, table.containers tr { display: block; width: 100%; }
+  table.containers { border: 0; background: none; overflow: visible; }
+  table.containers thead { display: none; }
+  table.containers tr { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+  table.containers td { padding: 0; border: 0; }
+  table.containers td:first-child { flex-basis: 100%; font-weight: 600; }
+  table.containers td.state { white-space: normal; }
+  table.containers td.num::after { content: " items"; color: var(--ink-3); }
   .picker-bar .count { flex-basis: 100%; order: 3; }
 }

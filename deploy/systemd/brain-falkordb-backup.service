@@ -1,0 +1,15 @@
+[Unit]
+Description=Snapshot FalkorDB (BGSAVE) and upload the RDB and its count manifest to GCS
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/brain
+# The bucket is created by hand once; see docs/DEPLOY.md, "Backups and restore".
+Environment=BRAIN_BACKUP_BUCKET=graphhacks-brain-8490-falkordb-backups
+# The RDB is staged on the boot disk (not tmpfs) and deleted after the upload.
+ExecStart=/usr/bin/python3 /opt/brain/falkordb-backup.py backup --work-dir /var/tmp
+TimeoutStartSec=1h
+Nice=10
+IOSchedulingClass=idle
