@@ -88,9 +88,22 @@ def get_org(org_id: str) -> Org | None:
     return _org(rows[0]) if rows else None
 
 
+_ref_cache: dict[str, tuple[float, OrgRef]] = {}
+
+
 def get_org_ref(org_id: str) -> OrgRef | None:
+    """The org's OrgRef, cached for a minute (the scheduler resolves one per job). An org's
+    graph never changes, so a cached ref is only ever stale for a deleted org."""
+    now = time.monotonic()
+    cached = _ref_cache.get(org_id)
+    if cached and now - cached[0] < ROUTE_CACHE_SECONDS:
+        return cached[1]
     org = get_org(org_id)
-    return org.ref() if org else None
+    if org is None:
+        _ref_cache.pop(org_id, None)
+        return None
+    _ref_cache[org_id] = (now, org.ref())
+    return org.ref()
 
 
 def list_orgs() -> list[Org]:
@@ -212,15 +225,30 @@ def org_for_team(team_id: str) -> Org | None:
     return get_org(org_id) if org_id else None
 
 
+class RouteUnavailable(RuntimeError):
+    """The control graph could not be read, so which org a team belongs to is unknown."""
+
+
 def org_ref_for_team(team_id: str | None) -> OrgRef:
-    """Where a Slack event for ``team_id`` runs: its routed org, else the legacy org."""
+    """Where a Slack event for ``team_id`` runs: its routed org, else (no route) the legacy org.
+    Raises ``RouteUnavailable`` when the lookup fails: never guess, or another org's event would
+    run in the legacy graph. Slack routes answer 503 then, so Slack retries."""
     try:
         org_id = routed_org_id(team_id) if team_id else None
         ref = get_org_ref(org_id) if org_id else None
-    except Exception:
-        log.exception("[orgs] route lookup failed team=%s; using the legacy org", team_id)
-        ref = None
+    except Exception as error:
+        log.exception("[orgs] route lookup failed team=%s", team_id)
+        raise RouteUnavailable(str(team_id)) from error
+    if org_id and ref is None:
+        # Routed to an org that no longer exists: not the legacy org's either.
+        raise RouteUnavailable(str(team_id))
     return ref or tenancy.legacy_org()
+
+
+def legacy_migrated() -> bool:
+    """Whether ``POST /ops/orgs/migrate`` has run: the legacy org's node exists, so every team it serves is routed."""
+    rows = control_graph().query("MATCH (o:Org {id: $id}) RETURN count(o)", {"id": LEGACY_ORG_ID}).result_set
+    return bool(rows and rows[0][0])
 
 
 def teams_of(org_id: str) -> list[str]:
@@ -231,6 +259,7 @@ def teams_of(org_id: str) -> list[str]:
 def clear_route_cache() -> None:
     with _route_lock:
         _route_cache.clear()
+    _ref_cache.clear()
 
 
 # --- external accounts ---------------------------------------------------------------------

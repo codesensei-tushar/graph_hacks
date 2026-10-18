@@ -6,15 +6,16 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
-from src.api.v1 import auth, connectors, console_oauth, github, health, proof, slack, slack_install
+from src.api.v1 import auth, connectors, console_oauth, github, health, org_ops, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
 from src.connectors import sync as connector_sync  # registers the connector sync job
-from src.core import scheduler
+from src.core import scheduler, tenancy
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
 from src.domain.knowledge.search import ensure_search_indexes
+from src.domain import orgs
 from src.domain.memory.memory_service import ensure_indexes
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
 from src.domain.slack import token_install
@@ -25,7 +26,7 @@ from src.domain.slack.channels import reset as channel_reset
 from src.domain.slack.compute import register_turn_agent
 from src.domain.slack.turn import approval_expiry, reaction_queue  # noqa: F401  register expiry and reaction jobs
 from src.domain.slack.turn import reset as turn_reset
-from src.domain.slack.workspace import list_connected_workspaces
+from src.domain.slack.workspace import list_all_connected_workspaces, rollback_stale_pending_workspaces
 from src.seed.seed import company_module, reset_and_seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -43,10 +44,27 @@ def _seed_if_empty() -> None:
     connector_graph.ensure_indexes()
     # Never raises: a failure is logged and the tools that would search keep their refusal.
     ensure_search_indexes()
+    # The other orgs' graphs got their indexes when they were created; this adds any added since.
+    for org in _other_orgs():
+        try:
+            orgs.build_org_indexes(org)
+        except Exception:
+            log.exception("index build failed org=%s", org.id)
+
+
+def _other_orgs() -> list[tenancy.OrgRef]:
+    """Every org but the legacy one. Empty (and logged) when the control graph cannot be read."""
+    try:
+        orgs.ensure_control_indexes()
+        return [org.ref() for org in orgs.list_orgs() if not org.legacy]
+    except Exception:
+        log.exception("listing orgs failed; starting the legacy org only")
+        return []
 
 
 def _recover() -> None:
     """Startup safety nets: work missed or orphaned while the app was down."""
+    # Both queues hold every org's rows and run each row in its team's org.
     for job, name in (
         (reaction_queue.recover_passive_reaction_queue, "reaction queue"),
         (observe.reconcile_channel_observe_schedules, "channel observe schedules"),
@@ -55,17 +73,24 @@ def _recover() -> None:
             job()
         except Exception:
             log.exception("startup recovery failed: %s", name)
-    for workspace in list_connected_workspaces():
-        # Token-mode installs never hit the OAuth callback; run its after-install steps once.
+    for org in [tenancy.legacy_org(), *_other_orgs()]:
         try:
-            token_install.ensure_token_workspace_bootstrapped(workspace)
+            with tenancy.org_context(org):
+                rollback_stale_pending_workspaces()
         except Exception:
-            log.exception("token-mode bootstrap failed team=%s", workspace.team_id)
-        # Private-channel joins and leaves missed while the app was down.
-        try:
-            reconcile_channel_membership(workspace.client)
-        except Exception:
-            log.exception("membership reconcile failed team=%s", workspace.team_id)
+            log.exception("rolling back unverified installs failed org=%s", org.id)
+    for org, workspace in list_all_connected_workspaces():
+        with tenancy.org_context(org):
+            # Token-mode installs never hit the OAuth callback; run its after-install steps once.
+            try:
+                token_install.ensure_token_workspace_bootstrapped(workspace)
+            except Exception:
+                log.exception("token-mode bootstrap failed team=%s", workspace.team_id)
+            # Private-channel joins and leaves missed while the app was down.
+            try:
+                reconcile_channel_membership(workspace.client)
+            except Exception:
+                log.exception("membership reconcile failed team=%s", workspace.team_id)
 
 
 @asynccontextmanager
@@ -107,6 +132,7 @@ app.include_router(connectors.router)
 app.include_router(console_oauth.router)
 app.include_router(health.router)
 app.include_router(proof.router)
+app.include_router(org_ops.router)
 app.include_router(auth.router)
 ops.install(app)
 web.install(app)
