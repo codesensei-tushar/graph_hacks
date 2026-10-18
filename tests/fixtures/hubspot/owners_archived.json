@@ -1,0 +1,6 @@
+{
+  "results": [
+    {"id": "105", "email": "sam@quillfern.example.com", "type": "PERSON", "firstName": "", "lastName": "", "userId": null,
+     "userIdIncludingInactive": 9001005, "createdAt": "2025-03-01T09:00:00.000Z", "updatedAt": "2026-06-30T09:00:00.000Z", "archived": true}
+  ]
+}

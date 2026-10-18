@@ -1,0 +1,11 @@
+{
+  "portalId": 24681357,
+  "accountType": "STANDARD",
+  "timeZone": "Europe/London",
+  "companyCurrency": "USD",
+  "additionalCurrencies": [],
+  "utcOffset": "+01:00",
+  "utcOffsetMilliseconds": 3600000,
+  "uiDomain": "app.hubspot.com",
+  "dataHostingLocation": "na1"
+}

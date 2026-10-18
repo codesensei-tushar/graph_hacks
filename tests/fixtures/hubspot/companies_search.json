@@ -1,0 +1,29 @@
+{
+  "total": 5,
+  "results": [
+    {"id": "9001", "properties": {"name": "Larkspur Freightways", "domain": "larkspur-freightways.example", "industry": "LOGISTICS_AND_SUPPLY_CHAIN",
+      "lifecyclestage": "customer", "hubspot_owner_id": "102", "hs_num_open_deals": "1", "num_associated_deals": "2",
+      "hs_lastmodifieddate": "2026-10-15T10:00:00.000Z", "hs_object_id": "9001", "createdate": "2026-01-10T09:00:00.000Z"},
+     "createdAt": "2026-01-10T09:00:00.000Z", "updatedAt": "2026-10-15T10:00:00.000Z", "archived": false},
+    {"id": "9002", "properties": {"name": "Tidewhistle Robotics", "domain": "tidewhistle-robotics.example", "industry": "MACHINERY",
+      "lifecyclestage": "opportunity", "hubspot_owner_id": "101", "hs_num_open_deals": "1", "num_associated_deals": "1",
+      "hs_lastmodifieddate": "2026-10-12T10:00:00.000Z", "hs_object_id": "9002", "createdate": "2026-08-01T09:00:00.000Z"},
+     "createdAt": "2026-08-01T09:00:00.000Z", "updatedAt": "2026-10-12T10:00:00.000Z", "archived": false},
+    {"id": "9003", "properties": {"name": "Saltwick Outfitters", "domain": "saltwick-outfitters.example", "industry": "RETAIL",
+      "lifecyclestage": "other", "hubspot_owner_id": "102", "hs_num_open_deals": "0", "num_associated_deals": "2",
+      "hs_lastmodifieddate": "2026-09-20T10:00:00.000Z", "hs_object_id": "9003", "createdate": "2024-04-01T09:00:00.000Z"},
+     "createdAt": "2024-04-01T09:00:00.000Z", "updatedAt": "2026-09-20T10:00:00.000Z", "archived": false},
+    {"id": "9004", "properties": {"name": "Bramblecote Analytics", "domain": "bramblecote-analytics.example", "industry": "",
+      "lifecyclestage": "salesqualifiedlead", "hubspot_owner_id": "104", "hs_num_open_deals": "0", "num_associated_deals": "1",
+      "hs_lastmodifieddate": "2026-08-02T10:00:00.000Z", "hs_object_id": "9004", "createdate": "2026-03-01T09:00:00.000Z"},
+     "createdAt": "2026-03-01T09:00:00.000Z", "updatedAt": "2026-08-02T10:00:00.000Z", "archived": false},
+    {"id": "9005", "properties": {"name": "Hollowpine Health", "domain": "hollowpine-health.example", "industry": "HOSPITAL_HEALTH_CARE",
+      "lifecyclestage": "customer", "hubspot_owner_id": "", "hs_num_open_deals": "0", "num_associated_deals": "0",
+      "hs_lastmodifieddate": "2026-07-01T10:00:00.000Z", "hs_object_id": "9005", "createdate": "2026-02-01T09:00:00.000Z"},
+     "createdAt": "2026-02-01T09:00:00.000Z", "updatedAt": "2026-07-01T10:00:00.000Z", "archived": false},
+    {"id": "9100", "properties": {"name": "Mossgarth Hotels", "domain": "mossgarth-hotels.example", "industry": "HOSPITALITY",
+      "lifecyclestage": "lead", "hubspot_owner_id": "103", "hs_num_open_deals": "0", "num_associated_deals": "0",
+      "hs_lastmodifieddate": "2026-10-16T10:00:00.000Z", "hs_object_id": "9100", "createdate": "2026-10-16T10:00:00.000Z"},
+     "createdAt": "2026-10-16T10:00:00.000Z", "updatedAt": "2026-10-16T10:00:00.000Z", "archived": false}
+  ]
+}

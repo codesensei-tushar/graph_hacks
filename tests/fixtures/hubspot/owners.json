@@ -1,0 +1,13 @@
+{
+  "results": [
+    {"id": "101", "email": "priya@quillfern.example.com", "type": "PERSON", "firstName": "Priya", "lastName": "Shah", "userId": 9001001,
+     "userIdIncludingInactive": 9001001, "createdAt": "2026-01-05T09:00:00.000Z", "updatedAt": "2026-01-05T09:00:00.000Z", "archived": false,
+     "teams": [{"id": "368389", "name": "Sales", "primary": true}]},
+    {"id": "102", "email": "dev@quillfern.example.com", "type": "PERSON", "firstName": "Dev", "lastName": "Patel", "userId": 9001002,
+     "userIdIncludingInactive": 9001002, "createdAt": "2026-01-05T09:00:00.000Z", "updatedAt": "2026-01-05T09:00:00.000Z", "archived": false,
+     "teams": [{"id": "368389", "name": "Sales", "primary": true}]},
+    {"id": "103", "email": "Noor@Quillfern.example.com", "type": "PERSON", "firstName": "Noor", "lastName": "Haddad", "userId": 9001003,
+     "userIdIncludingInactive": 9001003, "createdAt": "2026-01-05T09:00:00.000Z", "updatedAt": "2026-01-05T09:00:00.000Z", "archived": false}
+  ],
+  "paging": {"next": {"after": "3", "link": "https://api.hubapi.com/crm/owners/2026-09?after=3"}}
+}
