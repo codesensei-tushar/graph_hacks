@@ -78,6 +78,9 @@ class Settings:
     # OAuth credentials of the same app, used only to verify `link github` in Slack.
     github_client_id: str = field(default_factory=lambda: os.getenv("GITHUB_CLIENT_ID", ""))
     github_client_secret: str = field(default_factory=lambda: os.getenv("GITHUB_CLIENT_SECRET", ""))
+    # Optional: a token used only to read public repos added by name (5,000 requests an hour instead of 60).
+    # A fine-grained token with public-repository read access is enough. See docs/GITHUB.md.
+    github_public_repo_token: str = field(default_factory=lambda: os.getenv("GITHUB_PUBLIC_REPO_TOKEN", ""), repr=False)
 
     # Connectors (docs/CONNECTORS.md): every CONNECTOR_<SOURCE>_<FIELD> variable, secrets included.
     # src/connectors/registry.py turns them into installs; kept out of repr so they never print.
