@@ -69,7 +69,15 @@ links of that source and relationship. The handles are kept on the pull request
 
 **Reserved properties.** `props` may not use a name graph.py writes itself, nor `number`:
 `who_should_know` looks tickets and pull requests up by `#12`, and a Jira ticket must not answer
-for a GitHub issue.
+for a GitHub issue. `Edge.props` may not use `item`, `source`, `install`, `via`, `user` or
+`state`, which graph.py writes on every edge (or GitHub's reviews use). A refused name is logged
+and dropped.
+
+**How answers read it.** An unlinked account is named with its tool ("Yash Patil (HubSpot)") in
+`who_owns`, `who_knows` and paths, so it is never mistaken for a person the company knows by the
+same name. Ticket work counts once per person in `who_knows`, so many tickets never outrank
+owning the thing. A team's page and brief list the accounts its members own (scope-filtered,
+the first ten and a count). No `RUNS` edge is made from connector data.
 
 **Scopes.** Connector data is `org_internal`: every Slack asker reads it, in channels and DMs.
 The public ask page, the team pages and MCP read `org_shared` only, so they never see it.

@@ -226,6 +226,16 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
         """,
         {"id": service.id},
     ).result_set
+    # A connected tool's owner the company does not know yet (HubSpot): named with its tool.
+    unlinked = graph.ro_query(
+        f"""
+        MATCH (account:ExternalUser)-[:OWNS]->(:Service {{id: $id}})
+        WHERE {SCOPED.format(var="account")} AND NOT (account)-[:IS]->(:Person)
+        RETURN account.id, account.name, account.source
+        ORDER BY account.name
+        """,
+        {"id": service.id, "scopes": scopes},
+    ).result_set
     teams = graph.ro_query(
         """
         MATCH (team:Team)-[:RUNS]->(service:Service {id: $id})
@@ -236,6 +246,10 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     ).result_set
     for person_id, person_name in owners:
         result.add(_step(Entity(person_id, person_name, "Person"), "OWNS", service))
+    for account_id, account, source in unlinked:
+        name = account_name(account, "ExternalUser", source)
+        owners.append([account_id, name])
+        result.add(_step(Entity(account_id, name, "ExternalUser"), "OWNS", service))
     for team_id, team_name in teams:
         result.add(_step(Entity(team_id, team_name, "Team"), "RUNS", service))
 
