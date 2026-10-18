@@ -59,6 +59,24 @@ class FormatTests(unittest.TestCase):
             self.assertIn("Read from: public channels, connected tools, #pay_", format_answer({"answer": "x", "path": []}, [], tags, {"G1": "pay"}))
             self.assertIn("• connected tools", format_scopes(tags, "org_shared", {"G1": "pay"}))
 
+    def test_an_orgs_own_connectors_count_and_cited_tools_are_named(self):
+        from src.core import tenancy
+        from src.domain.knowledge.dto import PathStep, ToolResult
+
+        tags = ["org_shared", "org_internal"]
+        org = tenancy.OrgRef(id="o1", graph="org_" + "1" * 26)
+        result = ToolResult(tool="who_owns", answer="x")
+        result.add(PathStep("Dev Patel (HubSpot)", "OWNS", "Larkspur", from_id="hubspot:abc123:user:9", to_id="hubspot:abc123:company:1"))
+        result.add(PathStep("Arjun (Jira)", "ASSIGNED", "PAY-1", from_id="jira:def456:user:7", to_id="jira:def456:10001"))
+        result.add(PathStep("Billing", "DEPENDS_ON", "Postgres", from_id="billing-service", to_id="postgres"))
+        self.assertEqual(result.to_dict()["sources"], ["hubspot", "jira"])
+        with mock.patch.object(registry, "installs", return_value=[]), mock.patch.object(registry, "installs_of", return_value=[(object(), object())]):
+            with tenancy.org_context(org):
+                # An org's console install counts: the env installs (registry.installs) are the legacy org's only.
+                self.assertIn("Read from: public channels, connected tools_", format_answer({"answer": "x", "path": []}, [], tags, {}))
+                self.assertIn("Read from: public channels, HubSpot, Jira_", format_answer(result.to_dict(), [], tags, {}))
+        self.assertNotIn("sources", ToolResult(tool="t", answer="x").to_dict())
+
     def test_public_memory_cites_channel(self):
         memories = [{"text": "hello there all", "scope": "org_shared", "channel_id": "C9", "author": "Bo"}]
         text = format_answer({"answer": "x", "path": []}, memories, ["org_shared"], {})

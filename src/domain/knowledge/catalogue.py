@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, explore, find, memories, risk_map, ticket_status
+from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, explore, find, memories, pr_explain, risk_map, ticket_status
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 from src.domain.knowledge.kinds import SERVICE_KINDS
 
@@ -631,6 +631,24 @@ register(
         ),
         args_schema=_schema({"name": {"type": "string", "description": "The ticket's key, copied from the question (PAY-12)."}}, ["name"]),
         run=lambda args, scopes: ticket_status.ticket_status(args["name"], scopes),
+    )
+)
+register(
+    ToolSpec(
+        name="pr_explain",
+        description=(
+            "One pull request explained: title, open, merged (with when) or closed, who wrote it, who reviewed it "
+            "and how (approved, commented), a gist of its description, the services it touches (from the files it "
+            "changed) and what depends on those one hop out, the tickets it closes or references, and the decisions "
+            "based on it. Use when the question names one pull request by number or repo (#207, PR 207, "
+            "graph_hacks#207) and asks what it did, who did or reviewed it, what it affects or what it closes. For "
+            "who should hear about it, use who_should_know; for a ticket key (PAY-12), ticket_status."
+        ),
+        args_schema=_schema(
+            {"name": {"type": "string", "description": "The pull request, copied from the question (#207, PR 207, graph_hacks#207)."}},
+            ["name"],
+        ),
+        run=lambda args, scopes: pr_explain.pr_explain(args["name"], scopes),
     )
 )
 register(

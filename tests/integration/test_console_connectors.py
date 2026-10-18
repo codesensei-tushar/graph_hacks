@@ -285,6 +285,25 @@ class ConsoleConnectorsTest(unittest.TestCase):
             self.assertFalse(scheduler.exists(f"connector:sync:{self.x.id}:consolefake:{self.install.id}"))
             self.assertFalse(store.set_status(key, "active"))
 
+    def test_a_connect_left_without_a_site_is_discarded(self):
+        """A second Jira connect whose consent covered several sites, abandoned at the site picker: no site,
+        no account. The card can discard it at once, and the listing drops it once the OAuth state is dead."""
+        with tenancy.org_context(self.x.id):
+            fresh = store.create_install(self.x.id, "jira", None, "oauth", status="connecting", secret={"access_token": "a", "refresh_token": "r"})
+            stale = store.create_install(self.x.id, "jira", None, "oauth", status="connecting", secret={"access_token": "a", "refresh_token": "r"})
+        ids = [row["id"] for row in self.client.get("/console/api/connections").json()]
+        self.assertIn(fresh.key, ids)
+        answer = self.client.delete(f"/console/api/connections/{fresh.key}", headers=self.headers)
+        self.assertEqual(answer.json(), {"ok": True, "status": "removed"})
+        later = time.time() + console_connectors.ABANDONED_SECONDS + 5
+        with mock.patch.object(console_connectors.time, "time", return_value=later):
+            ids = [row["id"] for row in self.client.get("/console/api/connections").json()]
+        self.assertNotIn(stale.key, ids)
+        with tenancy.org_context(self.x.id):
+            self.assertIsNone(store.get(fresh.key))
+            self.assertIsNone(store.get(stale.key))
+            self.assertIsNotNone(store.get(self.install.key))  # a connection with an account is never swept
+
     def test_bodies_must_be_json(self):
         # CSRF (Origin, X-CSRF-Token) is checked by console_user/console_admin themselves.
         key = self.install.key

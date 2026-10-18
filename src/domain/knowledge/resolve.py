@@ -14,6 +14,7 @@ count. Ingestion code that only needs a best guess for classification uses ``bes
 """
 
 import contextlib
+import logging
 import contextvars
 import bisect
 import re
@@ -415,6 +416,20 @@ def _read_rows(graph, wanted: dict[str, tuple[str, ...]]) -> dict:
         out.setdefault((label, scope), []).append((node, row))
         out["all"].append((node, row))
     return out
+
+
+def withheld_name(text: str, scopes: list[str], wider: list[str], graph=None) -> str | None:
+    """For a question that found nothing in ``scopes``: the name of the one node it names that only the
+    ``wider`` scopes hold (a connected tool's ticket asked about in a room with a guest), else None.
+    Strict (no partial names), and only the name: a caller may say where it lives, nothing about it."""
+    try:
+        found = resolve_name(text, scopes=list(wider), graph=graph, partial=False).entity
+        if found is None or resolve_name(text, scopes=list(scopes), graph=graph, partial=False).entity is not None:
+            return None
+    except Exception:
+        logging.getLogger(__name__).warning("[resolve] withheld_name failed", exc_info=True)
+        return None
+    return found.name
 
 
 def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: list[str] | None = None, graph=None, partial: bool = True) -> Resolution:
