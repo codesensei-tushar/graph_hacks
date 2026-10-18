@@ -1,11 +1,14 @@
-"""The connector JSON client and the install registry, with no network and no graph."""
+"""The connector JSON client and the install registry, with no graph. Only the redirect test
+opens a socket, to two servers on localhost."""
 
 import io
 import json
 import logging
+import threading
 import unittest
 import urllib.error
 from email.message import Message
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
 import tests  # noqa: F401  pins the test graph and owner before src loads
@@ -127,6 +130,65 @@ class JsonClientTest(unittest.TestCase):
         self.assertEqual(http.retry_after_seconds("7"), 7.0)
         self.assertIsNone(http.retry_after_seconds(None))
         self.assertEqual(http.retry_after_seconds("Wed, 21 Oct 2015 07:28:00 GMT"), 0.0)
+
+    def test_waits_are_clamped_to_an_hour(self):
+        self.assertEqual(http.retry_after_seconds("999999999"), 3600.0)
+        self.assertEqual(http.retry_after_seconds("Fri, 01 Jan 2100 00:00:00 GMT"), 3600.0)
+        self.assertEqual(RetryLater(999_999_999).seconds, 3600.0)
+        self.assertEqual(RetryLater(float("nan")).seconds, 0.0)
+        self._serve(_error(429, {"Retry-After": "999999999"}))
+        with self.assertRaises(RetryLater) as raised:
+            self.client.get("x")
+        self.assertEqual(raised.exception.seconds, 3600.0)
+
+
+class _Server:
+    """A local HTTP server; ``reply(handler)`` answers each GET, and every request's headers are kept."""
+
+    def __init__(self, reply):
+        seen = self.seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append(dict(self.headers))
+                reply(self)
+
+            def log_message(self, *_):
+                pass
+
+        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class RedirectTest(unittest.TestCase):
+    def test_a_redirect_is_never_followed_so_credentials_stay_home(self):
+        def ok(handler):
+            handler.send_response(200)
+            handler.end_headers()
+            handler.wfile.write(b"{}")
+
+        elsewhere = _Server(ok)
+        self.addCleanup(elsewhere.close)
+        for status in (301, 302, 307, 308):
+
+            def redirect(handler, status=status):
+                handler.send_response(status)
+                handler.send_header("Location", f"{elsewhere.url}/steal")
+                handler.end_headers()
+
+            source = _Server(redirect)
+            self.addCleanup(source.close)
+            client = http.JsonClient(source.url, http.bearer(SECRET))
+            with self.assertRaises(http.HttpError) as raised:
+                client.get("/rest/api/3/search")
+            self.assertEqual(raised.exception.status, status)
+            self.assertEqual(len(source.seen), 1)
+        self.assertEqual(elsewhere.seen, [])
 
 
 class _Needs(Connector):

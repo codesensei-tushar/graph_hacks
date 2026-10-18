@@ -442,7 +442,12 @@ def account_name(name: str, label: str, source: str | None) -> str:
 
 
 def rank_people(path: list[PathStep], target: Entity) -> list[tuple[str, int, str]]:
-    """People in a path, heaviest edges first, each with the reasons in plain words. The path lines are the proof.
+    """People in a path, heaviest edges first, each with the reasons in plain words. The path lines are the proof."""
+    return [(name, score, reasons) for _who, name, score, reasons in rank_people_keyed(path, target)]
+
+
+def rank_people_keyed(path: list[PathStep], target: Entity) -> list[tuple[tuple[str, str], str, int, str]]:
+    """``rank_people`` with each person's ``(label, id)`` first, to tell people apart.
 
     People are told apart by label and id, never by name: an unlinked Jira account named like a
     person the company knows is someone else until it is linked. Work on tickets that lead to the
@@ -475,7 +480,7 @@ def rank_people(path: list[PathStep], target: Entity) -> list[tuple[str, int, st
     for who in sorted(scores, key=lambda who: (-scores[who], names[who], who)):
         # "worked on it and TKT-102, wrote notebook#52": one clause per verb, "it" first.
         clauses = [f"{verb} {join_names(sorted(objects, key=lambda what: what != 'it'))}" for verb, objects in reasons[who].items()]
-        ranked.append((names[who], scores[who], ", ".join(clauses)))
+        ranked.append((who, names[who], scores[who], ", ".join(clauses)))
     return ranked
 
 
