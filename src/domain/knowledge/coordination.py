@@ -19,7 +19,9 @@ account, tickets and decisions when the author is a known person. It says what t
 shows, not that the two have never met.
 
 A pull request is looked up by its number and repo, never matched loosely: ``docs#1234``
-is not ``docs#12345``. A document or ticket is not a change and is refused as one. Hops and
+is not ``docs#12345``. A document or ticket is not a change: named by its name ("who should
+review the billing runbook") it is answered as ``who_knows`` answers it, and an issue named
+like a pull request (``notebook#12``) is refused as one. Hops and
 shared work are counted from the edges the reply cites, so the answer is exact and the
 same on every run. Nothing is ranked by a graph algorithm.
 """
@@ -39,15 +41,15 @@ MAX_LISTED = 3
 # Shared pull requests, tickets or decisions named for one person.
 MAX_EXAMPLES = 2
 # What a question that names no pull request is resolved against. Pull requests are looked up
-# by number instead, so a pull request's title never hides a service. A document or ticket
-# resolves only to be refused: it is asked about, not changed.
+# by number instead, so a pull request's title never hides a service. A document or ticket is
+# asked about, not changed, so it gets the people who know it.
 LABELS = ("Service", "Document", "Ticket")
 WHAT = "pull request or service"
 
 # "notebook#45" or "acme/notebook#45": a pull request named with its repo.
 _IN_REPO = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)?[\w.-]+)#(\d+)\b")
-# "#45", "PR 45", "PR#45", "pull request 45", or the bare number a model may fill in.
-_NUMBER = re.compile(r"(?:\b(?:pr|pull request)\s*#?\s*|(?<![\w#])#)(\d+)\b|^\s*(\d+)\s*$", re.IGNORECASE)
+# "#45", "PR 45", "PR#45", "PR-45", "pull request 45", or the bare number a model may fill in.
+_NUMBER = re.compile(r"(?:\b(?:pr|pull request)[\s-]*#?\s*|(?<![\w#])#)(\d+)\b|^\s*(\d+)\s*$", re.IGNORECASE)
 # Words that sit before "#45" without naming a repo; after "issue" the number is not a pull request's.
 _NOT_A_REPO = frozenset({"pr", "pull", "issue", "issues"})
 _ISSUE_BEFORE = re.compile(r"\bissues?\s*$", re.IGNORECASE)
@@ -235,7 +237,11 @@ def pull_request_in(text: str, scopes: list[str], graph=None) -> Entity | None:
 
 
 def _resolve(graph, question: str, scopes: list[str]):
-    """The pull request or service named, with the resolver's other candidates, or a refusal."""
+    """The pull request or service named, with the resolver's other candidates, or a finished answer.
+
+    A document or ticket named by its name is answered here as ``who_knows`` answers it, so
+    every surface that runs this tool (keywords, the model, MCP) gets the same fall-through.
+    """
     reference = pr_reference(question)
     if reference is not None:
         return _pull_request_named(graph, question, reference, scopes)
@@ -244,7 +250,12 @@ def _resolve(graph, question: str, scopes: list[str]):
         return _miss(resolution)
     entity = resolution.entity
     if entity.label != "Service":
-        return _not_a_change(entity)
+        # ask_service routes to this module, so it is imported here rather than at the top.
+        from src.domain.knowledge.ask_service import knowers
+
+        result = knowers(graph, entity, scopes)
+        result.candidates = resolution.candidate_names()
+        return result
     return entity, resolution.candidate_names()
 
 
