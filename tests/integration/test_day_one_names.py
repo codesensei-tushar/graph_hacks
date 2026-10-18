@@ -86,7 +86,7 @@ class DayOneNamesTest(unittest.TestCase):
 
     def test_the_built_in_slack_answerer_knows_the_asker(self):
         reply = self._turn("UAMY", "what team am I on")
-        self.assertTrue(reply.startswith("Amy Member is on Payments."), reply)
+        self.assertTrue(reply.startswith("You're on Payments. You own Invoice Worker."), reply)
 
     def test_slack_never_says_ask_in_slack(self):
         reply = self._turn("UNOBODY", "what team am I on")

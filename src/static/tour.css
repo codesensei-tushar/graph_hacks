@@ -1,0 +1,102 @@
+/* Company Brain: the 60-second tour (tour.js), on the tokens in style.css. A caption card in a
+   corner, and a spotlight that dims the page around what the step shows. The page stays usable
+   under both: the spotlight takes no clicks, and the card covers one corner only. */
+
+:root { --tour-dim: rgba(17, 20, 42, 0.32); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --tour-dim: rgba(0, 0, 0, 0.55); }
+}
+:root[data-theme="dark"] { --tour-dim: rgba(0, 0, 0, 0.55); }
+
+/* The hero's buttons, side by side at the foot. The tour button shows once tour.js is running. */
+/* The tour button at the foot of the hero, bottom-right, as a ghost button. */
+.hero-foot {
+  position: absolute; left: 0; right: 0; bottom: 28px; width: min(var(--max), 100% - 2 * var(--gutter)); margin: 0 auto;
+  display: flex; justify-content: flex-end; align-items: end; gap: 8px;
+}
+.hero-foot .btn-ghost { min-height: 36px; font-size: var(--fs-sm); border-radius: 8px; }
+@media (max-width: 760px) {
+  /* Under the chips, in the room style.css keeps there for it on wide screens. */
+  .hero .ask-area { padding-bottom: 0; }
+  .hero-foot { position: static; width: 100%; margin-top: 14px; justify-content: flex-start; }
+}
+.tour-start[hidden] { display: none; }
+
+.tour-spot {
+  position: fixed; left: 0; top: 0; z-index: 45; border-radius: var(--radius); pointer-events: none;
+  box-shadow: 0 0 0 2px var(--path), 0 0 0 200vmax var(--tour-dim);
+  transition: transform var(--slow) var(--ease), width var(--slow) var(--ease), height var(--slow) var(--ease);
+}
+.tour-spot[hidden] { display: none; }
+
+.tour-card {
+  position: fixed; right: 24px; bottom: 24px; z-index: 50; width: min(380px, calc(100vw - 32px));
+  display: grid; gap: 10px; padding: 16px 18px 14px; border: 1px solid var(--line-2); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+}
+.tour-card:focus-visible { outline: 2px solid var(--path); outline-offset: 2px; }
+.tour-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tour-count { font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.tour-title { margin: 0; font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em; }
+.tour-text { margin: 0; font-size: var(--fs-sm); line-height: 1.55; color: var(--ink-2); min-height: 4.65em; }
+.tour-progress { height: 3px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.tour-fill { display: block; width: 0; height: 100%; background: var(--path); }
+.tour-controls { display: flex; gap: 8px; justify-content: flex-end; }
+.tour-controls button, .tour-skip {
+  min-height: 34px; padding: 0 12px; border-radius: 999px; cursor: pointer;
+  font: 500 var(--fs-sm)/1 var(--font); color: var(--ink-2); background: var(--surface); border: 1px solid var(--line);
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.tour-controls button:hover, .tour-skip:hover { color: var(--ink); border-color: var(--line-2); }
+.tour-controls button:disabled { opacity: 0.45; cursor: default; }
+.tour-controls .tour-next { color: var(--on-path); background: var(--path-ink); border-color: transparent; }
+.tour-controls .tour-next:hover { color: var(--on-path); box-shadow: 0 0 0 4px var(--glow); }
+.tour-skip { min-height: 28px; padding: 0 10px; font-size: var(--fs-xs); }
+/* The step's live fact: its claim, with this graph's own names and numbers. */
+.tour-fact { margin: 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); }
+.tour-fact[hidden] { display: none; }
+.tour-live { margin-right: 4px; font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--path-ink); }
+/* One dot per step, before the buttons; each jumps to its step. */
+.tour-dots { display: flex; align-items: center; gap: 2px; margin-right: auto; }
+.tour-controls .tour-dot { width: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 50%; background: none; display: grid; place-items: center; }
+.tour-dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--line-2); }
+.tour-dot[aria-current="step"]::before { background: var(--path); border-color: var(--path); }
+.tour-dot:hover::before { border-color: var(--ink-3); }
+.tour-controls[hidden] { display: none; }
+/* What the step's fact names, marked in place; a drawing's edge takes the drawing's own light. */
+.tour-mark { outline: 2px solid var(--path); outline-offset: 4px; border-radius: var(--radius-sm); }
+tr.tour-mark { outline: none; }
+tr.tour-mark > * { background-color: color-mix(in oklab, var(--path) 12%, var(--surface)) !important; }
+/* The phone line (tour.js): step, title, Next and close in one row. Wider screens never show it. */
+.tour-line { display: none; align-items: center; gap: 8px; }
+.tour-expand {
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 2px; border: 0; background: none; cursor: pointer; text-align: left;
+  font: 600 var(--fs-sm)/1.3 var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tour-expand::after { content: " ▾"; color: var(--ink-3); }
+.tour-card.open .tour-expand::after { content: " ▴"; }
+.tour-line-next, .tour-close {
+  flex: none; min-height: 44px; padding: 0 14px; border-radius: 999px; cursor: pointer; font: 500 var(--fs-sm)/1 var(--font);
+  color: var(--on-path); background: var(--path-ink); border: 1px solid transparent;
+}
+.tour-close { width: 44px; padding: 0; color: var(--ink-2); background: var(--surface); border-color: var(--line); font-size: var(--fs-lg); }
+.tour-line-next[hidden] { display: none; }
+/* While a step's answer is on its way. */
+.tour-card.busy .tour-text { opacity: 0.6; }
+
+@media (max-width: 760px) {
+  .tour-card { left: 12px; right: 12px; bottom: 12px; width: auto; }
+  /* Folded to its line, so the answer stays readable; a tap on the title opens the whole card,
+     whose line then stands in for the count and Skip. */
+  .tour-line { display: flex; }
+  .tour-top { display: none; }
+  .tour-card:not(.open) { gap: 0; padding: 6px 6px 6px 14px; }
+  .tour-card:not(.open) > :not(.tour-line) { display: none !important; }
+  .tour-card.open .tour-line-next { display: none; }
+  .tour-controls button { min-height: 44px; }
+  .tour-controls .tour-dot { width: 20px; min-height: 44px; }
+  .tour-skip { min-height: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot { transition: none; }
+}

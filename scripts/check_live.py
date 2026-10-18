@@ -13,14 +13,18 @@ when any check fails.
     python scripts/check_live.py --base http://localhost:8000
     python scripts/check_live.py --no-mcp                       # GET requests only
 
-The ask routes and ``/mcp`` share 30 calls a minute per address and this makes about 20,
-so wait a minute before running it twice.
+The ask routes and ``/mcp`` share one budget per address: about 60 calls a minute with bursts
+of 30, a heavy tool (a path, the risk map, a brief, a people ranking) costing 5. A run makes
+about 30 calls, so it sends one a second, the rate the budget refills at, and a 429 is waited
+out once, for its Retry-After but at most ``MAX_RETRY_SECONDS``, then asked again. A 429 that
+persists is a FAIL line like any other status, so run it again a minute later.
 """
 
 import argparse
 import http.client
 import json
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,6 +34,12 @@ from dataclasses import dataclass
 PRODUCTION = "https://brain.noobsurd.space"
 TIMEOUT_SECONDS = 30
 ANSWER_CHARS = 100
+# One request a second: the public budget's refill rate, so a run never drains it however
+# many chips the page lists.
+PACE_SECONDS = 1.0
+# A 429 is retried once, after its Retry-After (1 second when it names none) but never longer:
+# the longest the server asks for, a heavy call's 5 tokens at one a second.
+MAX_RETRY_SECONDS = 5.0
 
 # README.md, "Try it in two minutes": what a judge pastes first, and whether each should answer.
 # Keep this in step with that table.
@@ -166,16 +176,58 @@ def run(fetch: Fetch, post: Post | None = None) -> tuple[str, list[Check]]:
     return header, checks
 
 
+class Pacer:
+    """Requests spaced ``pace`` seconds apart, fetch and post alike, with a 429 waited out once."""
+
+    def __init__(self, pace: float = PACE_SECONDS, sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic):
+        self.pace, self.sleep, self.clock = pace, sleep, clock
+        self._last: float | None = None
+
+    def wrap(self, call):
+        """``call`` (a Fetch or a Post) paced, its 429 retried once after ``retry_wait``."""
+
+        def paced(*args):
+            status, body = self._send(call, args)
+            if status == 429:
+                self.sleep(retry_wait(body))
+                status, body = self._send(call, args)
+            return status, body
+
+        return paced
+
+    def _send(self, call, args):
+        if self._last is not None:
+            wait = self.pace - (self.clock() - self._last)
+            if wait > 0:
+                self.sleep(wait)
+        try:
+            return call(*args)
+        finally:
+            self._last = self.clock()
+
+
+def retry_wait(body: dict | None) -> float:
+    """Seconds to wait after a 429: its Retry-After in seconds, between 0 and ``MAX_RETRY_SECONDS``; 1 when unreadable."""
+    try:
+        seconds = float((body or {}).get("retry_after"))
+    except (TypeError, ValueError):
+        seconds = 1.0
+    return max(0.0, min(MAX_RETRY_SECONDS, seconds))
+
+
 def _exchange(request: urllib.request.Request) -> tuple[int, dict | None]:
     """Send one request and parse its JSON body, or an SSE body's last ``data:`` line.
 
-    A transport failure is status 0 with the reason, never a traceback."""
+    A transport failure is status 0 with the reason, never a traceback. A 429's Retry-After
+    comes back in the body as ``retry_after``."""
+    retry_after = None
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             status, body = response.status, response.read()
             content_type = (getattr(response, "headers", None) or {}).get("content-type", "")
     except urllib.error.HTTPError as error:
         status, body, content_type = error.code, error.read(), ""
+        retry_after = error.headers.get("Retry-After") if error.headers else None
     except urllib.error.URLError as error:
         return 0, {"error": str(error.reason)}
     except TimeoutError:
@@ -191,9 +243,12 @@ def _exchange(request: urllib.request.Request) -> tuple[int, dict | None]:
         events = [line[5:].strip() for line in body.decode("utf-8", "replace").splitlines() if line.startswith("data:")]
         body = events[-1].encode() if events else b""
     try:
-        return status, json.loads(body)
+        parsed = json.loads(body)
     except ValueError:
-        return status, None
+        parsed = None
+    if status == 429:
+        parsed = {**(parsed if isinstance(parsed, dict) else {}), "retry_after": retry_after}
+    return status, parsed
 
 
 def http_fetch(base: str) -> Fetch:
@@ -218,7 +273,8 @@ def main() -> int:
     parser.add_argument("--base", default=PRODUCTION, help=f"the instance to check (default {PRODUCTION})")
     parser.add_argument("--no-mcp", action="store_true", help="skip the three POSTs to /mcp; send GET requests only")
     args = parser.parse_args()
-    header, checks = run(http_fetch(args.base), None if args.no_mcp else http_post(args.base))
+    pacer = Pacer()
+    header, checks = run(pacer.wrap(http_fetch(args.base)), None if args.no_mcp else pacer.wrap(http_post(args.base)))
     print(f"{args.base}  {header}")
     for check in checks:
         print(check.line())

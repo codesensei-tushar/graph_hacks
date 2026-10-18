@@ -13,7 +13,7 @@ From the [rules](https://www.wemakedevs.org/hackathons/falkordb/rules) and [over
 | Public source repository | **Not yet.** The repository is private (`gh repo view` on 18 Oct, 14:20 IST). The user makes it public before submitting; step 6 of "18 Oct, in order" |
 | README with setup instructions **and the graph data model** | Done. README, "Graph data model". Vector recall was cut (round 2), so no vector index is documented |
 | **The Cypher queries or graph algorithms the product depends on**, in the README | Done. README, "Cypher queries the product depends on", with the injection audit |
-| Demo video of the working project | Not yet. Record to "Recording script, Quillfern on production (primary)", with the Sales beat from round 6 on the local replay |
+| Demo video of the working project | Not yet. Record to "Recording script, Quillfern on production (primary)": 2:30, all on production |
 | Live deployment, or complete local setup | Both. `brain.noobsurd.space` serves Quillfern (DEPLOY.md), and `scripts/replay_workspace.py` is the local setup. Every merge to `main` redeploys and drops connections for a few seconds; keep it up through judging |
 | Tracks named at submission | Enter 01, 02 and 03. Each has its own prize. |
 | FalkorDB is the primary database and "supports a central part of the product" | Yes. It is the only store, including the Redis keys. The ask page's proof shows 5 of 6 capabilities collapsing without it |
@@ -227,10 +227,10 @@ Rewritten 18 Oct, 14:45 IST. **Code freeze 20:00 IST; submit by 22:00** (the for
 | 1 | Now | **Tokens.** `/api/proof` and `POST /ops/seed` answer 503 because `BRAIN_ADMIN_TOKEN` is not in Secret Manager. Create it with `read -rs V && printf '%s' "$V" \| gcloud secrets create BRAIN_ADMIN_TOKEN --data-file=- --configuration=graphhacks; unset V` (value from `openssl rand -hex 32`). `MCP_TOKEN` is optional since #115: `/mcp` is public and rate-limited, and a token only lifts the limit. Keep every token out of the repo | user |
 | 2 | Right after 1 | **Redeploy**: `gh workflow run deploy.yml`, or let the next merge do it. Verify `curl -s -o /dev/null -w '%{http_code}' https://brain.noobsurd.space/api/proof` prints 401, not 503 | user |
 | 3 | Before 4 | **SEED_COMPANY: done in #116.** `POST /ops/seed` merges whatever `SEED_COMPANY` names, and it defaults to `company_brain`. `deploy.sh` writes only the listed secrets into the VM's `.env`, so #116 sets `SEED_COMPANY: quillfern` in `deploy/docker-compose.yml`. Step 4's response proves it | done |
-| 4 | After 3 | **Seed refresh, then the CITES cleanup.** `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. The response must say `"company": "quillfern"`; stop if it says anything else. Then in the Browser at https://gdb.noobsurd.space: `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c`. Details in step 3 of "Recording script, Quillfern on production (primary)" | user |
+| 4 | After 3 | **Seed refresh, then the CITES cleanup.** `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. The response must say `"company": "quillfern"`; stop if it says anything else. Then in the Browser at https://gdb.noobsurd.space: `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c`. Details under "Before the first take" in "Recording script, Quillfern on production (primary)" | user |
 | 5 | A minute after 4 | **`python scripts/check_live.py`: 16 passed, 0 failed.** Before the refresh it reads 15 of 15, because the page hides the billing-retries chip until that decision exists | user or critic |
 | 6 | Before recording | **Make the repository public** (rule 10): `gh repo edit codesensei-tushar/graph_hacks --visibility public --accept-visibility-change-consequences`. Secrets live only in Secret Manager (DEPLOY.md) | user |
-| 7 | After 5, ideally after the 20:00 freeze | **Record** to "Recording script, Quillfern on production (primary)", plus the Sales beat on the local replay (round 6). 1080p. Redo once if a step stumbles | user, team |
+| 7 | After 5, ideally after the 20:00 freeze | **Record** to "Recording script, Quillfern on production (primary)", 2:30, all on production. 1920x1080 at 125%. Redo once if a step stumbles | user, team |
 | 8 | After 7 | **Blog**: publish from docs/BLOG.md, then link it and the video from the README (the only merges allowed after the freeze) | user, coordinator |
 | 9 | After 7 | **Deck**: put the video link in place of `[video link]` on the deck's last slide and in docs/PITCH.md | user |
 | 10 | By 22:00 | **Submit** with the copy in "Form fields": repo, live link, video, tracks 03, 01 and 02, blog. `/mcp` needs no token since #115 | user |
@@ -290,31 +290,32 @@ Ticket numbers (`TKT-106`, `graph_hacks#N`) depend on the day's graph; read what
 
 ## Recording script, Quillfern on production (primary)
 
-**This is the script to record.** Production serves Quillfern, not the self-seed: `/api/ask/tools` reports company `quillfern`, and the teams are Data, Payments and Platform (rechecked 18 Oct, 14:20 IST). The two self-seed scripts above are superseded. It follows the Quillfern replay, whose replies `tests/integration/test_demo_replay.py` pins. Steps 1 and 6 and the bus-factor reply were checked on production read-only that morning; step 2 answers there too, but without dates or the decision it replaced until the refresh. Steps 1 to 8 were rechecked word for word on 18 Oct at `1ecb932`, on a fresh Quillfern seed (production after the refresh) through the replay's fake Slack, with and without the Sales import: every quoted line reads as written, and the import changes none of them.
+**Record this.** It runs 2:30, all on production: six asks, then the proof and MCP on the page, with one line to say per shot. Production serves Quillfern, a synthetic company. On 18 Oct at 21:50 IST, on `f45f9fd`, every quoted reply below was checked through the replay's fake Slack (`scripts/replay_workspace.py`, pinned by `tests/integration/test_demo_replay.py`) and by GET on production. They were rechecked at 22:30 on `c14d54b`, after the minimal page (#211) and the compound answers (#206, #212, #214), on the replay and by GET on production once that commit had deployed. All of them still read as written. This cut drops the ticket, "what changed this week", the private-repo DMs, the terminal proof and the local Sales beat. The 3:26 version is in git at `f45f9fd`.
 
-**Before the first take, in this order**
+**Before the first take**
 
-1. `BRAIN_ADMIN_TOKEN` in Secret Manager, then redeploy (steps 1 and 2 of "18 Oct, in order"); the refresh, the import and step 8 need it. Without a token `/api/proof` answers 503 while the secret is unset (still so on 18 Oct at `7ede9c6`) and 401 once it is set. Since #115 `/mcp` needs no token: it is public and rate-limited, and `MCP_TOKEN` only lifts the limit.
-2. **`SEED_COMPANY` is `quillfern` on production since #116** (`deploy/docker-compose.yml`), so `POST /ops/seed`, `/ops/import` and `onboard team:` all join Quillfern. Before #116 it was unset and defaulted to `company_brain`, and a refresh would have merged the self-seed into Quillfern. Step 3's response still confirms it.
-3. Refresh the seed: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. The response must say `"company": "quillfern"`. Production's Quillfern predates the current seed: its one decision cites through `CITES`, with no date and no `SUPERSEDES`, and the billing retries decision that step 3 replaces is missing. The refresh adds both missing decisions, the dates, `BASED_ON` and `SUPERSEDES`, and the seed's six dated public-channel memories: 13 nodes (the memories, their six Slack speakers and the `org_shared` scope) and 27 edges (`IN_SCOPE`, `SAID` and 15 `MENTIONS`), measured on a trimmed graph at `994c817`. They fill each team page's "What was said", answer the chip `what have we said about billing`, and add a *From conversations* list to some Slack replies (step 2 below). It also leaves the old `CITES` edges, so step 2 then lists the RFC and TKT-101 twice, in "Based on:" and in the path. Remove them in the Browser: `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c`. All of this was checked on a scratch graph trimmed to look like production's (before the seed had memories, the refresh reported 2 nodes and 12 edges created). The ask page caches each answer for a minute, so wait a minute before checking there.
-4. Optional, so the whole video stays on production: import Sales with `curl -X POST https://brain.noobsurd.space/ops/import -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" --data-binary @examples/teams/quillfern-sales.toml`, as the recording's Sales beat (13 nodes, 32 edges on a fresh Quillfern), then `/team/sales`, S2 and `what if priya shah leaves` as in round 6. Otherwise the Sales beat stays on the local replay.
-5. A minute after the refresh, and after any redeploy, `python scripts/check_live.py` passes. It sends only public GETs and checks every page chip, the README's four questions, `/team/payments` and the `/?q=` deep link. Since #114 the page lists a chip only when it answers with a path on the live graph: before the refresh production lists 8, without `is the billing retries decision still the last word` (that decision is missing; checked 18 Oct at `7ede9c6`) and without `what have we said about billing` (no memories yet), and a minute after the refresh it lists 10. Before #114 the billing retries chip was `check_live`'s one failure. With the three `/mcp` checks the run reads 18 of 18 before the refresh and 20 of 20 after it (both run locally at `994c817`, on a fresh seed and on one trimmed to look like production's).
+1. Production is refreshed. On the page, `why did we move the memory layer off postgres` (click More: the card shows only the lead) ends with "This replaced *Keep notebook links in Postgres join tables* (decided 1 Jun 2026)", which was true at 21:50. If it does not: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed` (the response must say `"company": "quillfern"`), then run `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c` in the Browser.
+2. `python scripts/check_live.py` passes.
+3. No merges during a take: every merge redeploys production.
+4. Browser at 1920x1080 with 125% zoom. Slack is the dev workspace, in #engineering.
 
-| Step | Type in the dev Slack workspace | Tool | Read aloud |
+| Time | Do | On screen, check | Say |
 | --- | --- | --- | --- |
-| 1 | `@Company Brain who owns billing, and who else has worked on it` | `who_knows` | "Billing Service is owned by Arjun Mehta." Then the ranked people and their path lines. "The answer is the path." |
-| 2 | `@Company Brain why did we move the memory layer off Postgres` | `decision_trace` | "Proposed by Kofi Mensah", "Approved by Tomas Reyes", the RFC and TKT-101 it rests on, and after the refresh "This replaced *Keep notebook links in Postgres join tables* (decided 1 Jun 2026)" and, under *From conversations*, Tomas's "signed off on moving the memory layer to the graph store, Kofi owns the migration" (learned 2026-09-15) and Sara's "I'll run the graph store for the memory layer, same box as search" (learned 2026-09-11) |
-| 3 | Post `we're moving billing retries to the invoice worker, decided in today's sync`, then `@Company Brain decision: move billing retries to the invoice worker`. Approve, then ask `why did we move billing retries to the invoice worker` | `record_decision`, then `decision_trace` | The card says what it replaces: *Retry renewal webhooks inside the billing service* (decided 20 Sep 2026). The trace quotes your message: "Decided in #<channel> on <date> by <you>: “we're moving billing retries ...”" |
-| 3b | In a new thread: `@Company Brain what changed this week`, then in that thread `only decisions` | `what_changed` | "In the last 7 days, 2 changes across the company. By thing: Billing Service: 2 changes; Invoice Worker: 2. Newest first: <today>: decided *Move billing retries to the invoice worker* (Billing Service, Invoice Worker), proposed by <you>, replacing *Retry renewal webhooks inside the billing service*. <today>: <you> said “we're moving billing retries ...”" Then `only decisions`: "In the last 7 days, 1 decision across the company, newest first: ...", with "Subject from this thread" in the footer. "What changed this week starts with the decision made a minute ago." |
-| 4 | `@Company Brain what breaks if auth goes down, one hop`, then in the thread `and two hops out` | `blast_radius` | One hop: "... API Gateway, Billing Service, Notification Service and Search Service (1 hop). 1 more breaks further out (Invoice Worker at depth 2) ...". Two hops: "... Invoice Worker (2 hops). Depth 2 reached 5 services; nothing new past depth 2. Among them, Billing Service and Notification Service are the main connectors: 1 of the 5 reaches Auth Service through each." |
-| 5 | `@Company Brain ticket: billing exports time out`, Approve, then in the thread `who should look at it` | `ingest_ticket`, then `who_knows` | The card names *Billing Service*; then "Filed *TKT-N* about Billing Service" and the ranked people |
-| 6 | `@Company Brain who knows the payments gateway` | refusal | "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." |
-| 7 | Not live: real Slack users are not Quillfern's people, and its private repo is scripted. Show the local replay's two DM replies in the terminal instead | `who_knows` | Kofi's DM has no `billing-internal` line (footer "public channels, your DMs, #engineering"); Arjun's adds `billing-internal#7` and its footer ends "the quillfern/billing-internal repo". "The permission check is a graph query too." |
-| 8 | Terminal: `curl -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "https://brain.noobsurd.space/api/proof?format=text"` | proof | "5 of 6 capabilities collapse without FalkorDB", and the refusal row "refused both ways". `tests/integration/test_knowledge_proof.py` pins this on the current seed. Production's old seed reads the same through the public `GET /api/ask/proof` (JSON, no token; on 18 Oct at `7ede9c6`, 5 of 6 collapsed and the refusal refused both ways), so the text route needs only `BRAIN_ADMIN_TOKEN` set |
+| 0:00 | The landing page. Click the chip `who owns billing, and who else has worked on it` | "Billing Service is owned by Arjun Mehta." leads the card, then the walk draws | "Ask how your company works. Every answer shows the path it walked." |
+| 0:15 | Slack: `@Company Brain why did we move the memory layer off Postgres` | "Proposed by Kofi Mensah. Approved by Tomas Reyes." and "This replaced *Keep notebook links in Postgres join tables*" | "The decision, who made it, and what it replaced." |
+| 0:35 | Post `we're moving billing retries to the invoice worker, decided in today's sync`, then `@Company Brain decision: move billing retries to the invoice worker`, then Approve, then `@Company Brain why did we move billing retries to the invoice worker` | The card names *Retry renewal webhooks inside the billing service*. The trace reads "Decided in #engineering on <date> by <you>: “we're moving billing retries ...”" | "Writes wait for an Approve. The old decision stays, marked as replaced." |
+| 1:05 | `@Company Brain what breaks if auth goes down, one hop`, then `and two hops out` in the thread | "1 more breaks further out (Invoice Worker at depth 2)", then "Invoice Worker (2 hops)" | "Two hops out. A search box can't do that." |
+| 1:30 | `@Company Brain who knows the payments gateway` | "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." | "If the graph doesn't know, it says so." |
+| 1:45 | `@Company Brain what if arjun mehta leaves` | "Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes" | "What rests on one person, and who's next." |
+| 2:00 | The browser, the page's [Take FalkorDB out](https://brain.noobsurd.space/#proof) section | "5 of 6 answers disappear without the graph.", five rows marked ✕ refused, and the refusal row reads "refused both ways" | "Take FalkorDB out, and the answers go with it." |
+| 2:15 | Scroll to Builders: the `claude mcp add` line | The quick start, then one line of tool names: "27 read-only tools, 3 writes behind an Approve card." | "The same tools, over MCP. One command." |
+| 2:25 | Back to the top of the page | The URL | "Company Brain, on FalkorDB." |
 
-Beat 3b (added 18 Oct by team-coder-b) is played and pinned by the replay: `tests/integration/test_demo_replay.py` `test_3c`, from #engineering with no model. On production, "this week" also lists any public-channel message the bot kept in the last seven days, so read whatever the reply shows after the two lines above. team-critic: change the read-aloud line here if it should read differently; the replay pins the reply, not the voice-over.
+Read the reply that is on screen, never the table. Numbers and dates depend on the day's graph.
 
-Between takes, delete the two writes in the Browser: `MATCH (d:Decision {name: 'Move billing retries to the invoice worker'}) DETACH DELETE d` and `MATCH (t:Ticket {title: 'billing exports time out'}) DETACH DELETE t`. With the new decision gone, the old one stands again.
+If Sales was imported on production (`/ops/import` with `examples/teams/quillfern-sales.toml`), ask `what if priya shah leaves` at 1:45 instead and say "Next in line for pricing is on another team." It answers "... Pricing playbook: Priya Shah is its only owner; next in line: Noor Haddad, then Tomas Reyes." (checked on the replay graph; production had no Sales at 21:50).
+
+Between takes, delete the write in the Browser: `MATCH (d:Decision {name: 'Move billing retries to the invoice worker'}) DETACH DELETE d`. With it gone, the old decision stands again.
 
 ## Round 4: 17 Oct, late morning
 
@@ -378,7 +379,7 @@ Submission description, one added sentence: "Any team onboards the same way; the
 
 ## Round 6: the video, end to end (17 Oct, evening)
 
-Short version: record steps 1 to 8 in Slack on production as scripted, then cut to a local replay of the synthetic company for the Sales beat in the browser, which ends on one new move, `if_person_leaves`. One storyboard below replaces the round 2 table and the round 5 beat. Replies marked "target" become exact when the test that pins them lands; the script follows the tests.
+Superseded by the 2:30 cut in "Recording script, Quillfern on production (primary)". Short version, as of round 6: record steps 1 to 8 in Slack on production as scripted, then cut to a local replay of the synthetic company for the Sales beat in the browser, which ends on one new move, `if_person_leaves`. One storyboard below replaces the round 2 table and the round 5 beat. Replies marked "target" become exact when the test that pins them lands; the script follows the tests.
 
 ### Since round 5
 
@@ -413,31 +414,11 @@ Router phrasings: "what if X leaves", "what happens if X leaves", "who covers fo
 
 ### Storyboard, consolidated
 
-Hard cap three and a half minutes. This table replaces the round 2 storyboard and the round 5 storyboard line.
-
-| Time | Shot | Say |
-| --- | --- | --- |
-| 0:00 to 0:12 | Title over the FalkorDB Browser showing production's graph | "Agents see pieces. Company Brain puts people, services, docs, tickets, decisions and chat in one FalkorDB graph and answers by walking it." |
-| 0:12 to 0:22 | Browser on the local replay graph, not production: production has no GitHub data, so no `TOUCHES` edges, and after the refresh only the six seeded memories. Use the graph set up for the Sales beat (`--steps history --no-sales`, under "Before recording" below). There, checked on 18 Oct, Memory Layer has `DEPENDS_ON` (to Graph Store, from Search Service), `OWNS` from Kofi Mensah, `TOUCHES` from notebook#41, and two memories with `MENTIONS` | "Slack and GitHub feed it live. Every memory carries the scope of the room it was said in." |
-| 0:22 to 0:45 | Slack, production, recording step 1 | "The answer is the path." |
-| 0:45 to 1:00 | Step 2 | "Decision, author, sources, and the conversation it came from." |
-| 1:00 to 1:20 | Steps 3 and 3b | "Knowledge stays current without deleting history." Then 3b: "What changed this week starts with the decision made a minute ago." |
-| 1:20 to 1:45 | Steps 4 and 4b | "Three hops. A search box could not." |
-| 1:45 to 2:05 | Steps 5, 5b and 5c | "Writes wait for a human. The card named the target before the write." |
-| 2:05 to 2:15 | Step 6 | "It says what it does not know, and never guesses." |
-| 2:15 to 2:25 | Steps 7 and 7b. Cut if the private test repo and `link github` are not done | "The permission check is a graph query too." |
-| 2:25 to 2:35 | Terminal, step 8, the proof route on production | "Take FalkorDB out and nothing answers." |
-| 2:35 to 2:43 | Terminal, local replay: B1, the import | "Not only engineering. Sales is one file and one command." |
-| 2:43 to 2:52 | Browser: B2, `/team/sales` | "The same graph: a process is run by someone, a CRM can go down, an account has an owner." |
-| 2:52 to 3:04 | Ask page: B3 | "A CRM outage, traced through the process it feeds." |
-| 3:04 to 3:16 | Ask page: B4 | "And if the person who runs renewals leaves, the graph says what rests on them alone and who is next in line, even from another team." |
-| 3:16 to 3:26 | README: the Mermaid diagram, the deploy URL, the three tracks | Close. |
-
-3:26 with every step in; 3:16 without step 7.
-
-The step numbers above are the self-seed script's. On Quillfern production, use "Recording script, Quillfern on production (primary)": step 4 is one hop, then two (say "Two hops. A search box could not."), step 5 is the card, the write and `who should look at it` in one, and step 7 is the replay's two DM replies in the terminal.
+Superseded on 18 Oct at 21:50 IST by the 2:30 cut in "Recording script, Quillfern on production (primary)", which carries its own times. The 3:26 storyboard with the Sales beat is in git at `f45f9fd`.
 
 ### The Sales beat, literal
+
+Not in the 2:30 cut. Kept here for a longer take.
 
 On the local replay. Hold every reply three seconds. Rechecked word for word on 18 Oct at `1ecb932`, set up as in "Before recording" below: B1 created 13 nodes and 32 edges (0 on the second run), and B2 to B4, S1 and S3 read as written.
 

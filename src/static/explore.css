@@ -2,7 +2,7 @@
    Only new classes live here; the chips themselves are the page's .chip. */
 
 /* "Ask next" after an answer and "Try instead" after a refusal: one labelled row of chips,
-   after the edge lines and before the footer line, so nothing above it moves. */
+   after the footer line, so nothing above it moves and the recording frame keeps the footer. */
 .next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 18px 0 0; }
 .next-label { margin: 0; font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 .next-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -40,3 +40,8 @@
   .walk-step { min-height: 44px; }
   .walk-step, .walk-here { max-width: 22ch; }
 }
+
+/* A question in two parts: each part's paragraph under the part as the server read it, the second
+   set apart by a quiet rule. The paragraphs keep the answer's own .text. */
+.answer .part-q { margin: 0 0 6px; font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.04em; color: var(--ink-3); overflow-wrap: anywhere; }
+.answer .part-q.then { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line-2); }

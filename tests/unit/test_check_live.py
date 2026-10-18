@@ -1,9 +1,11 @@
 """The live smoke check's pass/fail decision, on canned responses: no network, no server."""
 
 import http.client
+import io
 import json
 import re
 import unittest
+import urllib.error
 import urllib.parse
 from pathlib import Path
 from unittest import mock
@@ -229,3 +231,65 @@ class CheckLiveTest(unittest.TestCase):
         self.assertEqual(re.findall(r"^\| `([^`]+)` \|", section, re.MULTILINE), [question for question, _ in check_live.README_QUESTIONS])
         for path in ("/team/payments", "/?q=what%20if%20arjun%20mehta%20leaves"):
             self.assertIn(path, section)
+
+
+class _Clock:
+    """A clock that only moves when the pacer sleeps."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def sleep(self, seconds: float):
+        self.slept.append(round(seconds, 3))
+        self.now += seconds
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class PacerTest(unittest.TestCase):
+    def test_a_429_waits_its_retry_after_once_then_answers(self):
+        clock = _Clock()
+        replies = [(429, {"error": "Too many questions", "retry_after": "2"}), (200, {"found": True, "answer": "ok"})]
+        asked: list[str] = []
+
+        def fetch(path):
+            asked.append(path)
+            return replies.pop(0)
+
+        fetch = check_live.Pacer(sleep=clock.sleep, clock=clock).wrap(fetch)
+        self.assertEqual(fetch("/api/ask?q=x"), (200, {"found": True, "answer": "ok"}))
+        self.assertEqual(asked, ["/api/ask?q=x", "/api/ask?q=x"])
+        # Retry-After, then the pace already covered by that wait.
+        self.assertEqual(clock.slept, [2.0])
+
+    def test_a_long_retry_after_is_capped_and_a_second_429_is_reported(self):
+        clock = _Clock()
+        fetch = check_live.Pacer(sleep=clock.sleep, clock=clock).wrap(lambda path: (429, {"retry_after": "60"}))
+        status, body = fetch("/api/ask?q=x")
+        self.assertEqual((status, clock.slept), (429, [check_live.MAX_RETRY_SECONDS]))
+        self.assertEqual(check_live.judge_answer("chip: x", True, status, body).line(), "FAIL  chip: x  ->  HTTP 429")
+        self.assertEqual([check_live.retry_wait(body) for body in ({}, None, {"retry_after": "soon"}, {"retry_after": "-4"})], [1.0, 1.0, 1.0, 0.0])
+
+    def test_requests_are_paced_across_fetch_and_post(self):
+        clock = _Clock()
+        pacer = check_live.Pacer(sleep=clock.sleep, clock=clock)
+        fetch, _ = _fake()
+        post, posted = _fake_mcp()
+        _, checks = check_live.run(pacer.wrap(fetch), pacer.wrap(post))
+        self.assertTrue(all(check.ok for check in checks))
+        requests = 2 + len(CHIPS) + len(check_live.README_QUESTIONS) + len(check_live.README_PAGES) + len(posted)
+        # Every request after the first waits one pace, the budget's refill.
+        self.assertEqual(clock.slept, [check_live.PACE_SECONDS] * (requests - 1))
+
+    def test_http_fetch_reads_a_429s_retry_after(self):
+        error = urllib.error.HTTPError("http://check.test/api/ask?q=x", 429, "Too Many Requests", {"Retry-After": "3"}, io.BytesIO(b'{"error": "Too many questions"}'))
+        with mock.patch.object(check_live.urllib.request, "urlopen", side_effect=error):
+            self.assertEqual(check_live.http_fetch("http://check.test")("/api/ask?q=x"), (429, {"error": "Too many questions", "retry_after": "3"}))
+
+    def test_main_paces_what_it_sends(self):
+        with mock.patch.object(check_live, "run", return_value=("header", [])) as run, mock.patch("sys.argv", ["check_live.py"]):
+            check_live.main()
+        fetch, post = run.call_args.args
+        self.assertEqual((fetch.__qualname__, post.__qualname__), ("Pacer.wrap.<locals>.paced", "Pacer.wrap.<locals>.paced"))

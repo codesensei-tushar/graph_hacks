@@ -54,6 +54,12 @@ def format_answer(
 ) -> str:
     """``chosen_by`` is "model" or "keywords" when the agent picked the tool; the footer then names both."""
     parts = [result.get("answer") or "I couldn't find that in the company graph."]
+    if result.get("parts"):
+        # A question in two parts: one section each, headed by what it asked.
+        parts = []
+        for part in result["parts"]:
+            parts += [""] if parts else []
+            parts += [f"*{_asked(part['question'])}*", part["answer"]]
     path = result.get("path") or []
     if path:
         # The header says what was walked, how deep, and how many edges, so a reader can judge
@@ -83,6 +89,11 @@ def format_answer(
             footer = footer.replace(". Read from:", ". Subject from this thread. Read from:", 1)
     parts += ["", f"_{footer}_"]
     return "\n".join(parts)
+
+
+def _asked(question: str) -> str:
+    question = question.strip().rstrip("?.! ")
+    return question[:1].upper() + question[1:] + "?"
 
 
 def format_scopes(read_tags: list[str], write_tag: str | None, channel_names: dict[str, str]) -> str:

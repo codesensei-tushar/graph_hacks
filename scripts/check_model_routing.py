@@ -84,6 +84,9 @@ QUESTIONS = [
     # Company-level reads across teams and across decisions.
     ("org 1", "which teams depend on platform", "team_dependencies", None),
     ("org 2", "which decisions are stale", "decision_health", None),
+    # People ranked on a measure, and who to ask now with dates.
+    ("people 1", "who reviewed the most code", "people_ranking", None),
+    ("people 2", "who is the go-to for postgres right now", "go_to", None),
     # reading_list: what to read before a change, and the neighbour it must not take.
     ("read 1", "what should I read before touching the invoice worker", "reading_list", None),
     ("read 2", "which docs describe the auth service", "reading_list", None),

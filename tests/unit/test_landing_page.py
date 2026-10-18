@@ -20,8 +20,8 @@ from src.domain.knowledge.algorithms import depth_in  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-PAGE_SCRIPTS = ("shell.js", "graph.js", "hero.js", "riskmap.js", "answer.js", "app.js")
-STYLESHEETS = ("style.css", "riskmap.css", "explore.css")
+PAGE_SCRIPTS = ("shell.js", "graph.js", "hero.js", "riskmap.js", "answer.js", "app.js", "tour.js")
+STYLESHEETS = ("style.css", "riskmap.css", "explore.css", "tour.css")
 ALLOWED_ROUTES = {"/api/ask", "/api/ask/tools", "/api/ask/proof", "/api/teams", "/api/team/", "/api/graph/stats", "/api/graph/sample"}
 # The explorer page at /explore.
 ALLOWED_ROUTES |= {"/api/explore", "/api/explore/neighbors", "/api/explore/start"}
@@ -99,22 +99,26 @@ class SectionsTest(unittest.TestCase):
             page.headings,
             [
                 ("h1", "Ask how your company works. Every answer shows the path it walked."),
-                ("h2", "Ask the graph behind this project."),
-                ("h2", "The graph behind every answer."),
                 ("h2", "Take FalkorDB out, and the answers go with it."),
                 ("h2", "Not only engineering."),
-                ("h2", "How an answer is made."),
                 ("h2", "The same tools, over MCP."),
             ],
         )
         for landmark in ("header", "main", "footer"):
             self.assertEqual(page.tags.count(landmark), 1, landmark)
+        # Every section link in the shared header still lands: the live answer and the graph share a
+        # section, and How it works is the proof's second half.
         for section in ("ask", "live-answer", "graph", "proof", "teams", "how", "builders"):
             self.assertIn(section, page.text_by_id)
+        self.assertIn('<h3 class="how-title">How an answer is made.</h3>', (STATIC / "index.html").read_text())
 
-    def test_the_footer_carries_the_readme_ai_disclosure_word_for_word(self):
-        disclosure = next(line for line in (ROOT / "README.md").read_text().splitlines() if line.startswith("AI assistance:"))
-        self.assertIn(disclosure, (STATIC / "index.html").read_text())
+    def test_the_footer_is_the_name_and_one_link(self):
+        # The README carries the AI-assistance disclosure; the page's footer stays minimal.
+        html = (STATIC / "index.html").read_text()
+        footer = html[html.index('<footer class="site">'):html.index("</footer>")]
+        self.assertIn('<span class="foot-name">Company Brain</span>', footer)
+        self.assertEqual(footer.count("<a "), 1)
+        self.assertTrue(next(line for line in (ROOT / "README.md").read_text().splitlines() if line.startswith("AI assistance:")))
 
     def test_the_answer_region_is_announced(self):
         self.assertRegex((STATIC / "index.html").read_text(), r'class="answer-body" aria-live="polite"')
@@ -123,8 +127,8 @@ class SectionsTest(unittest.TestCase):
 class NoTypedNumbersTest(unittest.TestCase):
     def test_counts_that_come_from_the_api_are_empty_in_the_html(self):
         page = _parse("index.html")
-        self.assertEqual(len(page.stat_cells), 4)
-        self.assertEqual([cell.strip() for cell in page.stat_cells], ["", "", "", ""])
+        self.assertEqual(len(page.stat_cells), 3)
+        self.assertEqual([cell.strip() for cell in page.stat_cells], ["", "", ""])
         for element_id in ("live-count", "proof-line", "proof-refusal", "proof-body", "tool-count", "tool-list", "team-cards", "chips", "arch-reads", "arch-writes"):
             self.assertNotRegex(page.text_by_id[element_id], r"\d", element_id)
 
@@ -155,14 +159,16 @@ class WeightTest(unittest.TestCase):
         self.assertEqual(fonts, ["Geist-Variable.woff2", "GeistMono-Variable.woff2"])
         self.assertTrue((STATIC / "fonts" / "OFL.txt").exists())
         own_js = sum((STATIC / name).stat().st_size for name in PAGE_SCRIPTS)
-        # Raised from 80 KB with the risk grid and the explore affordances; the page total below is the real cap.
-        self.assertLess(own_js, 96 * 1024)
+        # Raised from 80 KB with the risk grid and the explore affordances, then from 96 KB with the tour (19 KB).
+        # The scripts ship unminified, with their comments, and no build step; the page total below is the cap.
+        self.assertLess(own_js, 120 * 1024)
         page = own_js + sum((STATIC / name).stat().st_size for name in ("index.html", *STYLESHEETS)) + sum(
             (STATIC / "fonts" / name).stat().st_size for name in fonts
         )
         # Raised from 300 KB with the risk grid, the explore affordances and the builders section (architecture
-        # diagram, quick start, live catalogue); the woff2 fonts are most of it. DESIGN.md 3.x says the same.
-        self.assertLess(page, 320 * 1024)
+        # diagram, quick start, live catalogue), then from 320 KB with the tour; the woff2 fonts are most of it.
+        # DESIGN.md 3.x says the same.
+        self.assertLess(page, 340 * 1024)
 
 
 class TeamPageTest(unittest.TestCase):
@@ -289,7 +295,10 @@ class RiskMapTest(unittest.TestCase):
         render = answer_js[answer_js.index("function render(out, data, question, opts)"):]
         hook = 'if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: onAsk });'
         self.assertEqual(answer_js.count("RiskMap.render("), 1)
-        self.assertLess(render.index("data.answer));"), render.index(hook))
+        # Each part of a question in two parts is its own paragraph; one part is the answer itself.
+        self.assertLess(render.index("part.answer));"), render.index(hook))
+        self.assertIn("const parts = data.parts && data.parts.length ? data.parts : null;", render)
+        self.assertIn("for (const [index, part] of (parts || [data]).entries())", render)
         self.assertLess(render.index(hook), render.index("BrainGraph.renderPath("))
         self.assertIn("onAsk: askFromPage,", (STATIC / "app.js").read_text())
 
@@ -350,7 +359,7 @@ class BuildersTest(unittest.TestCase):
     def test_a_proof_row_links_to_its_tool_card(self):
         self.assertIn("href: `#tool-${row.tool}`", self.app_js)
         self.assertIn("id: `tool-${tool.name}`", self.app_js)
-        self.assertIn('href="#tools"', self.html)
+        self.assertIn('id="tool-list"', self.html)
 
     def test_the_claude_code_command_is_the_readmes(self):
         readme = (ROOT / "README.md").read_text()
@@ -362,3 +371,50 @@ class BuildersTest(unittest.TestCase):
         panes = re.findall(r'<div class="qs-pane" id="(qs-[a-z]+)"', self.html)
         self.assertEqual(panes, ["qs-claude", "qs-any", "qs-python", "qs-http"])
         self.assertEqual(self.html.count('<button class="copy" type="button">Copy</button>'), len(panes))
+
+
+class _Words(HTMLParser):
+    """The words index.html itself carries, per section (and the footer), as a reader sees them:
+    no scripts, styles, noscript fallbacks, SVG titles or descriptions, nothing hidden."""
+
+    SKIP = {"script", "style", "noscript", "title", "desc"}
+
+    def __init__(self):
+        super().__init__()
+        self.stack: list[tuple[str, str | None, bool]] = []
+        self.counts: dict[str, int] = {}
+
+    def handle_starttag(self, tag, attrs):
+        if tag in VOID:
+            return
+        attrs = dict(attrs)
+        key = "footer" if tag == "footer" else attrs.get("id") if tag == "section" else None
+        self.stack.append((tag, key, "hidden" in attrs))
+
+    def handle_endtag(self, tag):
+        if tag in VOID:
+            return
+        while self.stack and self.stack.pop()[0] != tag:
+            pass
+
+    def handle_data(self, data):
+        if any(tag in self.SKIP or hidden for tag, _, hidden in self.stack):
+            return
+        keys = [key for _, key, _ in self.stack if key]
+        if keys:
+            self.counts[keys[-1]] = self.counts.get(keys[-1], 0) + len(re.findall(r"\w[\w'’.-]*", data))
+
+
+class WordBudgetTest(unittest.TestCase):
+    """The page stays short. Each section's own words stay under its budget, half or less of what it
+    carried before the minimal pass; the live parts (chips, counts, the answer, the proof rows, the
+    tool cards) come on top and are measured in a browser."""
+
+    BUDGETS = {"ask": 24, "live-answer": 20, "proof": 260, "teams": 110, "builders": 160, "footer": 5}
+
+    def test_every_section_is_under_its_budget(self):
+        words = _Words()
+        words.feed((STATIC / "index.html").read_text())
+        self.assertEqual(set(words.counts), set(self.BUDGETS))
+        for section, budget in self.BUDGETS.items():
+            self.assertLessEqual(words.counts[section], budget, section)

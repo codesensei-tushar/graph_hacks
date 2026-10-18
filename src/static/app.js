@@ -1,6 +1,8 @@
 // Company Brain page: ask the graph, draw the path it walked. Plain JS, no build step.
 // Every piece of answer text is inserted with textContent; markup is built from constants only.
 // First load makes four calls (tools, stats, sample, teams); the proof waits until it is scrolled to.
+// The page stays short on purpose: the answer card opens on the first ask, an answer shows its lead
+// sentence and a tool card its first clause, and each folds the rest behind "More".
 (() => {
   "use strict";
 
@@ -15,7 +17,7 @@
   const chips = $("#chips");
 
   const { el } = window.BrainGraph;
-  const VISIBLE_CHIPS = 3;
+  const VISIBLE_CHIPS = 2;
   const CACHE_MS = 60 * 1000;
   const TOO_MANY = "Too many questions from this address; try again in a minute.";
   const reducedMotion = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -40,10 +42,10 @@
   // The example chips that answer on this graph; a refusal with no near name offers the first two.
   // ``toolsReady`` settles once they are in, for a refusal that arrives first (a deep link).
   let examplesAnswered = [];
+  // Every example chip /api/ask/tools offers, the refusal included, for the tour's honesty check.
+  let examplesOffered = [];
   let toolsReady = Promise.resolve();
   let teamIds = null;
-  // The stats' label counts once they arrive; {} when that call failed.
-  let counted = null;
   // The whole graph's node and edge counts, and the hero sample's, for the line above the sample.
   let totals = null;
   let sampled = null;
@@ -70,6 +72,7 @@
   function renderChips(examples) {
     const answered = examples.slice(0, -1);
     examplesAnswered = answered;
+    examplesOffered = examples.slice();
     const refusal = examples[examples.length - 1];
     chips.replaceChildren();
     const hidden = [];
@@ -79,7 +82,7 @@
       chips.append(item);
     });
     if (hidden.length) {
-      const more = chip(`${hidden.length} more`, () => {
+      const more = chip("More", () => {
         for (const item of hidden) item.hidden = false;
         more.remove();
         hidden[0].querySelector("button").focus();
@@ -90,33 +93,30 @@
     if (refusal) {
       const ask = $("#refusal-ask");
       ask.textContent = refusal;
+      ask.title = `Ask: ${refusal}`;
       ask.addEventListener("click", () => askFromPage(refusal));
-      $("#refusal-try").hidden = false;
+      ask.hidden = false;
+      $("#refusal-wait").remove();
     }
   }
 
-  // The graph line names only what the live graph holds, in the brief's order: a plain seed
-  // has no pull requests until GitHub adds them. Chat is a seeded Chat thread or a memory.
-  const DEMO_KINDS = [[["Person"], "people"], [["Service"], "services"], [["Decision"], "decisions"], [["Ticket"], "tickets"], [["PullRequest"], "pull requests"], [["Memory", "Chat"], "chat"]];
-  const OWN_KINDS = [[["Service"], "services"], [["Decision"], "decisions"], [["PullRequest"], "pull requests"], [["Memory", "Chat"], "public chat"]];
-  const listed = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
-
+  // The graph line names the graph; the counts beside it are the stats row's.
   function renderGraphLine() {
-    if (!catalogue || counted === null) return;
-    const own = catalogue.company === "company-brain";
-    const words = (own ? OWN_KINDS : DEMO_KINDS).filter(([labels]) => labels.some((label) => counted[label] > 0)).map(([, word]) => word);
-    const what = words.length ? `: its ${own ? "own " : ""}${listed(words)}` : "";
+    if (!catalogue) return;
     const line = $("#graph-line");
-    if (own) line.textContent = `This page reads the live graph behind this project${what}.`;
-    else if (catalogue.name) line.textContent = `This page reads the live graph of ${catalogue.name}, a synthetic company built for the demo${what}.`;
+    if (catalogue.company === "company-brain") line.textContent = "This project's own graph";
+    else if (catalogue.name) line.textContent = `${catalogue.name}, a synthetic demo company`;
   }
 
-  // The catalogue for builders: one card per read-only tool, read live from /api/ask/tools, with
-  // its first sentence and its arguments. Each card has an id, so a proof row can link to it.
-  // The architecture diagram takes its counts from the same call.
+  // The catalogue for builders, in one line: how many read-only tools there are and how many more
+  // write, each behind an Approve card (the README holds the full list); then every read tool's
+  // name as a pill, its description as the pill's title. Each pill has an id, so a proof row can
+  // link to it. The architecture diagram takes its counts from the same call.
   function renderTools(tools, writes) {
     const reads = plural(tools.length, "read-only tool", "read-only tools");
-    $("#tool-count").replaceChildren(el("b", {}, String(tools.length)), reads.slice(String(tools.length).length));
+    const count = $("#tool-count");
+    count.replaceChildren(el("b", {}, String(tools.length)), reads.slice(String(tools.length).length));
+    if (writes.length) count.append(`, ${plural(writes.length, "write", "writes")} behind an Approve card`);
     const archReads = $("#arch-reads");
     if (archReads) archReads.textContent = reads;
     const archWrites = $("#arch-writes");
@@ -124,47 +124,10 @@
     const list = $("#tool-list");
     list.replaceChildren();
     for (const tool of tools) {
-      const first = tool.description.split(/(?<=\.)\s/)[0];
-      const card = el("li", { class: "tool-card", id: `tool-${tool.name}`, title: tool.description });
-      card.dataset.search = `${tool.name} ${tool.name.replace(/_/g, " ")} ${tool.description} ${(tool.args || []).join(" ")}`.toLowerCase();
-      card.append(el("code", { class: "tool-name" }, tool.name), el("p", { class: "tool-does" }, first));
-      const args = el("p", { class: "tool-args" });
-      if ((tool.args || []).length) {
-        args.append(el("span", { class: "label" }, "args"));
-        for (const arg of tool.args) args.append(el("code", {}, arg));
-      } else {
-        args.append(el("span", { class: "label" }, "no arguments"));
-      }
-      card.append(args);
-      list.append(card);
+      const pill = el("li", { id: `tool-${tool.name}`, title: tool.description });
+      pill.append(el("code", {}, tool.name));
+      list.append(pill);
     }
-    const note = $("#tool-writes");
-    if (writes.length) {
-      note.replaceChildren(`${plural(writes.length, "more tool writes", "more tools write")} the graph: `);
-      writes.forEach((name, index) => note.append(index ? ", " : "", el("code", {}, name)));
-      note.append(". They run in Slack only, after someone approves a card that names the target, and are never served over MCP.");
-      note.hidden = false;
-    }
-    watchFilter(tools.length);
-  }
-
-  function watchFilter(total) {
-    const input = $("#tool-filter");
-    const count = $("#tool-count");
-    const full = count.cloneNode(true);
-    input.disabled = false;
-    input.addEventListener("input", () => {
-      const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
-      let shown = 0;
-      for (const card of $("#tool-list").children) {
-        const match = words.every((word) => (card.dataset.search || "").includes(word));
-        card.hidden = !match;
-        if (match) shown += 1;
-      }
-      $("#tool-empty").hidden = shown > 0;
-      if (!words.length) count.replaceChildren(...full.cloneNode(true).childNodes);
-      else count.replaceChildren(el("b", {}, String(shown)), ` of ${plural(total, "read-only tool", "read-only tools")}`);
-    });
   }
 
   // How it works: the diagram shows one way in at a time when a button asks it to.
@@ -236,9 +199,7 @@
     try {
       const data = await getJson("/api/graph/stats");
       const labels = data.labels || {};
-      counted = labels;
       totals = { nodes: data.nodes, edges: data.edges };
-      renderGraphLine();
       renderSampleCount();
       for (const cell of row.querySelectorAll("dd[data-stat]")) {
         const key = cell.dataset.stat;
@@ -248,10 +209,7 @@
         if (value === 1 && term.dataset.one) term.textContent = term.dataset.one;
         cell.parentElement.classList.remove("sk");
       }
-      if (data.company_name) $("#live-name").textContent = `${data.company_name} · live sample of the graph`;
     } catch (error) {
-      counted = {};
-      renderGraphLine();
       row.dataset.state = "failed";
       row.setAttribute("aria-hidden", "true");
     }
@@ -274,7 +232,7 @@
     const wait = $("#live-wait");
     try {
       const data = await getJson("/api/graph/sample");
-      const mounted = window.BrainHero.mount(stage, data, { ticker: $("#live-ticker"), onAsk: askFromPage });
+      const mounted = window.BrainHero.mount(stage, data, { onAsk: askFromPage });
       if (!mounted) {
         wait.textContent = "Nothing public is in the graph yet, so there is nothing to draw.";
         return;
@@ -339,7 +297,6 @@
   // reload starts a new one. Each history entry's state carries its question and its step.
   const walk = { steps: [], at: -1, scroll: false };
   const SHOWN_STEPS = 5;
-  const emptyAnswer = Array.from(out.childNodes, (node) => node.cloneNode(true));
 
   function stepTo(q, how, step) {
     const address = `?q=${encodeURIComponent(q)}`;
@@ -361,14 +318,15 @@
     return walk.steps[walk.at];
   }
 
-  // Back to the page as it loaded, before anything was asked.
+  // Back to the page as it loaded, before anything was asked: the answer card is hidden again.
   function showEmpty() {
     walk.at = -1;
     input.value = "";
     answerQ.textContent = "";
     statusLine.textContent = "";
     statusLine.classList.remove("error");
-    out.replaceChildren(...emptyAnswer.map((node) => node.cloneNode(true)));
+    out.replaceChildren();
+    answerBox.hidden = true;
   }
 
   // Back and Forward show the answer the step showed, from memory: no new ask and no pinning. A
@@ -383,6 +341,7 @@
     const entry = walk.steps[state.step];
     if (!entry || entry.q !== q || !entry.data) { ask(q, false, "back", state.step); return; }
     unpin();
+    answerBox.hidden = false;
     walk.at = state.step;
     answerQ.textContent = q;
     statusLine.textContent = "";
@@ -420,6 +379,7 @@
     const q = question.trim();
     if (!q) return;
     button.disabled = true;
+    answerBox.hidden = false;
     answerQ.textContent = q;
     statusLine.textContent = "Walking the graph…";
     statusLine.classList.remove("error");
@@ -432,6 +392,7 @@
       if (!fresh) answered.set(q, { at: Date.now(), data });
       entry.data = data;
       render(data, q);
+      return data;
     } catch (error) {
       out.replaceChildren();
       statusLine.textContent = error.message === TOO_MANY ? TOO_MANY : `No answer: ${error.message}`;
@@ -444,7 +405,7 @@
 
   // The answer itself is drawn by answer.js, shared with the console's ask page. The public page
   // copies its own address (/?q=...), offers the example chips after a refusal with no near name,
-  // and adds "Your walk" after "Ask next".
+  // adds "Your walk" after "Ask next", and asks for the compact card (answer.js says what that folds).
   function render(data, question) {
     statusLine.textContent = "";
     BrainAnswer.render(out, data, question, {
@@ -454,6 +415,7 @@
       examplesReady: toolsReady,
       isCurrent: (q) => answerQ.textContent === q,
       trail: walkRow,
+      compact: true,
     });
   }
 
@@ -489,48 +451,41 @@
   async function loadProof() {
     const status = $("#proof-status");
     const body = $("#proof-body");
-    status.textContent = "Running the questions twice…";
     try {
       const data = await getJson("/api/ask/proof");
-      $("#proof-line").replaceChildren(el("b", {}, `${data.collapsed} of ${data.total}`), " capabilities collapse without the graph.");
+      $("#proof-line").replaceChildren(el("b", {}, `${data.collapsed} of ${data.total}`), " answers disappear without the graph.");
       $("#proof-refusal").textContent = refusalSentence(data.rows || []);
-      status.hidden = true;
       body.replaceChildren();
       const outcome = (side) => (side.found ? plural(side.steps, "edge", "edges") : "refused");
       for (const row of data.rows || []) {
-        const line = el("tr", { class: row.collapsed ? "" : "kept" });
+        const line = el("tr", { class: row.collapsed ? "gone" : "kept" });
         const question = el("td", { class: "q", "data-label": "Question" });
         const askIt = el("button", { type: "button", class: "proof-ask", title: `Ask: ${row.question}` }, row.question);
         askIt.addEventListener("click", () => askFromPage(row.question));
         question.append(askIt);
         line.append(question);
-        const toolCell = el("td", { class: "name", "data-label": "Tool" });
-        const toolLink = el("a", { href: `#tool-${row.tool}`, title: `${row.tool} in the catalogue` });
-        toolLink.append(el("code", {}, row.tool));
-        toolCell.append(toolLink);
-        line.append(toolCell);
-        line.append(el("td", { "data-label": "With the graph" }, outcome(row.with_graph)));
-        line.append(el("td", { "data-label": "Without" }, outcome(row.without_graph)));
-        line.append(el("td", { class: "verdict", "data-label": "Result" }, row.verdict));
+        // The edge count links to the tool's card in the catalogue.
+        const withGraph = el("td", { class: "name", "data-label": "With the graph" });
+        withGraph.append(el("a", { href: `#tool-${row.tool}`, title: `${row.tool} in the catalogue` }, outcome(row.with_graph)));
+        line.append(withGraph);
+        line.append(el("td", { class: "verdict", "data-label": "Without" }, row.collapsed ? outcome(row.without_graph) : row.verdict));
         body.append(line);
       }
     } catch (error) {
       status.textContent = `The proof could not be loaded. ${error.message}`;
+      status.hidden = false;
       $("#proof-line").replaceChildren();
       body.replaceChildren();
     }
   }
 
-  // Said only when the report bears it out: every row that did not collapse refused both ways.
+  // Said only when the report bears it out, in as few words as it takes.
   function refusalSentence(rows) {
     const kept = rows.filter((row) => !row.collapsed);
-    if (!kept.length) return "Every one of them collapses.";
-    if (kept.length === rows.length && kept.every((row) => !row.with_graph.found)) return "Nothing collapses because nothing answers yet: this graph holds none of what the questions name.";
-    if (kept.every((row) => row.verdict === "refused both ways")) {
-      const lead = kept.length === 1 ? "The one that does not is a refusal." : `The ${kept.length} that do not are refusals.`;
-      return `${lead} A question about something the graph does not know is refused either way, which is the point.`;
-    }
-    return `${plural(kept.length, "question answers", "questions answer")} the same without the graph: ${kept.map((row) => row.question).join("; ")}.`;
+    if (!kept.length) return "Every one collapses.";
+    if (kept.length === rows.length && kept.every((row) => !row.with_graph.found)) return "Nothing answers yet: this graph holds none of these names.";
+    if (kept.every((row) => row.verdict === "refused both ways")) return kept.length === 1 ? "The refusal refuses either way." : "The refusals refuse either way.";
+    return `${plural(kept.length, "question answers", "questions answer")} the same without it.`;
   }
 
   // While the hero's dark top is under the header, the header goes transparent with light ink;
@@ -578,4 +533,12 @@
   watchQuickstart();
   const initial = new URLSearchParams(location.search).get("q");
   if (initial) { input.value = initial; ask(initial, true, "start"); }
+
+  // The guided tour (tour.js) asks through the page, so each step's answer, walk, cache and address
+  // behave as a click's: ``ask`` settles with the answer once it is drawn (nothing when it failed),
+  // ``offered`` once the chips are in.
+  window.BrainPage = {
+    ask: (question) => { input.value = question; return ask(question, true, "start"); },
+    offered: () => toolsReady.then(() => examplesOffered.slice()),
+  };
 })();

@@ -66,6 +66,13 @@ class HubSpotClient:
         data = self.http.get(self.path("pipelines", "deals")) or {}
         return {str(stage["id"]): stage.get("label") or str(stage["id"]) for pipeline in data.get("results") or [] for stage in pipeline.get("stages") or []}
 
+    def total(self, object_type: str, filter_groups: list[dict]) -> int | None:
+        """How many records a CRM search matches (its ``total``), asking for one record. None when not given."""
+        body = {"filterGroups": filter_groups, "limit": 1, "properties": ["hs_object_id"]}
+        data, _ = self.http.request("POST", self.path("objects", f"{object_type}/search"), body=body)
+        value = (data or {}).get("total")
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
     def search(self, object_type: str, body: dict) -> tuple[list[dict], str | None, dict]:
         """One page of a CRM search, the ``after`` of the next page (None at the end) and the response headers."""
         data, headers = self.http.request("POST", self.path("objects", f"{object_type}/search"), body=body)

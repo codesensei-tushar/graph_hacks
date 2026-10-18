@@ -9,8 +9,10 @@ Needs FalkorDB on localhost:6379 (``docker compose up -d``).
 """
 
 import re
+import time
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
@@ -25,10 +27,12 @@ from src.core import scheduler, tenancy  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
 from src.db.falkordb_client import connect  # noqa: E402
 from src.domain import orgs  # noqa: E402
+from src.domain.access import approvals  # noqa: E402
+from src.domain.access.roles import role_of, set_role  # noqa: E402
 from src.domain.knowledge import resolve  # noqa: E402
 from src.domain.memory.writeback import SlackMemoryScope  # noqa: E402
 from src.domain.onboarding import team_import  # noqa: E402
-from src.domain.slack import compute  # noqa: E402
+from src.domain.slack import compute, turn_service  # noqa: E402
 from src.domain.slack.compute import TurnRequest  # noqa: E402
 from src.integrations.slack.events import SlackEventInner  # noqa: E402
 
@@ -333,6 +337,123 @@ class ResyncAfterImportTest(unittest.TestCase):
         finally:
             falkordb_client.client().select_graph(org.graph).delete()
             tenancy.control_graph().query("MATCH (o:Org {id: $id}) DETACH DELETE o", {"id": org.id})
+
+
+class OrgFollowUpsTest(unittest.TestCase):
+    """Slugs stay unique under a race; an org admin approves onboarding; people keep real names."""
+
+    created: list = []
+
+    @classmethod
+    def setUpClass(cls):
+        orgs.ensure_control_indexes()
+        for _ in range(50):  # the constraint is built in the background
+            if any(c["label"] == "Org" and c["status"] == "OPERATIONAL" for c in tenancy.control_graph().list_constraints()):
+                break
+            time.sleep(0.05)
+
+    @classmethod
+    def tearDownClass(cls):
+        for org in cls.created:
+            try:
+                falkordb_client.client().select_graph(org.graph).delete()
+            except Exception:
+                pass
+        tenancy.control_graph().query("MATCH (o:Org) WHERE o.id IN $ids DETACH DELETE o", {"ids": [org.id for org in cls.created]})
+
+    def _org(self, name: str):
+        org = orgs.create_org(name, created_by="TF:UF")
+        self.created.append(org)
+        return org
+
+    def test_a_slug_taken_between_the_check_and_the_write_goes_to_the_next_one(self):
+        first = self._org("Race Co")
+        real = orgs._slug_for
+        calls = iter([first.slug])  # the loser read the slug before the winner wrote it
+        with mock.patch.object(orgs, "_slug_for", side_effect=lambda name: next(calls, None) or real(name)):
+            second = self._org("Race Co")
+        self.assertEqual((first.slug, second.slug), ("race-co", "race-co-2"))
+        self.assertEqual(_rows(second.ref(), "MATCH (c:Company) RETURN c.id"), [["race-co-2"]], "its Company has the slug it got")
+        with self.assertRaises(Exception):
+            tenancy.control_graph().query("CREATE (:Org {id: 'dupe', slug: 'race-co'})")
+        self.assertNotEqual(self._org("Quillfern").slug, "quillfern", "the legacy org's slug is never handed out")
+
+    def _decide(self, approval, user, approved=True):
+        actor = SimpleNamespace(is_member=True, person_id=f"p-{user.lower()}")
+        with mock.patch.object(turn_service, "update_interaction_response") as respond, \
+             mock.patch.object(turn_service, "get_workspace_by_team_id", return_value=SimpleNamespace(client=mock.MagicMock(**{"post_slack_reply.return_value": None}), team_name="Day One")), \
+             mock.patch.object(turn_service, "_user_lookup", return_value=SimpleNamespace(ok=True, user=None)), \
+             mock.patch.object(turn_service, "resolve_actor", return_value=actor), \
+             mock.patch.object(turn_service, "execute_approved_action", return_value="Onboarded"):
+            turn_service.run_slack_approval_decision("TDAYONE", approval.approval_id, approved, user, "https://example.invalid")
+        return respond.call_args.args[1] if respond.call_args else ""
+
+    def test_in_a_console_org_an_owner_or_admin_approves_onboarding(self):
+        org = self._org("Approvals Co")
+        with tenancy.org_context(org.ref()):
+            set_role("UADMIN", "admin")
+            approval = approvals.insert_pending_approval(
+                team_id="TDAYONE", channel="CPAY", thread_ts="1.1", asker_user="UPAULA", tool_name="onboard_team",
+                tool_input={}, summary="Onboard", container_tag="org_shared",
+            )
+            self.assertEqual(self._decide(approval, "UPAULA"), turn_service.ONBOARD_NEEDS_ADMIN, "the requester is a member")
+            self.assertEqual(self._decide(approval, "USAM"), turn_service.ONBOARD_NEEDS_ADMIN)
+            self.assertEqual(approvals.load_approval(approval.approval_id).status, "pending")
+            self._decide(approval, "UADMIN")
+            self.assertEqual(approvals.load_approval(approval.approval_id).status, "executed")
+
+            withdrawn = approvals.insert_pending_approval(
+                team_id="TDAYONE", channel="CPAY", thread_ts="1.2", asker_user="UPAULA", tool_name="onboard_team",
+                tool_input={}, summary="Onboard", container_tag="org_shared",
+            )
+            self._decide(withdrawn, "UPAULA", approved=False)
+            self.assertEqual(approvals.load_approval(withdrawn.approval_id).status, "denied", "the requester may withdraw it")
+            outcome = compute.compute_turn(_request(PAYMENTS))
+            self.assertTrue(outcome.approval.summary.endswith("An owner or admin approves this."), outcome.approval.summary)
+        with tenancy.org_context(tenancy.legacy_org()):
+            self.assertFalse(turn_service._needs_org_admin("onboard_team"), "the demo keeps the asker's approval")
+
+    def test_the_console_orgs_creator_approves_without_having_installed_the_bot(self):
+        org = orgs.create_org("Creator Co", created_by="TCREATE:UCREATOR")
+        self.created.append(org)
+        orgs.route_team("TCREATE", org.id)
+        try:
+            with tenancy.org_context(org.ref()):
+                self.assertEqual(role_of("UCREATOR", env_roles=False), "owner")
+                self.assertEqual(role_of("UOTHER", env_roles=False), "member")
+                approval = approvals.insert_pending_approval(
+                    team_id="TDAYONE", channel="CPAY", thread_ts="1.3", asker_user="UPAULA", tool_name="onboard_team",
+                    tool_input={}, summary="Onboard", container_tag="org_shared",
+                )
+                self._decide(approval, "UCREATOR")
+                self.assertEqual(approvals.load_approval(approval.approval_id).status, "executed")
+            with tenancy.org_context(tenancy.legacy_org()):
+                self.assertNotEqual(role_of("UCREATOR", env_roles=False), "owner", "only in the org they made")
+        finally:
+            orgs.unroute_team("TCREATE")
+
+    def test_no_org_is_created_without_the_unique_slug_constraint(self):
+        with mock.patch.object(orgs, "_slug_constraint_ready", return_value=False), mock.patch.object(orgs, "ensure_control_indexes"):
+            with self.assertRaises(orgs.SlugConstraintMissing), self.assertLogs("src.domain.orgs", "ERROR"):
+                orgs.create_org("Unsafe Co", created_by="TF:UF")
+        self.assertEqual(tenancy.control_graph().query("MATCH (o:Org {name: 'Unsafe Co'}) RETURN count(o)").result_set, [[0]])
+        self.assertTrue(orgs._slug_constraint_ready())
+
+    def test_a_person_known_by_a_handle_gets_their_slack_name_and_a_real_name_stays(self):
+        org = self._org("Names Co")
+        _rows(
+            org.ref(),
+            """
+            CREATE (:SlackUser {id: 'UPAULA'})-[:IS]->(:Person {id: 'p-paula', name: 'paula'}),
+                   (:SlackUser {id: 'USAM'})-[:IS]->(:Person {id: 'p-sam', name: 'Samuel Okafor'})
+            RETURN 1
+            """,
+        )
+        with tenancy.org_context(org.ref()):
+            outcome = compute.compute_turn(_request(PAYMENTS))
+            self.assertIn("Paula Ortiz and Samuel Okafor", outcome.approval.summary)
+            compute.execute_approved_action(outcome.approval.tool_name, outcome.approval.tool_input, outcome.approval.container_tag)
+        self.assertEqual(sorted(_rows(org.ref(), "MATCH (p:Person) RETURN p.id, p.name")), [["p-paula", "Paula Ortiz"], ["p-sam", "Samuel Okafor"]])
 
 
 if __name__ == "__main__":

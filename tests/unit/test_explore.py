@@ -132,10 +132,40 @@ class WiringTest(unittest.TestCase):
         self.assertIn('el("ul", { class: "next-list", "aria-label": label })', self.answer_js)
         self.assertIn("const MAX_NEXT = 3;", self.answer_js)
 
-    def test_the_row_comes_after_the_edge_lines_and_before_the_footer(self):
+    def test_the_row_comes_after_the_footer_so_the_recording_frame_keeps_its_provenance(self):
         render = self.answer_js[self.answer_js.index("function render(out, data, question, opts)"):]
-        self.assertLess(render.index("BrainGraph.renderPath("), render.index("chipRow("))
-        self.assertLess(render.index("chipRow("), render.index('el("p", { class: "footer-line" })'))
+        self.assertLess(render.index("BrainGraph.renderPath("), render.index("out.append(footer);"))
+        self.assertLess(render.index("out.append(footer);"), render.index("chipRow("))
+
+
+class CompoundAnswerTest(unittest.TestCase):
+    """A question in two parts: one paragraph per part, under the part, and follow-ups neither part covered."""
+
+    def setUp(self):
+        self.answer_js = (STATIC / "answer.js").read_text()
+        self.render = self.answer_js[self.answer_js.index("function render(out, data, question, opts)"):]
+        self.next = self.answer_js[self.answer_js.index("function nextQuestions(data, asked)"):self.answer_js.index("function insteadOf(")]
+
+    def test_each_part_is_its_own_paragraph_under_the_part_as_the_server_read_it(self):
+        self.assertIn('if (parts) out.append(el("p", { class: index ? "part-q then" : "part-q" }, part.question));', self.render)
+        self.assertLess(self.render.index('class: index ? "part-q then"'), self.render.index("part.answer));"))
+        css = (STATIC / "explore.css").read_text()
+        self.assertIn(".answer .part-q {", css)
+        self.assertIn(".answer .part-q.then {", css)
+
+    def test_ask_next_skips_what_a_part_asked_and_reads_each_part_with_its_own_tool(self):
+        self.assertIn("...(parts || []).map((part) => part.question)", self.next)
+        self.assertIn("rolesOf({ ...data, tool: part.tool, answer: part.answer }, true)", self.next)
+        self.assertIn("for (const step of NEXT[part.tool] || [])", self.next)
+
+    def test_what_a_part_answered_is_named_in_the_words_a_chip_would_use(self):
+        table = re.search(r"const ANSWERED_AS = \{(.*?)\};", self.answer_js).group(1)
+        answered = dict(re.findall(r'(\w+): "([^"]*)"', table))
+        self.assertEqual(set(answered), {"who_knows", "blast_radius"})
+        for tool, template in answered.items():
+            with self.subTest(tool=tool):
+                self.assertIn(tool, NEXT)
+                self.assertIn(template.replace("{service}", "{name}"), QUESTIONS["Service"])
 
 
 class WalkTest(unittest.TestCase):
@@ -162,12 +192,12 @@ class WalkTest(unittest.TestCase):
         for storage in ("localStorage", "sessionStorage"):
             self.assertNotIn(storage, self.app_js[self.app_js.index("// --- The walk"):self.app_js.index("async function ask(")])
 
-    def test_your_walk_comes_after_ask_next_and_before_the_footer(self):
-        # answer.js draws the trail the page passes between "Ask next" and the footer; the page passes its walk.
+    def test_your_walk_comes_after_ask_next_which_comes_after_the_footer(self):
+        # answer.js draws the trail the page passes after the footer and "Ask next"; the page passes its walk.
         answer_js = (STATIC / "answer.js").read_text()
         render = answer_js[answer_js.index("function render(out, data, question, opts)"):]
+        self.assertLess(render.index("out.append(footer);"), render.index("chipRow("))
         self.assertLess(render.index("chipRow("), render.index("opts.trail()"))
-        self.assertLess(render.index("opts.trail()"), render.index('el("p", { class: "footer-line" })'))
         self.assertIn("trail: walkRow,", self.app_js)
         self.assertIn('el("nav", { class: "next walk", "aria-label": "Your walk" })', self.app_js)
         self.assertIn('item.setAttribute("aria-current", "step");', self.app_js)

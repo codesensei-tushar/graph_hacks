@@ -30,6 +30,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import Future
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -63,6 +64,7 @@ EXAMPLES: dict[str, list[str]] = {
         "who is Arjun Mehta",
         "what changed this week",
         "which teams depend on platform",
+        "who is the go-to for postgres right now",
         "who knows the payments gateway",
     ],
     "company-brain": [
@@ -132,9 +134,9 @@ RATE_LIMIT = 60
 RATE_WINDOW_SECONDS = 60.0
 # A client may spend this many calls at once; the budget then refills at RATE_LIMIT per window.
 RATE_BURST = 30
-# Tools whose queries walk far (paths between far nodes, whole-graph rankings, a team's
+# Tools whose queries walk far (paths between far nodes, whole-graph rankings of things or people, a team's
 # whole brief) cost this many tokens a call, so one address gets RATE_LIMIT / HEAVY_COST of them a minute.
-HEAVY_TOOLS = frozenset({"path_between", "risk_map", "onboarding_brief"})
+HEAVY_TOOLS = frozenset({"path_between", "risk_map", "onboarding_brief", "people_ranking"})
 HEAVY_COST = 5
 # Explore at this depth or more is heavy too.
 HEAVY_EXPLORE_DEPTH = 2
@@ -150,6 +152,8 @@ class TtlCache:
     """Values kept for ``ttl`` seconds, at most ``max_entries`` of them, the oldest dropped first.
 
     A failed computation is not cached. Cached values are shared, so callers treat them as read-only.
+    Callers asking for the same missing key at once share one computation: the first computes, the
+    rest wait for its value (or its error) instead of each walking the graph.
     """
 
     def __init__(self, ttl: float, max_entries: int, clock: Callable[[], float] = time.monotonic) -> None:
@@ -158,18 +162,33 @@ class TtlCache:
         self.clock = clock
         self._items: OrderedDict = OrderedDict()
         self._lock = threading.Lock()
+        self._pending: dict = {}
 
     def get_or_compute(self, key, compute: Callable[[], object]):
         with self._lock:
             hit = self._items.get(key)
             if hit is not None and hit[0] > self.clock():
                 return hit[1]
-        value = compute()
+            pending = self._pending.get(key)
+            owner = pending is None
+            if owner:
+                pending = self._pending[key] = Future()
+        if not owner:
+            return pending.result()
+        try:
+            value = compute()
+        except BaseException as error:
+            with self._lock:
+                self._pending.pop(key, None)
+            pending.set_exception(error)
+            raise
         with self._lock:
             self._items[key] = (self.clock() + self.ttl, value)
             self._items.move_to_end(key)
             while len(self._items) > self.max_entries:
                 self._items.popitem(last=False)
+            self._pending.pop(key, None)
+        pending.set_result(value)
         return value
 
     def clear(self) -> None:
@@ -326,9 +345,11 @@ class AskAnswer:
     notice: str = ""
     # The table a ranking tool returns (risk_map); None for every other tool.
     grid: dict | None = None
+    # Each part of a question in two parts, in order; empty, and left out of the reply, for one part.
+    parts: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
+        reply = {
             "notice": self.notice,
             "question": self.question,
             "tool": self.tool,
@@ -344,6 +365,9 @@ class AskAnswer:
             "scopes": list(self.scopes),
             "grid": self.grid,
         }
+        if self.parts:
+            reply["parts"] = [dict(part) for part in self.parts]
+        return reply
 
 
 def read_tools() -> list[ToolSummary]:
@@ -419,10 +443,13 @@ def answer_question(question: str, tool: str | None = None, use_model: bool = Fa
     if use_model:
         # Admin only, and a model's choice can differ between calls: never cached.
         return _answer(question, tool, True, read_scopes)
-    if tuple(read_scopes) != DEFAULT_SCOPES:
-        # A member's answer (Slack, the console) reads private scopes: never cached, always current.
-        return _answer(question, tool, False, read_scopes)
-    return ANSWERS.get_or_compute(cache_key(question, tool), lambda: _answer(question, tool, False, read_scopes))
+    # One question reads each graph's generation from Redis once (the cache key, and every
+    # ``resolve.load_rows`` while answering), and again only after it writes.
+    with falkordb_client.generation_snapshot():
+        if tuple(read_scopes) != DEFAULT_SCOPES:
+            # A member's answer (Slack, the console) reads private scopes: never cached, always current.
+            return _answer(question, tool, False, read_scopes)
+        return ANSWERS.get_or_compute(cache_key(question, tool), lambda: _answer(question, tool, False, read_scopes))
 
 
 def _answer(question: str, tool: str | None, use_model: bool, read_scopes: list[str]) -> AskAnswer:
@@ -458,6 +485,7 @@ def shape(question: str, result: ToolResult, picked_by: str, scopes: list[str]) 
         memories=[memory.to_dict() for memory in result.memories],
         scopes=list(scopes),
         grid=result.grid,
+        parts=[dict(part) for part in result.parts],
     )
 
 

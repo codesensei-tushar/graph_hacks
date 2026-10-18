@@ -216,7 +216,7 @@ class WorkspaceLifecycleTest(unittest.TestCase):
             run = team_invite.current_run(self.team)
             if not run or run["status"] in ("done", "failed", "aborted"):
                 return
-            raw = kv().hget("brain:schedule:payload", run["schedule_id"] or "")
+            raw = kv().hget(scheduler.PAYLOADS, run["schedule_id"] or "")
             if raw is None:
                 return
             job = json.loads(raw)
