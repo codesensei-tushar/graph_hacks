@@ -6,13 +6,13 @@ reads through ``oauth.bearer_for`` -> an expired token refreshed under the kv lo
 refresh token saved before it is used. Plus every way a callback is refused.
 
 The vendors are ``tests/fixtures/oauth_servers.py`` on 127.0.0.1; the orgs are real orgs in the
-test control graph, each with its own graph. Package A's session is faked: ``_admin_session``
-returns the session the test sets.
+test control graph, each with its own graph. Most tests fake package A's session (``_admin_session``
+returns the session the test sets); ``test_connect_and_callback_with_package_a_real_session`` runs
+A's real ``console_admin`` against a real session in kv.
 """
 
 import dataclasses
 import hashlib
-import importlib
 import time
 import logging
 import os
@@ -39,6 +39,8 @@ from src.connectors.jira import oauth as jira_oauth  # noqa: E402
 from src.core import config, scheduler, tenancy  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
 from src.domain import orgs  # noqa: E402
+from src.domain.console import csrf as csrf_module  # noqa: E402
+from src.domain.console import session as session_module  # noqa: E402
 from src.domain.slack import token_crypto  # noqa: E402
 from tests.fixtures.oauth_servers import CLIENT, CLOUD_ID, HUB_ID, FakeVendors  # noqa: E402
 
@@ -453,11 +455,8 @@ class ConsoleOAuthTest(unittest.TestCase):
     # --- package A's real session ---------------------------------------------------------------
 
     def test_connect_and_callback_with_package_a_real_session(self):
-        try:
-            session_module = importlib.import_module("src.domain.console.session")
-            csrf_module = importlib.import_module("src.domain.console.csrf")
-        except ImportError:
-            self.skipTest("package A's console session (#151) is not on this branch yet")
+        """The routes with package A's own ``console_admin``, not the fake: a real session in kv, its cookie,
+        its CSRF token, and A's role and CSRF checks in front of the route."""
         live = console_oauth.settings
         with mock.patch.object(session_module, "settings", live), mock.patch.object(csrf_module, "settings", live), \
                 mock.patch.object(console_oauth, "_admin_session", REAL_ADMIN_SESSION):
