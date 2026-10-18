@@ -31,7 +31,7 @@ import math
 from datetime import UTC, datetime, timedelta
 
 from src.connectors import registry
-from src.connectors.base import Connector, ConnectorError, Container, Edge, Install, InstallInfo, OAuthSpec, Page
+from src.connectors.base import AvailableContainer, Connector, ConnectorError, Container, Edge, Install, InstallInfo, OAuthSpec, Page
 from src.connectors.jira import mapper
 from src.connectors.jira import oauth as jira_oauth
 from src.connectors.oauth import bearer_for
@@ -41,6 +41,8 @@ log = logging.getLogger(__name__)
 
 BACKFILL_DAYS = 90
 MAX_ISSUES_PER_PROJECT = 500
+# Projects offered for selection in the console, by key.
+MAX_AVAILABLE_PROJECTS = 500
 # Minutes of overlap on every poll, for clock skew between us and Jira.
 OVERLAP_MINUTES = 5
 
@@ -77,6 +79,8 @@ class JiraConnector(Connector):
     required = ("base_url", "email", "api_token", "projects")
     accepts_webhooks = False
     oauth: OAuthSpec = jira_oauth.SPEC
+    # The console stores the selected project keys here (comma-separated), the same field as CONNECTOR_JIRA_PROJECTS.
+    container_field = "projects"
 
     def __init__(self) -> None:
         # Seams for tests: the client, and what time it is.
@@ -98,6 +102,19 @@ class JiraConnector(Connector):
             log.warning("[jira] projects not visible to the token, not synced: %s", ", ".join(missing))
         base_url = site_base(install)
         return [mapper.container(install, project, base_url) for project in found if project.get("key") in wanted]
+
+    def available_containers(self, install: Install) -> list[AvailableContainer]:
+        """Every project the account can browse, for the console to select from: the first
+        ``MAX_AVAILABLE_PROJECTS`` by key. Works with an API token and over OAuth alike."""
+        projects = self.client_for(install).all_projects(MAX_AVAILABLE_PROJECTS)
+        if len(projects) >= MAX_AVAILABLE_PROJECTS:
+            log.warning("[jira] %s can browse more than %d projects; offering the first %d by key", install.key, MAX_AVAILABLE_PROJECTS, MAX_AVAILABLE_PROJECTS)
+        offered: dict[str, AvailableContainer] = {}
+        for project in projects:
+            project_id, key = str(project.get("id") or ""), str(project.get("key") or "")
+            if project_id.isdigit() and PROJECT_KEY.fullmatch(key) and project_id not in offered:
+                offered[project_id] = AvailableContainer(external_id=project_id, key=key, name=str(project.get("name") or key)[:200])
+        return list(offered.values())
 
     def fetch(self, install: Install, container: Container, cursor: str | None) -> Page:
         if not container.external_id.isdigit():

@@ -78,6 +78,18 @@ class JiraClient:
                 break
         return found
 
+    def all_projects(self, limit: int = 500) -> list[dict]:
+        """Every project the account can browse, by key, up to ``limit``. Paged by ``startAt``; a page
+        that does not move ``startAt`` forward ends the listing, so a broken ``isLast`` cannot loop."""
+        found: list[dict] = []
+        while len(found) < limit:
+            page = self.http.get("/rest/api/3/project/search", {"maxResults": min(50, limit - len(found)), "startAt": len(found), "orderBy": "key"}) or {}
+            values = page.get("values") or []
+            found.extend(values[: limit - len(found)])
+            if page.get("isLast", True) or not values:
+                break
+        return found
+
     def project(self, key: str) -> dict | None:
         try:
             return self.http.get(f"/rest/api/3/project/{_segment(key)}")

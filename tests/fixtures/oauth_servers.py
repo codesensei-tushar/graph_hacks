@@ -117,7 +117,11 @@ class FakeVendors:
             if rest == "myself":
                 return 200, load_jira("myself.json"), {}
             if rest == "project/search":
-                return 200, {"values": self.jira.projects(query.get("keys", [])), "isLast": True}, {}
+                if "keys" in query:
+                    return 200, {"values": self.jira.projects(query["keys"]), "isLast": True}, {}
+                start, size = int(query["startAt"][0]), int(query["maxResults"][0])
+                every = sorted(self.jira.all_projects(), key=lambda project: project["key"])
+                return 200, {"values": every[start : start + size], "isLast": start + size >= len(every)}, {}
             if rest == "search/jql":
                 return 200, self.jira.search_page(body["jql"], body.get("nextPageToken"), body.get("maxResults", 100)), {}
             return 404, {}, {}
