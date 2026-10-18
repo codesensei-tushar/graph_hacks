@@ -19,7 +19,7 @@ from src.domain.knowledge.algorithms import depth_in  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-PAGE_SCRIPTS = ("shell.js", "graph.js", "hero.js", "riskmap.js", "app.js")
+PAGE_SCRIPTS = ("shell.js", "graph.js", "hero.js", "riskmap.js", "answer.js", "app.js")
 STYLESHEETS = ("style.css", "riskmap.css", "explore.css")
 ALLOWED_ROUTES = {"/api/ask", "/api/ask/tools", "/api/ask/proof", "/api/teams", "/api/team/", "/api/graph/stats", "/api/graph/sample"}
 # The explorer page at /explore.
@@ -187,10 +187,10 @@ class DepthButtonsTest(unittest.TestCase):
     """The "1 hop / 2 hops / all" buttons on a blast_radius answer ask what the server reads as that depth."""
 
     def setUp(self):
-        self.app_js = (STATIC / "app.js").read_text()
-        self.hop_phrase = _js_regex(self.app_js, "HOP_PHRASE")
-        self.names_depth = _js_regex(self.app_js, "NAMES_DEPTH")
-        depths = re.search(r"const DEPTHS = \[(.+)\];", self.app_js).group(1)
+        self.answer_js = (STATIC / "answer.js").read_text()
+        self.hop_phrase = _js_regex(self.answer_js, "HOP_PHRASE")
+        self.names_depth = _js_regex(self.answer_js, "NAMES_DEPTH")
+        depths = re.search(r"const DEPTHS = \[(.+)\];", self.answer_js).group(1)
         self.depths = [(label, phrase, None if hops == "null" else int(hops)) for label, phrase, hops in re.findall(r'\["([^"]+)", "([^"]*)", (\d+|null)\]', depths)]
 
     def base(self, question: str) -> str:
@@ -198,8 +198,8 @@ class DepthButtonsTest(unittest.TestCase):
 
     def test_three_buttons_on_found_blast_radius_answers_only(self):
         self.assertEqual([label for label, _, _ in self.depths], ["1 hop", "2 hops", "all"])
-        self.assertEqual(len(re.findall(r"addDepthButtons\(", self.app_js)), 2, "defined once, called once")
-        self.assertIn('if (data.tool === "blast_radius" && data.found) addDepthButtons(question, data.depth);', self.app_js)
+        self.assertEqual(len(re.findall(r"addDepthButtons\(", self.answer_js)), 2, "defined once, called once")
+        self.assertIn('if (data.tool === "blast_radius" && data.found) addDepthButtons(out, question, data.depth, onAsk);', self.answer_js)
 
     def test_the_buttons_ask_the_pinned_phrasings(self):
         self.assertEqual([phrase for _, phrase, _ in self.depths], [", one hop", ", two hops out", ""])
@@ -242,9 +242,10 @@ class CopyLinkTest(unittest.TestCase):
 
     def setUp(self):
         self.app_js = (STATIC / "app.js").read_text()
+        self.answer_js = (STATIC / "answer.js").read_text()
 
     def test_the_copied_link_is_the_one_the_page_reads_on_load(self):
-        self.assertIn("new URL(`/?q=${encodeURIComponent(question)}`, location.origin).href", self.app_js)
+        self.assertIn("linkFor: (q) => new URL(`/?q=${encodeURIComponent(q)}`, location.origin).href,", self.app_js)
         self.assertIn('new URLSearchParams(location.search).get("q")', self.app_js)
         # Every history entry the page writes (the walk) is that same address.
         self.assertIn("const address = `?q=${encodeURIComponent(q)}`;", self.app_js)
@@ -252,31 +253,34 @@ class CopyLinkTest(unittest.TestCase):
         self.assertIn('history.pushState({ q, step: walk.at }, "", address);', self.app_js)
 
     def test_every_answer_with_a_path_gets_the_button_beside_replay(self):
-        self.assertEqual(len(re.findall(r"addCopyLink\(", self.app_js)), 2, "defined once, called once")
-        self.assertRegex(self.app_js, r"addDepthButtons\(question, data\.depth\);\n    addCopyLink\(question\);")
-        self.assertIn('head.insertBefore(copy, $(".replay", head));', self.app_js)
+        self.assertEqual(len(re.findall(r"addCopyLink\(", self.answer_js)), 2, "defined once, called once")
+        self.assertRegex(self.answer_js, r"addDepthButtons\(out, question, data\.depth, onAsk\);\n    addCopyLink\(out, opts\.linkFor\(question\)\);")
+        self.assertIn('head.insertBefore(copy, $(".replay", head));', self.answer_js)
         for label in ('"Copy link"', '"Copied"', '"Not copied"'):
-            self.assertIn(label, self.app_js)
+            self.assertIn(label, self.answer_js)
 
 
 class RiskMapTest(unittest.TestCase):
     """The grid table (riskmap.js) renders only when the answer carries a risk_map or person_profile grid."""
 
     def test_the_hook_is_guarded_and_sits_between_the_answer_text_and_the_path(self):
-        app_js = (STATIC / "app.js").read_text()
-        render = app_js[app_js.index("function render(data, question)"):]
-        hook = 'if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });'
-        self.assertEqual(app_js.count("RiskMap.render("), 1)
+        answer_js = (STATIC / "answer.js").read_text()
+        render = answer_js[answer_js.index("function render(out, data, question, opts)"):]
+        hook = 'if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: onAsk });'
+        self.assertEqual(answer_js.count("RiskMap.render("), 1)
         self.assertLess(render.index("data.answer));"), render.index(hook))
         self.assertLess(render.index(hook), render.index("BrainGraph.renderPath("))
+        self.assertIn("onAsk: askFromPage,", (STATIC / "app.js").read_text())
 
-    def test_the_page_loads_the_grid_before_app_js(self):
+    def test_the_page_loads_the_grid_and_the_answer_before_app_js(self):
         resources = _parse("index.html").resources
         scripts = [resource.split("?")[0] for resource in resources if resource.endswith(".js") or ".js?" in resource]
         self.assertLess(scripts.index("/static/riskmap.js"), scripts.index("/static/app.js"))
+        self.assertLess(scripts.index("/static/graph.js"), scripts.index("/static/answer.js"))
+        self.assertLess(scripts.index("/static/answer.js"), scripts.index("/static/app.js"))
         self.assertIn("/static/riskmap.css", [resource.split("?")[0] for resource in resources])
         self.assertIn("window.RiskMap = { render };", (STATIC / "riskmap.js").read_text())
-
+        self.assertIn("window.BrainAnswer = {", (STATIC / "answer.js").read_text())
 
 class TypeScaleTest(unittest.TestCase):
     """One type scale and three weights: every size in the page's stylesheets is a token, an em value or a clamp."""
