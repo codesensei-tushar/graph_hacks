@@ -16,6 +16,7 @@
     slack_refused: "Slack did not complete the sign-in. Start again.",
     slack_unavailable: "Slack could not be reached. Try again in a few minutes.",
     workspace_unavailable: "Your workspace could not be checked just now. Try again in a few minutes.",
+    workspace_key: "Company Brain cannot read this workspace's Slack connection: its encryption key changed. Ask the person who runs Company Brain to restore the key or reinstall the Slack app.",
     unavailable: RETRY,
     failed: RETRY,
     signed_out: "You are signed out.",
