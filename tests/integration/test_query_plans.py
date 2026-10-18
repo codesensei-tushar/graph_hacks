@@ -44,6 +44,7 @@ QUESTIONS = {
     "neighbors": "billing",
     "find": "open tickets about billing",
     "ticket_status": "what is the status of TKT-102",
+    "pr_explain": "what did notebook#45 do",
 }
 
 # Openings (whitespace collapsed, first 90 characters) of read queries still allowed to plan an
