@@ -237,6 +237,8 @@ def vendor_screen(source: str, request: Request):
                 "items": 0,
                 "backfilled": False,
                 "capped": False,
+                "readers": None,
+                "available": None,
                 "last_fetch_at": None,
                 "last_error": None,
             }
@@ -299,6 +301,8 @@ async def containers(connection_id: str, request: Request):
             "items": 0,
             "backfilled": False,
             "capped": False,
+            "readers": None,
+            "available": None,
             "last_fetch_at": None,
             "last_error": None,
         }
@@ -350,6 +354,17 @@ async def ask(request: Request):
         return ask_api.answer_question(question).to_dict()
     except (ask_api.ToolRefused, ask_api.QuestionTooLong) as refused:
         return JSONResponse({"error": str(refused)}, status_code=400)
+
+
+@router.get("/console/api/slack")
+def slack(request: Request):
+    """Proposed, not in the spec yet: the workspace card on Connections."""
+    state = _scenario(request)
+    if denied := _denied(request, state):
+        return denied
+    if not state["me"]["org"]:
+        return JSONResponse({"detail": "no_org"}, status_code=403)
+    return _stamp(_load("slack.json"), datetime.now(UTC))
 
 
 @router.get("/console/api/audit")

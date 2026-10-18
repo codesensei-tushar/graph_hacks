@@ -8,7 +8,7 @@
   "auth": "oauth",
   "created_by": "Arjun Mehta",
   "created_at": "-518400s",
-  "items": 3169,
+  "items": 3935,
   "last_sync_at": "-180s",
   "last_error": null,
   "containers": [
@@ -18,6 +18,8 @@
     "items": 123,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-60s",
     "last_error": null
    },
@@ -27,6 +29,8 @@
     "items": 160,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-67s",
     "last_error": null
    },
@@ -36,15 +40,19 @@
     "items": 197,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-74s",
     "last_error": null
    },
    {
     "id": "jira:01JB7Q2K9W:container:10004",
     "name": "Platform",
-    "items": 234,
+    "items": 1000,
     "backfilled": true,
     "capped": true,
+    "readers": null,
+    "available": 4812,
     "last_fetch_at": "-81s",
     "last_error": null
    },
@@ -54,6 +62,8 @@
     "items": 271,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-88s",
     "last_error": null
    },
@@ -63,6 +73,8 @@
     "items": 308,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-95s",
     "last_error": null
    },
@@ -72,6 +84,8 @@
     "items": 345,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-102s",
     "last_error": null
    },
@@ -81,6 +95,8 @@
     "items": 382,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-109s",
     "last_error": null
    },
@@ -90,6 +106,8 @@
     "items": 419,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-116s",
     "last_error": null
    },
@@ -99,6 +117,8 @@
     "items": 46,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-123s",
     "last_error": null
    },
@@ -108,6 +128,8 @@
     "items": 83,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-130s",
     "last_error": null
    },
@@ -117,6 +139,8 @@
     "items": 120,
     "backfilled": true,
     "capped": false,
+    "readers": 4,
+    "available": null,
     "last_fetch_at": "-137s",
     "last_error": null
    },
@@ -126,6 +150,8 @@
     "items": 28,
     "backfilled": false,
     "capped": false,
+    "readers": 7,
+    "available": null,
     "last_fetch_at": "-144s",
     "last_error": null
    },
@@ -135,6 +161,8 @@
     "items": 37,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-151s",
     "last_error": null
    },
@@ -144,6 +172,8 @@
     "items": 6,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-158s",
     "last_error": null
    },
@@ -153,6 +183,8 @@
     "items": 15,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-165s",
     "last_error": null
    },
@@ -162,6 +194,8 @@
     "items": 24,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-172s",
     "last_error": null
    },
@@ -171,6 +205,8 @@
     "items": 33,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-179s",
     "last_error": null
    },
@@ -180,6 +216,8 @@
     "items": 2,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-186s",
     "last_error": null
    },
@@ -189,6 +227,8 @@
     "items": 11,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-193s",
     "last_error": null
    },
@@ -198,6 +238,8 @@
     "items": 20,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-200s",
     "last_error": null
    },
@@ -207,6 +249,8 @@
     "items": 29,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-207s",
     "last_error": null
    },
@@ -216,6 +260,8 @@
     "items": 38,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-214s",
     "last_error": null
    },
@@ -225,6 +271,8 @@
     "items": 7,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-221s",
     "last_error": null
    },
@@ -234,6 +282,8 @@
     "items": 16,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-228s",
     "last_error": null
    },
@@ -243,6 +293,8 @@
     "items": 25,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-235s",
     "last_error": null
    },
@@ -252,6 +304,8 @@
     "items": 34,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-242s",
     "last_error": null
    },
@@ -261,6 +315,8 @@
     "items": 3,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-249s",
     "last_error": null
    },
@@ -270,6 +326,8 @@
     "items": 12,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-256s",
     "last_error": null
    },
@@ -279,6 +337,8 @@
     "items": 21,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-263s",
     "last_error": null
    },
@@ -288,6 +348,8 @@
     "items": 30,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-270s",
     "last_error": null
    },
@@ -297,6 +359,8 @@
     "items": 39,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-277s",
     "last_error": null
    },
@@ -306,6 +370,8 @@
     "items": 8,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-284s",
     "last_error": null
    },
@@ -315,6 +381,8 @@
     "items": 17,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-291s",
     "last_error": null
    },
@@ -324,6 +392,8 @@
     "items": 26,
     "backfilled": false,
     "capped": false,
+    "readers": null,
+    "available": null,
     "last_fetch_at": "-298s",
     "last_error": null
    }
@@ -348,6 +418,8 @@
     "items": 1284,
     "backfilled": true,
     "capped": false,
+    "readers": null,
+    "available": 1284,
     "last_fetch_at": "-240s",
     "last_error": null
    }

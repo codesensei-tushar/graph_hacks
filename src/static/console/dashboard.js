@@ -10,6 +10,51 @@
   const addSection = $("#add");
   let me = null;
   let watcher = null;
+  let slackCard = null; // the workspace card, once /console/api/slack answers
+
+  const slackFirst = () => (slackCard ? [slackCard] : []);
+
+  // The Slack workspace: whether the app is in, where it lives, how many channels it reads, when
+  // it last heard anything, and Reinstall. A console without that route simply has no card.
+  function slackItem(slack) {
+    const box = el("div", { class: "conn-card slack-card-c" });
+    const head = el("div", { class: "conn-head" });
+    const names = el("span", { class: "grow" });
+    names.append(el("b", {}, "Slack"), el("span", { class: "conn-site", title: slack.team_name || "" }, slack.team_name || "Your workspace"));
+    head.append(C.tile("slack"), names);
+    box.append(head);
+    const state = el("div", { class: "conn-state" });
+    const channels = slack.channels || [];
+    const stats = el("p", { class: "conn-stats" });
+    const count = el("span");
+    count.append(el("b", {}, C.fmt(channels.length)), ` ${channels.length === 1 ? "channel" : "channels"}`);
+    stats.append(count);
+    const private_ = channels.filter((c) => c.private).length;
+    if (private_) stats.append(el("span", {}, `${C.fmt(private_)} private`));
+    state.append(C.pill(slack.bot_installed ? { tone: "ok", text: "App installed" } : { tone: "warn", text: "App not installed" }), stats);
+    box.append(state);
+    const facts = el("p", { class: "conn-note" });
+    facts.append(slack.home_channel ? `Home channel #${slack.home_channel.name}` : "No home channel yet");
+    facts.append(slack.last_event_at ? ` · last heard ${C.ago(slack.last_event_at)}` : " · nothing heard yet");
+    box.append(facts);
+    const foot = el("div", { class: "conn-foot" });
+    foot.append(el("span", {}, "Everyone in the workspace can ask in Slack."));
+    const url = typeof slack.install_url === "string" && (/^https:\/\//.test(slack.install_url) || /^\/(?!\/)/.test(slack.install_url)) ? slack.install_url : "";
+    if (C.isAdmin(me) && url) foot.append(el("a", { class: "go", href: url }, slack.bot_installed ? "Reinstall →" : "Install →"));
+    box.append(foot);
+    const item = el("li");
+    item.append(box);
+    return item;
+  }
+
+  async function loadSlack() {
+    try {
+      slackCard = slackItem(await C.api("GET", "/console/api/slack"));
+      if (!list.hasAttribute("aria-busy") && list.firstElementChild !== slackCard) list.prepend(slackCard);
+    } catch (error) {
+      slackCard = null;
+    }
+  }
 
   // --- Notices carried back in the address -------------------------------------------------------
 
@@ -57,6 +102,7 @@
       link.append(bar);
     }
     if (status.tone === "error") link.append(el("p", { class: "conn-error" }, "The last sync failed. Open it to see what happened and sync again."));
+    link.append(el("p", { class: "conn-note" }, "Everyone in your Slack workspace can ask about this."));
 
     const foot = el("div", { class: "conn-foot" });
     foot.append(el("span", {}, connection.created_by ? `Added by ${connection.created_by}` : `Added ${C.ago(connection.created_at)}`));
@@ -109,7 +155,7 @@
       for (const source of Object.keys(C.SOURCES)) actions.append(connectButton(source, []));
       box.append(actions);
     }
-    list.replaceChildren(box);
+    list.replaceChildren(...slackFirst(), box);
   }
 
   function failed(message) {
@@ -128,7 +174,7 @@
   function render(connections) {
     list.removeAttribute("aria-busy");
     if (!connections.length) { empty(); return false; }
-    list.replaceChildren(...connections.map(card));
+    list.replaceChildren(...slackFirst(), ...connections.map(card));
     connectors($("#connectors"), connections);
     if (!C.isAdmin(me)) $("#add-sub").textContent = "These are the tools Company Brain can read. Ask an owner or admin of your company to connect one.";
     addSection.hidden = false;
@@ -160,6 +206,7 @@
       const connections = await C.api("GET", "/console/api/connections");
       return render(connections || []);
     }, $("#poll-note"));
+    loadSlack();
     load();
   }
 
