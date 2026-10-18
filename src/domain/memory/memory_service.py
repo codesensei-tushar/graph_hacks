@@ -57,23 +57,11 @@ class Memory:
 
 
 def ensure_indexes() -> None:
-    _, graph = connect()
-    for statement in (
-        "CREATE INDEX FOR (m:Memory) ON (m.scope)",
-        "CREATE INDEX FOR (m:Memory) ON (m.id)",
-        "CREATE INDEX FOR (m:Memory) ON (m.custom_id)",
-        "CREATE INDEX FOR (t:Tag) ON (t.id)",
-        "CREATE INDEX FOR (t:Tag) ON (t.container)",
-        "CREATE INDEX FOR (s:Scope) ON (s.id)",
-        "CREATE INDEX FOR (u:SlackUser) ON (u.id)",
-        "CREATE INDEX FOR (c:Channel) ON (c.id)",
-        "CALL db.idx.fulltext.createNodeIndex('Memory', 'text')",
-    ):
-        try:
-            graph.query(statement)
-        except Exception as error:  # already exists
-            if "already" not in str(error).lower():
-                raise
+    """The memory layer's indexes, and every other one: they all live in ``schema.INDEXES``. Indexes
+    only: data migrations run at startup (``schema.ensure_in_background``), never as a side effect."""
+    from src.db import schema
+
+    schema.ensure(migrate=False)
 
 
 def worth_keeping(text: str) -> bool:

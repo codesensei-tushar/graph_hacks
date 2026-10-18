@@ -156,18 +156,13 @@ def _slug_for(name: str) -> str:
     return f"{base}-{index}"
 
 
-def build_org_indexes(org: OrgRef) -> None:
-    """The indexes main.py builds at startup, in ``org``'s graph."""
-    from src.connectors import graph as connector_graph
-    from src.connectors import store as connector_store
-    from src.domain.knowledge.search import ensure_search_indexes
-    from src.domain.memory.memory_service import ensure_indexes
+def build_org_indexes(org: OrgRef, migrate: bool = True) -> None:
+    """Every index (and with ``migrate``, every migration: ``schema.ensure``) in ``org``'s graph. A new
+    org's graph is empty, so its migrations are instant; startup runs them in the background instead."""
+    from src.db import schema
 
     with tenancy.org_context(org):
-        ensure_indexes()
-        connector_graph.ensure_indexes()
-        connector_store.ensure_indexes()
-        ensure_search_indexes()
+        schema.ensure(migrate=migrate)
 
 
 def company_id(org: OrgRef) -> str:
