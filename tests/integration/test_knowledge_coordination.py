@@ -98,13 +98,14 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertEqual(
             result.answer,
             "notebook#45 changes Auth Service. 2 people who own something that depends on it weren't on the pull request. "
-            "Lena Fischer owns Notification Service (1 hop) and Invoice Worker (2 hops) and has never worked with Maya Ortiz "
-            "on a pull request, ticket or decision: introduce them now, since it has already merged. "
+            "Lena Fischer owns Notification Service (1 hop) and Invoice Worker (2 hops), and the graph shows no pull request, "
+            "ticket or decision shared with Maya Ortiz: introduce them now, since it has already merged. "
             "Kofi Mensah owns Search Service (1 hop) and worked with Maya Ortiz on notebook#41, so a quick ping is enough.",
         )
         self.assertEqual(
             _cites(result),
             [
+                "Maya Ortiz -[AUTHORED]-> notebook#45",
                 "notebook#45 -[TOUCHES]-> Auth Service",
                 "Notification Service -[DEPENDS_ON]-> Auth Service",
                 "Lena Fischer -[OWNS]-> Notification Service",
@@ -126,8 +127,8 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertEqual(
             expected,
             "notebook#52 changes Billing Service and Invoice Worker. 1 person who owns something that depends on them wasn't "
-            "on the pull request. Maya Ortiz owns API Gateway (1 hop) and has never worked with Lena Fischer on a pull request, "
-            "ticket or decision: introduce them now, since it has already merged.",
+            "on the pull request. Maya Ortiz owns API Gateway (1 hop), and the graph shows no pull request, ticket or decision "
+            "shared with Lena Fischer: introduce them now, since it has already merged.",
         )
         for name in ("PR 52", "pr #52", "PR#52", "who should know about pr#52", "pull request 52", "#52", "notebook#52", "52"):
             with self.subTest(name=name):
@@ -135,6 +136,7 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertEqual(
             _cites(_ask("notebook#52")),
             [
+                "Lena Fischer -[AUTHORED]-> notebook#52",
                 "notebook#52 -[TOUCHES]-> Billing Service",
                 "notebook#52 -[TOUCHES]-> Invoice Worker",
                 "API Gateway -[DEPENDS_ON]-> Billing Service",
@@ -147,24 +149,27 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertEqual(
             result.answer,
             "crm-sync#3 changes the HubSpot system. 2 people who own what it changes or something that depends on it weren't on "
-            "the pull request. Noor Haddad owns the HubSpot system (which it changes) and has never worked with @outside-dev on a "
-            "pull request, ticket or decision: introduce them before this merges. Priya Shah runs the Renewals process (1 hop), "
-            "owns the Pricing playbook (2 hops) and has never worked with @outside-dev on a pull request, ticket or decision: "
-            "introduce them before this merges.",
+            "the pull request. Noor Haddad owns the HubSpot system (which it changes), and the graph cannot tell whether Noor "
+            "Haddad and @outside-dev have worked together: introduce them before this merges. Priya Shah runs the Renewals "
+            "process (1 hop), owns the Pricing playbook (2 hops), and the graph cannot tell whether Priya Shah and @outside-dev "
+            "have worked together: introduce them before this merges.",
         )
         self.assertIn("Pricing playbook -[DEPENDS_ON]-> Renewals", _cites(result))
         self.assertIn("Priya Shah -[OWNS]-> Pricing playbook", _cites(result))
-        self.assertEqual(_cites(result)[:2], ["crm-sync#3 -[TOUCHES]-> HubSpot", "Noor Haddad -[OWNS]-> HubSpot"])
+        self.assertEqual(
+            _cites(result)[:3],
+            ["@outside-dev -[AUTHORED]-> crm-sync#3", "crm-sync#3 -[TOUCHES]-> HubSpot", "Noor Haddad -[OWNS]-> HubSpot"],
+        )
 
     def test_owners_of_what_changes_come_first_even_when_one_changed_thing_depends_on_another(self):
         result = _ask("who should know about notebook#77")
         self.assertEqual(
             result.answer,
             "notebook#77 changes Auth Service and Search Service. 3 people who own what it changes or something that depends on "
-            "them weren't on the pull request. Maya Ortiz owns Auth Service (which it changes) and API Gateway (1 hop) and has "
-            "never worked with Lena Fischer on a pull request, ticket or decision: introduce them before this merges. Kofi Mensah "
-            "owns Search Service (which it changes) and has never worked with Lena Fischer on a pull request, ticket or decision: "
-            "introduce them before this merges. Arjun Mehta owns Billing Service (1 hop) and worked with Lena Fischer on "
+            "them weren't on the pull request. Maya Ortiz owns Auth Service (which it changes) and API Gateway (1 hop), and the "
+            "graph shows no pull request, ticket or decision shared with Lena Fischer: introduce them before this merges. Kofi "
+            "Mensah owns Search Service (which it changes), and the graph shows no pull request, ticket or decision shared with "
+            "Lena Fischer: introduce them before this merges. Arjun Mehta owns Billing Service (1 hop) and worked with Lena Fischer on "
             "notebook#52, so a quick ping is enough.",
         )
         cites = _cites(result)
@@ -185,11 +190,11 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertEqual(
             _cites(result),
             [
+                "Kofi Mensah -[AUTHORED]-> notebook#41",
                 "notebook#41 -[TOUCHES]-> Graph Store",
                 "notebook#41 -[TOUCHES]-> Memory Layer",
                 "Search Service -[DEPENDS_ON]-> Memory Layer",
                 "Kofi Mensah -[OWNS]-> Search Service",
-                "Kofi Mensah -[AUTHORED]-> notebook#41",
             ],
         )
 
@@ -309,7 +314,7 @@ class WhoShouldKnowTest(unittest.TestCase):
         )
 
     def test_past_work_counts_only_what_the_asker_may_read(self):
-        self.assertIn("Lena Fischer owns Notification Service (1 hop) and Invoice Worker (2 hops) and has never worked", _ask("notebook#45").answer)
+        self.assertIn("Lena Fischer owns Notification Service (1 hop) and Invoice Worker (2 hops), and the graph shows no", _ask("notebook#45").answer)
         private = _ask("notebook#45", ORG + [PRIVATE_ROOM])
         self.assertIn(
             "Lena Fischer owns Notification Service (1 hop) and Invoice Worker (2 hops) and worked with Maya Ortiz on TKT-PRIV, so a quick ping is enough.",
@@ -341,8 +346,8 @@ class WhoShouldKnowTest(unittest.TestCase):
             result.answer,
             "Auth Service is owned by Maya Ortiz. If it changes, 3 other people own something that depends on it. "
             "Arjun Mehta owns Billing Service (1 hop) and worked with Maya Ortiz on notebook#45, so a quick ping is enough. "
-            "Lena Fischer owns Notification Service (1 hop) and Invoice Worker (2 hops) and has never worked with Maya Ortiz "
-            "on a pull request, ticket or decision: introduce them before it changes. "
+            "Lena Fischer owns Notification Service (1 hop) and Invoice Worker (2 hops), and the graph shows no pull request, "
+            "ticket or decision shared with Maya Ortiz: introduce them before it changes. "
             "Kofi Mensah owns Search Service (1 hop) and worked with Maya Ortiz on notebook#41, so a quick ping is enough.",
         )
         cites = _cites(result)
@@ -358,10 +363,10 @@ class WhoShouldKnowTest(unittest.TestCase):
             result.answer,
             "Postgres is owned by Sara Lindqvist. If it changes, 4 other people own something that depends on it. "
             "Maya Ortiz owns Auth Service (1 hop) and API Gateway (2 hops) and worked with Sara Lindqvist on notebook#41, "
-            "so a quick ping is enough. Arjun Mehta owns Billing Service (1 hop) and has never worked with Sara Lindqvist on a "
-            "pull request, ticket or decision: introduce them before it changes. Lena Fischer owns Invoice Worker (2 hops) and "
-            "Notification Service (2 hops) and has never worked with Sara Lindqvist on a pull request, ticket or decision: "
-            "introduce them before it changes. And 1 more: Kofi Mensah.",
+            "so a quick ping is enough. Arjun Mehta owns Billing Service (1 hop), and the graph shows no pull request, ticket "
+            "or decision shared with Sara Lindqvist: introduce them before it changes. Lena Fischer owns Invoice Worker (2 hops) "
+            "and Notification Service (2 hops), and the graph shows no pull request, ticket or decision shared with Sara "
+            "Lindqvist: introduce them before it changes. And 1 more: Kofi Mensah.",
         )
         # Maya and Sara both reviewed notebook#41; the person named last still has an edge.
         for line in ("Maya Ortiz -[REVIEWED]-> notebook#41", "Sara Lindqvist -[REVIEWED]-> notebook#41", "Kofi Mensah -[OWNS]-> Search Service"):
@@ -411,6 +416,27 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertEqual(result.path, [])
         self.assertEqual(result.answer, "Enterprise accounts is an account: nothing depends on it. Ask who owns it or who knows it instead.")
 
+    # --- what the reply claims --------------------------------------------------------------
+
+    def test_with_the_repos_loaded_a_reviewer_of_the_owner_s_pull_request_is_not_a_stranger(self):
+        # Arjun reviewed Maya's notebook#45. On the seed alone the reply can only say what it could compare (below).
+        self.assertIn(
+            "Arjun Mehta owns Billing Service (1 hop) and worked with Maya Ortiz on notebook#45, so a quick ping is enough.",
+            _ask("who should know if auth changes").answer,
+        )
+
+    def test_every_person_named_in_a_reply_has_a_cited_edge(self):
+        _, graph = falkordb_client.connect()
+        people = [row[0] for row in graph.ro_query("MATCH (p:Person) RETURN p.name AS name UNION MATCH (g:GitHubUser) RETURN '@' + g.login AS name").result_set]
+        for question in ("who else should review notebook#52", "notebook#45", "notebook#77", "crm-sync#3", "who should know if postgres changes"):
+            with self.subTest(question=question):
+                result = _ask(question)
+                cited = {name for step in result.path for name in (step.from_name, step.to_name)}
+                named = [person for person in people if person in result.answer]
+                self.assertTrue(named)
+                self.assertEqual([person for person in named if person not in cited], [], result.answer)
+        self.assertEqual(_cites(_ask("who else should review notebook#52"))[0], "Lena Fischer -[AUTHORED]-> notebook#52")
+
     # --- served the same way everywhere ---------------------------------------------------
 
     def test_it_is_a_read_only_tool_served_over_mcp(self):
@@ -427,6 +453,50 @@ class WhoShouldKnowTest(unittest.TestCase):
         routed = ask_service.ask("who should know about notebook#45", ORG)
         self.assertEqual(routed.tool, "who_should_know")
         self.assertEqual(routed.answer, _ask("notebook#45").answer)
+
+
+class WhoShouldKnowOnTheSeedAloneTest(unittest.TestCase):
+    """Production's shape: the Quillfern seed with no GitHub history and no linked accounts."""
+
+    @classmethod
+    def setUpClass(cls):
+        graph = f"company_coordination_seed_test{tests.TEST_GRAPH_SUFFIX}"
+        cls._patches = [
+            mock.patch.object(falkordb_client, "graph_name", return_value=graph),
+            mock.patch.object(seed, "graph_name", return_value=graph),
+        ]
+        for patch in cls._patches:
+            patch.start()
+        seed.reset_and_seed(quillfern)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            falkordb_client.client().select_graph(falkordb_client.graph_name()).delete()
+        finally:
+            for patch in cls._patches:
+                patch.stop()
+
+    def test_with_no_linked_accounts_no_pull_request_is_claimed(self):
+        result = _ask("who should know if postgres changes")
+        self.assertEqual(
+            result.answer,
+            "Postgres is owned by Sara Lindqvist. If it changes, 4 other people own something that depends on it. "
+            "Maya Ortiz owns Auth Service (1 hop) and API Gateway (2 hops), and the graph shows no ticket or decision shared "
+            "with Sara Lindqvist: introduce them before it changes. Arjun Mehta owns Billing Service (1 hop), and the graph "
+            "shows no ticket or decision shared with Sara Lindqvist: introduce them before it changes. Lena Fischer owns "
+            "Invoice Worker (2 hops) and Notification Service (2 hops), and the graph shows no ticket or decision shared with "
+            "Sara Lindqvist: introduce them before it changes. And 1 more: Kofi Mensah.",
+        )
+        self.assertIn(
+            "Arjun Mehta owns Billing Service (1 hop), and the graph shows no ticket or decision shared with Maya Ortiz: introduce them before it changes.",
+            _ask("who should know if auth changes").answer,
+        )
+        for question in ("who should know if postgres changes", "who should know if auth changes", "who should know if billing changes"):
+            with self.subTest(question=question):
+                answer = _ask(question).answer
+                self.assertNotIn("pull request", answer)
+                self.assertNotIn("never", answer)
 
 
 if __name__ == "__main__":
