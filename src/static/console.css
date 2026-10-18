@@ -4,6 +4,9 @@
    the containers table, the setup steps and the confirm dialog. No inline styles anywhere: the
    console runs under a CSP without 'unsafe-inline'. Every font size is a --fs- token. */
 
+/* On console pages the hidden attribute always wins over a component's display. */
+.console [hidden] { display: none !important; }
+
 .console-main { min-height: calc(100vh - var(--header)); padding-bottom: 32px; }
 .console-main .page-head { padding: 48px 0 28px; }
 .console-main section.block { padding-top: 48px; }
@@ -52,6 +55,7 @@ button.top-signin { cursor: pointer; }
 .btn-danger:hover { box-shadow: none; background: color-mix(in oklab, var(--danger) 10%, transparent); }
 .btn-danger.solid { background: var(--danger); color: var(--surface); border-color: transparent; }
 .btn-danger.solid:hover { box-shadow: 0 0 0 4px color-mix(in oklab, var(--danger) 20%, transparent); }
+.btn[hidden] { display: none; }
 .btn-sm { min-height: 36px; padding: 0 14px; font-size: var(--fs-sm); }
 .btn[aria-busy="true"] { cursor: progress; opacity: 0.7; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 20px 0 0; }
@@ -185,6 +189,8 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
 .savebar p { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); }
 
 /* A choice of one (the Jira site). */
+.sr-fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.sk-choice { height: 76px; }
 .choices { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .choice {
   display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius);
@@ -193,8 +199,9 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
 .choice:hover { border-color: var(--line-2); }
 .choice:has(input:checked) { border-color: var(--path); background: color-mix(in oklab, var(--path) 6%, var(--surface)); }
 .choice input { width: 18px; height: 18px; margin: 0; accent-color: var(--path); }
-.choice b { display: block; font-weight: 600; }
-.choice span { display: block; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+.choice .txt { min-width: 0; }
+.choice .txt b { display: block; font-weight: 600; }
+.choice .txt span { display: block; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
 
 /* --- Setup steps (/console/start) ------------------------------------------------------------ */
 
@@ -247,4 +254,7 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
   .meta-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .signin-panel { padding: 22px 18px; }
   .signin-panel .btn { width: 100%; }
+  /* The containers table keeps three columns on a phone; when it was fetched is on the wide view. */
+  table.tools .when { display: none; }
+  .picker-bar .count { flex-basis: 100%; order: 3; }
 }

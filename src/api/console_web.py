@@ -41,6 +41,9 @@ PAGES = {
     "/signin": "signin.html",
     "/console": "index.html",
     "/console/start": "start.html",
+    "/console/connect/jira/site": "site.html",
+    "/console/connectors/{connection_id}/projects": "projects.html",
+    "/console/connectors/{connection_id}": "connection.html",
 }
 
 # The public header's link, hidden in the files; shown when the console runs.
