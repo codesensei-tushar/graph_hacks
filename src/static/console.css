@@ -1,0 +1,242 @@
+/* Company Brain console: what style.css does not already have. The tokens, type, buttons, pills,
+   chips, panels, cards, the ask bar and the answer all come from style.css; this file adds the
+   console's header bits, form rows, status dots and pills, connection cards, the project picker,
+   the containers table, the setup steps and the confirm dialog. No inline styles anywhere: the
+   console runs under a CSP without 'unsafe-inline'. Every font size is a --fs- token. */
+
+.console-main { min-height: calc(100vh - var(--header)); padding-bottom: 32px; }
+.console-main .page-head { padding: 48px 0 28px; }
+.console-main section.block { padding-top: 48px; }
+.console-main section.block h2 { font-size: var(--fs-xl); margin-bottom: 8px; }
+.console-main section.block p.sub { margin-bottom: 20px; }
+.narrow { max-width: calc(640px + 2 * var(--gutter)); }
+
+/* --- Header --------------------------------------------------------------------------------- */
+
+.top nav a[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
+.top-org {
+  max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 500 var(--fs-xs)/1 var(--mono); color: var(--ink-2); letter-spacing: 0.02em;
+}
+button.top-signin { cursor: pointer; }
+.top-org[hidden], .top-signin[hidden], .top nav a[hidden] { display: none; }
+
+/* --- Banners ---------------------------------------------------------------------------------- */
+
+.banner {
+  display: flex; align-items: flex-start; gap: 10px; margin: 0 0 20px; padding: 12px 16px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); border-left: 3px solid var(--path); background: var(--surface); color: var(--ink); font-size: var(--fs-md);
+}
+.banner[hidden] { display: none; }
+.banner.ok { border-left-color: var(--ok); }
+.banner.error { border-left-color: var(--danger); }
+.banner .grow { flex: 1; min-width: 0; }
+.banner .link-btn { flex: none; }
+
+/* --- Status: a dot and a pill ------------------------------------------------------------------ */
+
+.sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--other); }
+.sdot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ok) 20%, transparent); }
+.sdot.busy { background: var(--path); box-shadow: 0 0 0 3px var(--glow); animation: breathe 1.4s ease-in-out infinite alternate; }
+.sdot.warn { background: var(--service); box-shadow: 0 0 0 3px color-mix(in oklab, var(--service) 22%, transparent); }
+.sdot.error { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in oklab, var(--danger) 22%, transparent); }
+@keyframes breathe { from { opacity: 0.45; } to { opacity: 1; } }
+.status-pill { gap: 8px; white-space: nowrap; color: var(--ink); background: var(--surface); font-variant-numeric: tabular-nums; }
+.status-pill.warn { border-color: color-mix(in oklab, var(--service) 50%, var(--line-2)); }
+.status-pill.error { border-color: color-mix(in oklab, var(--danger) 50%, var(--line-2)); }
+.status-pill.busy { border-color: color-mix(in oklab, var(--path) 45%, var(--line-2)); }
+
+/* --- Buttons ------------------------------------------------------------------------------------ */
+
+.btn-danger { background: transparent; color: var(--danger); border-color: color-mix(in oklab, var(--danger) 55%, var(--line-2)); }
+.btn-danger:hover { box-shadow: none; background: color-mix(in oklab, var(--danger) 10%, transparent); }
+.btn-danger.solid { background: var(--danger); color: var(--surface); border-color: transparent; }
+.btn-danger.solid:hover { box-shadow: 0 0 0 4px color-mix(in oklab, var(--danger) 20%, transparent); }
+.btn-sm { min-height: 36px; padding: 0 14px; font-size: var(--fs-sm); }
+.btn[aria-busy="true"] { cursor: progress; opacity: 0.7; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 20px 0 0; }
+.btn-slack { gap: 10px; padding: 0 22px; background: var(--ink); color: var(--bg); }
+.btn-slack svg { width: 18px; height: 18px; }
+
+/* --- Form rows ---------------------------------------------------------------------------------- */
+
+.form { display: grid; gap: 16px; }
+.form-row { display: grid; gap: 6px; }
+.form-row label { font-size: var(--fs-sm); font-weight: 500; color: var(--ink); }
+.form-row .hint { margin: 0; font-size: var(--fs-sm); color: var(--ink-3); }
+.form-row .field-error { margin: 0; font-size: var(--fs-sm); color: var(--danger); }
+.form-row .field-error:empty { display: none; }
+.input {
+  width: 100%; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-2);
+  background: var(--surface); color: var(--ink); font: 400 var(--fs-md)/1.2 var(--font);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.input::placeholder { color: var(--ink-3); }
+.input:focus-visible { outline: 0; border-color: var(--path); box-shadow: 0 0 0 4px var(--glow); }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+.input.mono { font-family: var(--mono); font-size: var(--fs-sm); letter-spacing: 0.04em; }
+
+/* --- Sign in ------------------------------------------------------------------------------------ */
+
+.signin-panel { display: grid; gap: 14px; justify-items: start; padding: 28px; }
+.signin-panel .small { margin: 0; }
+.fineprint { margin: 18px 0 0; font-size: var(--fs-sm); color: var(--ink-3); }
+
+/* --- Connection cards -------------------------------------------------------------------------- */
+
+.conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.conn-card {
+  display: flex; flex-direction: column; gap: 14px; height: 100%; padding: 18px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--surface); box-shadow: inset 0 1px 0 var(--highlight);
+  color: var(--ink); text-decoration: none; transition: border-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+a.conn-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
+.conn-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.conn-head .grow { flex: 1; min-width: 0; }
+.conn-head b { display: block; font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em; }
+.conn-site { display: block; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.conn-stats b { color: var(--ink); font-weight: 500; }
+.conn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--ink-3); }
+.conn-foot .go { color: var(--path-ink); font-weight: 500; }
+.conn-error { margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
+/* A monogram tile per tool, in a node family's colour. */
+.tile {
+  --c: var(--other); display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: 10px;
+  border: 1.5px solid var(--c); background: color-mix(in oklab, var(--c) 16%, var(--surface)); color: var(--ink);
+  font: 600 var(--fs-md)/1 var(--mono);
+}
+.tile.jira { --c: var(--person); }
+.tile.hubspot { --c: var(--service); }
+.tile.lg { width: 52px; height: 52px; border-radius: 14px; font-size: var(--fs-lg); }
+.bar { height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.bar > span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--path); transition: width var(--slow) var(--ease); }
+
+/* The tools to add: one card each, with its one-click Connect button. */
+.connector-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.connector-list li { display: flex; flex-direction: column; gap: 12px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: inset 0 1px 0 var(--highlight); }
+.connector-list p { margin: 0; color: var(--ink-2); font-size: var(--fs-md); }
+.connector-list .btn { align-self: flex-start; margin-top: auto; }
+
+/* Empty and error states. */
+.empty { display: grid; justify-items: center; gap: 10px; padding: 40px 24px; text-align: center; border: 1px dashed var(--line-2); border-radius: var(--radius); background: color-mix(in oklab, var(--surface) 60%, transparent); }
+.empty h2, .empty h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.empty p { margin: 0; max-width: 36em; color: var(--ink-2); font-size: var(--fs-md); }
+.empty .actions { justify-content: center; margin-top: 8px; }
+.sk-conn { list-style: none; height: 178px; border-radius: var(--radius); background: var(--surface-3); animation: shimmer 900ms ease-in-out infinite alternate; }
+
+/* --- Detail ---------------------------------------------------------------------------------- */
+
+.detail-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.detail-head h1 { margin: 0; }
+.meta-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0; margin: 24px 0 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.meta-list > div { padding: 12px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); min-width: 0; margin: 0 -1px -1px 0; }
+.meta-list dt { font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-3); }
+.meta-list dd { margin: 4px 0 0; font-size: var(--fs-md); color: var(--ink); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.poll-note { margin: 10px 0 0; font: var(--fs-xs)/1.4 var(--mono); color: var(--ink-3); min-height: 1.4em; }
+
+/* The containers table: style.css's table.tools, with a status column and numbers to the right. */
+.table-wrap { overflow-x: auto; }
+table.tools td.num, table.tools th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.tools td.state { white-space: nowrap; }
+table.tools td.state .sdot { margin-right: 8px; vertical-align: 0.05em; }
+table.tools td .err { display: block; margin-top: 4px; font-size: var(--fs-sm); color: var(--danger); }
+table.tools td .dim { font-size: var(--fs-sm); }
+
+.danger-zone { border-color: color-mix(in oklab, var(--danger) 35%, var(--line)); }
+.danger-zone h3 { color: var(--ink); }
+
+/* --- Confirm dialog -------------------------------------------------------------------------- */
+
+dialog.confirm {
+  width: min(480px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line-2); border-radius: 16px;
+  background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+}
+dialog.confirm::backdrop { background: rgba(5, 6, 26, 0.6); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+dialog.confirm form { display: grid; gap: 14px; padding: 22px; }
+dialog.confirm h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+dialog.confirm p { margin: 0; color: var(--ink-2); font-size: var(--fs-md); }
+dialog.confirm code { color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
+
+/* --- Project picker ------------------------------------------------------------------------- */
+
+.picker { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.picker-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px; border-bottom: 1px solid var(--line); }
+.picker-bar .input { flex: 1 1 260px; width: auto; border-radius: 999px; }
+.picker-bar .count { font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.picker-bar .link-btn { font-size: var(--fs-sm); min-height: 32px; }
+.pick-list { max-height: min(56vh, 520px); overflow-y: auto; margin: 0; padding: 4px 0; list-style: none; }
+.pick-list li[hidden] { display: none; }
+.pick { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 16px; cursor: pointer; transition: background var(--fast) var(--ease); }
+.pick:hover { background: var(--surface-2); }
+.pick input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--path); }
+.pick .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pick .key { font: 500 var(--fs-xs)/1 var(--mono); color: var(--ink-2); padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; }
+.pick:has(input:checked) { background: color-mix(in oklab, var(--path) 7%, transparent); }
+.pick-empty { padding: 28px 16px; text-align: center; color: var(--ink-2); font-size: var(--fs-md); }
+.savebar {
+  position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 16px 0 0; padding: 12px 0; background: color-mix(in oklab, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-top: 1px solid var(--line);
+}
+.savebar p { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); }
+
+/* A choice of one (the Jira site). */
+.choices { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.choice {
+  display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); cursor: pointer; transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.choice:hover { border-color: var(--line-2); }
+.choice:has(input:checked) { border-color: var(--path); background: color-mix(in oklab, var(--path) 6%, var(--surface)); }
+.choice input { width: 18px; height: 18px; margin: 0; accent-color: var(--path); }
+.choice b { display: block; font-weight: 600; }
+.choice span { display: block; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* --- Setup steps (/console/start) ------------------------------------------------------------ */
+
+.setup { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.setup-step { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 16px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: inset 0 1px 0 var(--highlight); }
+.setup-step .num {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line-2);
+  font: 600 var(--fs-sm)/1 var(--mono); color: var(--ink-2); background: var(--surface-2);
+}
+.setup-step h2 { margin: 4px 0 4px; font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em; }
+.setup-step .body { grid-column: 2; }
+.setup-step .body > p { margin: 0 0 14px; color: var(--ink-2); font-size: var(--fs-md); }
+.setup-step .done-line { display: none; margin: 0; color: var(--ink-2); font-size: var(--fs-md); }
+.setup-step[data-state="current"] { border-color: color-mix(in oklab, var(--path) 50%, var(--line-2)); }
+.setup-step[data-state="current"] .num { border-color: var(--path); color: var(--path-ink); background: color-mix(in oklab, var(--path) 12%, var(--surface)); }
+.setup-step[data-state="done"] .num { border-color: transparent; color: var(--on-path); background: var(--ok); }
+.setup-step[data-state="done"] .work, .setup-step[data-state="todo"] .work { display: none; }
+.setup-step[data-state="done"] .done-line { display: block; }
+.setup-step[data-state="todo"] { opacity: 0.7; }
+.setup .form { max-width: 440px; }
+
+/* --- Ask -------------------------------------------------------------------------------------- */
+
+.console-ask .askbar { margin: 0 0 20px; box-shadow: 0 1px 0 var(--highlight) inset, 0 24px 48px -32px var(--horizon); }
+.console-ask .answer { margin-top: 4px; }
+
+/* --- Privacy --------------------------------------------------------------------------------- */
+
+.prose { max-width: 46em; }
+.prose h2 { margin: 40px 0 10px; font-size: var(--fs-xl); font-weight: 500; letter-spacing: -0.02em; }
+.prose p, .prose li { color: var(--ink-2); font-size: var(--fs-base); line-height: 1.65; }
+.prose ul { padding-left: 20px; }
+.prose li { margin: 6px 0; }
+.prose b { color: var(--ink); font-weight: 600; }
+
+@media (max-width: 760px) {
+  .console-main .page-head { padding-top: 32px; }
+  .conn-grid, .connector-list { grid-template-columns: minmax(0, 1fr); }
+  .setup-step { grid-template-columns: minmax(0, 1fr); padding: 18px 16px; }
+  .setup-step .body { grid-column: 1; }
+  .top-org { display: none; }
+  .actions .btn { flex: 1 1 auto; }
+  dialog.confirm .actions .btn { flex: 1 1 0; }
+  .meta-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .signin-panel { padding: 22px 18px; }
+  .signin-panel .btn { width: 100%; }
+}
