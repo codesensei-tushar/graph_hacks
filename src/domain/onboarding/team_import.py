@@ -16,6 +16,7 @@ is refused whole, one message per problem, before anything is written.
 """
 
 import dataclasses
+import logging
 import difflib
 import re
 import tomllib
@@ -29,6 +30,8 @@ from src.db.falkordb_client import connect
 from src.domain.knowledge.dto import PathStep
 from src.domain.knowledge.kinds import KIND_OF, NOT_DEPENDABLE, SERVICE_KINDS, normalize_kind
 from src.seed.seed import SeedReport, seed_company
+
+log = logging.getLogger(__name__)
 
 MAX_FILE_BYTES = 256 * 1024
 ORG_SHARED = "org_shared"
@@ -214,7 +217,7 @@ def import_team(text: str | bytes, company_id: str) -> ImportResult:
     """Check a team file against the graph, then merge it. Nothing is written unless every
     row and every reference checks out."""
     team = check_team(text, company_id)
-    return ImportResult(team, seed_company(team))
+    return _merged(team)
 
 
 def check_team_data(data: dict, company_id: str, scope: str = ORG_SHARED, scopes: list[str] | None = None) -> SimpleNamespace:
@@ -225,7 +228,21 @@ def check_team_data(data: dict, company_id: str, scope: str = ORG_SHARED, scopes
 
 def import_team_data(data: dict, company_id: str, scope: str = ORG_SHARED, scopes: list[str] | None = None) -> ImportResult:
     team = check_team_data(data, company_id, scope, scopes)
-    return ImportResult(team, seed_company(team))
+    return _merged(team)
+
+
+def _merged(team: SimpleNamespace) -> ImportResult:
+    """Merge a checked team. When it names Services, synced tickets may now be about them:
+    queue the org's ABOUT re-resolve (``about_refresh``). A failure to queue never fails the import."""
+    result = ImportResult(team, seed_company(team))
+    if team.SERVICES:
+        try:
+            from src.domain.onboarding import about_refresh
+
+            about_refresh.schedule()
+        except Exception:
+            log.exception("[onboarding] could not queue the ABOUT re-resolve")
+    return result
 
 
 def contents(team: SimpleNamespace) -> dict:

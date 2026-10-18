@@ -18,6 +18,7 @@ from src.domain.github import backfill as github_backfill  # registers the colla
 from src.domain.knowledge.search import ensure_search_indexes
 from src.domain import orgs
 from src.domain.memory.memory_service import ensure_indexes
+from src.domain.onboarding import about_refresh  # noqa: F401  registers the ABOUT re-resolve job
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
 from src.domain.slack import token_install
 from src.domain.slack.agent_turn import answer_turn

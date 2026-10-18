@@ -9,8 +9,10 @@ Needs FalkorDB on localhost:6379 (``docker compose up -d``).
 """
 
 import re
+import time
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
@@ -18,6 +20,10 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from src.api.v1 import console_teams  # noqa: E402
+from src.connectors import graph as connector_graph  # noqa: E402
+from src.connectors.base import Container, Install, Item, Page  # noqa: E402
+from src.core import scheduler  # noqa: E402
+from src.domain.onboarding import about_refresh  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.core import tenancy  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
@@ -246,6 +252,76 @@ class ConsoleTeamsTest(unittest.TestCase):
         self.session = {**self.session, "role": "member"}
         self.assertEqual(self._post({"file": PAYMENTS_FILE}).status_code, 403)
         self.assertEqual(self.client.get("/console/api/teams").status_code, 200, "members may list")
+
+
+
+class AboutRefreshTest(unittest.TestCase):
+    """Jira synced before the teams were imported: the import queues a pass that makes the tickets
+    about the Services their components name, in batches, in the org only."""
+
+    @classmethod
+    def setUpClass(cls):
+        orgs.ensure_control_indexes()
+        cls.org = orgs.create_org("About Refresh", created_by="TA:UA")
+
+    @classmethod
+    def tearDownClass(cls):
+        scheduler.cancel_org(cls.org.id)
+        try:
+            falkordb_client.client().select_graph(cls.org.graph).delete()
+        except Exception:
+            pass
+        tenancy.control_graph().query("MATCH (o:Org {id: $id}) DETACH DELETE o", {"id": cls.org.id})
+
+    def _sync(self):
+        install = Install(source="jira", id="site1", org=self.org.id, auth="oauth")
+        container = install.container_id("10")
+
+        def ticket(number, title, components):
+            return Item(
+                label="Ticket", id=install.item_id(str(number)), external_id=str(number), container=container, name=f"PAY-{number}",
+                title=title, about=tuple(components) or (title,), props={"components": list(components), "labels": []},
+            )
+
+        with tenancy.org_context(self.org.ref()):
+            connector_graph.write_containers(install, [Container(id=container, name="PAY", external_id="10")])
+            connector_graph.write_page(install, Page(items=[
+                ticket(1, "Retries time out", ["Billing Service"]),
+                ticket(2, "Totals drift overnight", ["Ledger"]),
+                ticket(3, "Crash on login", ["Mobile App"]),
+                ticket(4, "Ledger export is slow", []),
+            ]))
+        return install
+
+    def _about(self) -> dict:
+        rows = _rows(self.org.ref(), "MATCH (t:Ticket)-[r:ABOUT]->(s:Service) WHERE r.item = t.id RETURN t.name, s.id, r.install ORDER BY t.name")
+        return {name: (service, install) for name, service, install in rows}
+
+    def test_a_team_import_makes_tickets_synced_earlier_about_its_services(self):
+        install = self._sync()
+        self.assertEqual(self._about(), {}, "no Services yet: about nothing")
+        with tenancy.org_context(self.org.ref()):
+            team_import.import_team(PAYMENTS_FILE, team_import.company_id())
+            self.assertTrue(scheduler.exists(about_refresh.JOB_ID), "the import queued the pass")
+        with mock.patch.object(about_refresh, "BATCH", 1):
+            for _ in range(12):  # one item per batch: the pass walks on by itself
+                scheduler.run_due(now=time.time() + 5)
+        self.assertEqual(
+            self._about(),
+            {"PAY-1": ("billing-service", install.key), "PAY-2": ("ledger", install.key), "PAY-4": ("ledger", install.key)},
+        )
+        with tenancy.org_context(self.org.ref()):
+            self.assertEqual(about_refresh.refresh_all(), 0, "a second pass changes nothing")
+            self.assertFalse(scheduler.exists(about_refresh.JOB_ID), "the pass ended")
+            # A resync writes the same edges the pass did.
+            self._sync()
+        self.assertEqual(set(self._about()), {"PAY-1", "PAY-2", "PAY-4"})
+
+    def test_hints_are_the_stored_ones_else_the_jira_mappers(self):
+        self.assertEqual(about_refresh.hints(["Billing"], ["Other"], "Title", "jira"), ["Billing"])
+        self.assertEqual(about_refresh.hints(None, ["Ledger", ""], "Title", "jira"), ["Ledger"])
+        self.assertEqual(about_refresh.hints(None, [], "Ledger export", "jira"), ["Ledger export"])
+        self.assertEqual(about_refresh.hints(None, [], "Acme Corp", "hubspot"), [])
 
 
 if __name__ == "__main__":
