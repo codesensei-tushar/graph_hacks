@@ -33,7 +33,7 @@ from src.core.config import settings
 from src.core.tenancy import OrgRef, in_org, org_context
 from src.db.falkordb_client import kv
 from src.domain import orgs
-from src.domain.slack import channel_membership, turn_service
+from src.domain.slack import channel_audience, channel_membership, turn_service
 from src.domain.slack.channels import rollout
 from src.domain.slack.team_invite import (
     on_slack_team_join,
@@ -117,7 +117,11 @@ class _OrgTasks:
 
 
 def _org_for_team(team_id: str | None) -> OrgRef:
+    """Raises ``orgs.RouteUnavailable``; the routes answer 503 so Slack retries."""
     return orgs.org_ref_for_team(team_id)
+
+
+_ROUTE_UNAVAILABLE = {"error": "temporarily unavailable"}
 
 
 def _workspace_user_event(body: dict) -> tuple[str, str, str, dict] | None:
@@ -155,7 +159,12 @@ async def slack_events(request: Request, background: BackgroundTasks):
         key = f"slack:evt:{event_id}"
         if _seen(key):
             return {"ok": True}
-        org = _org_for_team(team_id)
+        # A new person: the audience caches (org_internal readers) start over.
+        channel_audience.forget(team_id)
+        try:
+            org = _org_for_team(team_id)
+        except orgs.RouteUnavailable:
+            return JSONResponse(_ROUTE_UNAVAILABLE, status_code=503)
         tasks = _OrgTasks(background, org)
         with org_context(org):
             if get_workspace_by_team_id(team_id) is None:
@@ -185,7 +194,13 @@ async def slack_events(request: Request, background: BackgroundTasks):
         _mark_seen(key)
         return {"ok": True}
 
-    org = _org_for_team(team_id)
+    if event.type in ("member_joined_channel", "member_left_channel") and event.channel:
+        # Who reads the channel changed: its org_internal verdict is asked again.
+        channel_audience.forget(team_id, event.channel)
+    try:
+        org = _org_for_team(team_id)
+    except orgs.RouteUnavailable:
+        return JSONResponse(_ROUTE_UNAVAILABLE, status_code=503)
     with org_context(org):
         return _dispatch_event(_OrgTasks(background, org), team_id, event_id, event, key)
 
@@ -299,7 +314,10 @@ async def slack_interactions(request: Request, background: BackgroundTasks):
         return JSONResponse({"error": "invalid signature"}, status_code=401)
 
     decoded = _decoded_payload(raw_body)
-    org = _org_for_team(((decoded or {}).get("team") or {}).get("id"))
+    try:
+        org = _org_for_team(((decoded or {}).get("team") or {}).get("id"))
+    except orgs.RouteUnavailable:
+        return JSONResponse(_ROUTE_UNAVAILABLE, status_code=503)
     background = _OrgTasks(background, org)
     with org_context(org):
         return _dispatch_interaction(background, raw_body, decoded)

@@ -338,7 +338,11 @@ def reconcile_channel_observe_schedules() -> None:
     for raw_key in kv().hkeys(_ROWS):
         key = _decode(raw_key)
         # The rows of every org share one hash: each is reconciled in its own team's org.
-        with tenancy.org_context(orgs.org_ref_for_team(key.split(":", 1)[0])):
+        try:
+            org = orgs.org_ref_for_team(key.split(":", 1)[0])
+        except orgs.RouteUnavailable:
+            continue  # left for the next startup; never reconciled in a guessed org
+        with tenancy.org_context(org):
             if not _reconcile_channel_observe_row(key):
                 _queue_channel_observe_repair(key)
 

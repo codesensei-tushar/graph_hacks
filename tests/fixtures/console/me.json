@@ -1,0 +1,14 @@
+{
+ "org": {
+  "id": "org_01JB7PZ4XK",
+  "name": "Quillfern",
+  "slug": "quillfern"
+ },
+ "person": {
+  "id": "person-arjun-mehta",
+  "name": "Arjun Mehta"
+ },
+ "role": "owner",
+ "csrf": "fixture-csrf-token",
+ "slack_connected": true
+}

@@ -368,9 +368,14 @@ def _link_account(request: TurnRequest) -> str:
 # --- approved actions -------------------------------------------------------------------
 
 
-def execute_approved_action(tool_name: str, tool_input: dict, container_tag: str) -> str:
-    """Run an approved write through the tool catalogue. The write lands in ``container_tag``."""
-    read_tags = list(dict.fromkeys([SHARED_TEAM_BRAIN_CONTAINER_TAG, ORG_INTERNAL_CONTAINER_TAG, container_tag]))
+def execute_approved_action(tool_name: str, tool_input: dict, container_tag: str, internal_audience: bool = False) -> str:
+    """Run an approved write through the tool catalogue. The write lands in ``container_tag``.
+
+    ``internal_audience`` is whether everyone in the room the approval came from is a full member
+    (read_scope.py): only then may the action read org_internal, or it could name a connector
+    account to a guest and link an org_shared node to it. It fails closed."""
+    internal = [ORG_INTERNAL_CONTAINER_TAG] if internal_audience else []
+    read_tags = list(dict.fromkeys([SHARED_TEAM_BRAIN_CONTAINER_TAG, *internal, container_tag]))
     spec = catalogue.get_tool("ingest_ticket" if tool_name == TICKET_TOOL_NAME else tool_name)
     if spec is None or not spec.needs_approval:
         raise ValueError(f"unknown approved tool {tool_name}")

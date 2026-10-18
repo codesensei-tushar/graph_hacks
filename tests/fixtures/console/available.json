@@ -1,0 +1,202 @@
+[
+ {
+  "external_id": "10001",
+  "key": "PAY",
+  "name": "Payments"
+ },
+ {
+  "external_id": "10002",
+  "key": "BIL",
+  "name": "Billing"
+ },
+ {
+  "external_id": "10003",
+  "key": "AUTH",
+  "name": "Identity and Auth"
+ },
+ {
+  "external_id": "10004",
+  "key": "PLAT",
+  "name": "Platform"
+ },
+ {
+  "external_id": "10005",
+  "key": "WEB",
+  "name": "Web App"
+ },
+ {
+  "external_id": "10006",
+  "key": "MOB",
+  "name": "Mobile"
+ },
+ {
+  "external_id": "10007",
+  "key": "API",
+  "name": "Public API"
+ },
+ {
+  "external_id": "10008",
+  "key": "DATA",
+  "name": "Data Platform"
+ },
+ {
+  "external_id": "10009",
+  "key": "ML",
+  "name": "Recommendations"
+ },
+ {
+  "external_id": "10010",
+  "key": "SRCH",
+  "name": "Search"
+ },
+ {
+  "external_id": "10011",
+  "key": "OPS",
+  "name": "Operations"
+ },
+ {
+  "external_id": "10012",
+  "key": "SEC",
+  "name": "Security"
+ },
+ {
+  "external_id": "10013",
+  "key": "INF",
+  "name": "Infrastructure"
+ },
+ {
+  "external_id": "10014",
+  "key": "OBS",
+  "name": "Observability"
+ },
+ {
+  "external_id": "10015",
+  "key": "REL",
+  "name": "Release Engineering"
+ },
+ {
+  "external_id": "10016",
+  "key": "SUP",
+  "name": "Support"
+ },
+ {
+  "external_id": "10017",
+  "key": "CS",
+  "name": "Customer Success"
+ },
+ {
+  "external_id": "10018",
+  "key": "SAL",
+  "name": "Sales Ops"
+ },
+ {
+  "external_id": "10019",
+  "key": "MKT",
+  "name": "Marketing Site"
+ },
+ {
+  "external_id": "10020",
+  "key": "DOC",
+  "name": "Documentation"
+ },
+ {
+  "external_id": "10021",
+  "key": "HR",
+  "name": "People Ops"
+ },
+ {
+  "external_id": "10022",
+  "key": "FIN",
+  "name": "Finance Systems"
+ },
+ {
+  "external_id": "10023",
+  "key": "LEG",
+  "name": "Legal Requests"
+ },
+ {
+  "external_id": "10024",
+  "key": "IT",
+  "name": "IT Helpdesk"
+ },
+ {
+  "external_id": "10025",
+  "key": "DES",
+  "name": "Design System"
+ },
+ {
+  "external_id": "10026",
+  "key": "GRO",
+  "name": "Growth"
+ },
+ {
+  "external_id": "10027",
+  "key": "ONB",
+  "name": "Onboarding"
+ },
+ {
+  "external_id": "10028",
+  "key": "NOT",
+  "name": "Notifications"
+ },
+ {
+  "external_id": "10029",
+  "key": "INV",
+  "name": "Invoicing"
+ },
+ {
+  "external_id": "10030",
+  "key": "TAX",
+  "name": "Tax Engine"
+ },
+ {
+  "external_id": "10031",
+  "key": "FRD",
+  "name": "Fraud"
+ },
+ {
+  "external_id": "10032",
+  "key": "RISK",
+  "name": "Risk"
+ },
+ {
+  "external_id": "10033",
+  "key": "PART",
+  "name": "Partner Integrations"
+ },
+ {
+  "external_id": "10034",
+  "key": "EXP",
+  "name": "Experiments"
+ },
+ {
+  "external_id": "10035",
+  "key": "LOC",
+  "name": "Localisation"
+ },
+ {
+  "external_id": "10036",
+  "key": "ACC",
+  "name": "Accessibility"
+ },
+ {
+  "external_id": "10037",
+  "key": "PERF",
+  "name": "Performance"
+ },
+ {
+  "external_id": "10038",
+  "key": "QA",
+  "name": "Quality"
+ },
+ {
+  "external_id": "10039",
+  "key": "ARCH",
+  "name": "Architecture Decisions"
+ },
+ {
+  "external_id": "10040",
+  "key": "LAB",
+  "name": "Labs"
+ }
+]
