@@ -265,6 +265,8 @@ class AlgorithmToolsTest(unittest.TestCase):
         self.assertEqual([call.method for call in scratch], ["query", "ro_query"])
         names = {name.decode() if isinstance(name, bytes) else name for name in falkordb_client.client().list_graphs()}
         self.assertNotIn(scratch[0].graph, names)
+        # A scratch graph is not tracked: no generation key is left behind for its throwaway name.
+        self.assertEqual(falkordb_client.kv().exists(falkordb_client.GENERATION_KEY.format(scratch[0].graph)), 0)
 
     def test_decision_pressure_names_uncited_work_and_hides_private_pull_requests(self):
         quiet = ask_service.decision_pressure("is the billing retries decision still the last word", ORG)

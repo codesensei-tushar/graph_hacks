@@ -176,11 +176,14 @@ def _run_hooks(hooks: list[QueryHook], call: QueryCall) -> None:
 class _GraphProxy:
     """A FalkorDB graph whose ``query`` and ``ro_query`` take the context's timeout and run the hooks.
 
-    Every other attribute (``name``, ``delete``, ``explain``, ...) is the wrapped graph's own.
+    Every other attribute (``name``, ``explain``, ...) is the wrapped graph's own. ``tracked``
+    graphs bump their generation on changing writes and on ``delete``; a scratch graph is not
+    tracked, so it leaves no generation key behind.
     """
 
-    def __init__(self, graph) -> None:
+    def __init__(self, graph, tracked: bool = True) -> None:
         self._graph = graph
+        self._tracked = tracked
 
     def __getattr__(self, name: str):
         return getattr(self._graph, name)
@@ -195,7 +198,8 @@ class _GraphProxy:
         try:
             return self._graph.delete()
         finally:
-            bump_generation(getattr(self._graph, "name", ""))
+            if self._tracked:
+                bump_generation(getattr(self._graph, "name", ""))
 
     def _run(self, method: str, q: str, params, timeout, kwargs):
         timeout = _timeout_for(timeout)
@@ -205,7 +209,8 @@ class _GraphProxy:
         try:
             call.result = getattr(self._graph, method)(q, params, timeout=timeout, **kwargs)
             if method == "query" and _changed(call.result):
-                bump_generation(call.graph)
+                if self._tracked:
+                    bump_generation(call.graph)
             return call.result
         except BaseException as error:
             call.error = error
@@ -310,8 +315,9 @@ def connect():
 
 def scratch_graph(name: str):
     """A throwaway graph (an algorithm's working copy) behind the same proxy as ``connect()``'s, so
-    its queries take the context's timeout and are seen by the hooks. The caller deletes it."""
-    return _GraphProxy(client().select_graph(name))
+    its queries take the context's timeout and are seen by the hooks. Not tracked: its writes keep
+    no generation key in Redis. The caller deletes it."""
+    return _GraphProxy(client().select_graph(name), tracked=False)
 
 
 def kv():
