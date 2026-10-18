@@ -24,12 +24,38 @@ HELP_TEXT = "\n".join(
 )
 
 
+# How a connected tool is named to the asker.
+SOURCE_NAMES = {"jira": "Jira", "hubspot": "HubSpot"}
+
+
+def _connected() -> bool:
+    """Whether the org in context has a connected tool: its stored installs, or the legacy env ones."""
+    from src.core import tenancy
+
+    org = tenancy.current_org_or_none()
+    return bool(registry.installs_of(org.id) if org is not None and not org.legacy else registry.installs())
+
+
 def cited_tags(read_tags: list[str]) -> list[str]:
     """The read set as a reply names it. "connected tools" (``org_internal``) is named only while a
-    connector is configured; without one it holds nothing, and the footer reads as it always did."""
-    if registry.installs():
+    connector is configured for the org; without one it holds nothing, and the footer reads as it always did."""
+    if _connected():
         return list(read_tags)
     return [tag for tag in read_tags if tag != ORG_INTERNAL_CONTAINER_TAG]
+
+
+def _read_from(read_tags: list[str], channel_names: dict[str, str], sources: list[str]) -> str:
+    """The footer's list: each scope as the asker knows it, and the connected tools by name when the
+    answer cites them ("Jira, HubSpot") rather than as "connected tools"."""
+    names = []
+    for tag in cited_tags(read_tags):
+        if tag == ORG_INTERNAL_CONTAINER_TAG and sources:
+            names += [SOURCE_NAMES.get(source, source) for source in sources]
+        else:
+            names.append(scope_label(tag, channel_names))
+    if sources and ORG_INTERNAL_CONTAINER_TAG not in read_tags:
+        names += [SOURCE_NAMES.get(source, source) for source in sources]  # a restricted project's own scope
+    return ", ".join(dict.fromkeys(names))
 
 
 def _clip(text: str, size: int) -> str:
@@ -79,7 +105,7 @@ def format_answer(
                 where = f"<#{memory['channel_id']}>"
             learned = f", learned {memory['learned_at']}" if memory.get("learned_at") else ""
             parts.append(f"• “{_clip(memory['text'], MAX_MEMORY_SNIPPET)}” — {memory['author']}, {where}{learned}")
-    footer = f"Read from: {', '.join(scope_label(tag, channel_names) for tag in cited_tags(read_tags))}"
+    footer = f"Read from: {_read_from(read_tags, channel_names, list(result.get('sources') or []))}"
     if chosen_by == "approval":
         footer = f"Tool `{result.get('tool', 'graph')}`, run after your approval. {footer}"
     elif chosen_by:

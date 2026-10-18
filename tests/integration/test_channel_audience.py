@@ -7,6 +7,7 @@
 """
 
 import unittest
+import time
 import uuid
 from unittest import mock
 
@@ -17,7 +18,7 @@ from src.db.falkordb_client import connect, kv  # noqa: E402
 from src.domain.access import approvals  # noqa: E402
 from src.domain.memory.read_scope import resolve_brain_read_container_tags  # noqa: E402
 from src.domain.memory.writeback import ORG_INTERNAL_CONTAINER_TAG, SlackMemoryScope, slack_memory_scope_for_turn  # noqa: E402
-from src.domain.slack import channel_audience, turn_service  # noqa: E402
+from src.domain.slack import agent_turn, channel_audience, compute, turn_service  # noqa: E402
 from src.domain.slack.lifecycle_api import SlackMember  # noqa: E402
 from src.domain.slack.workspace import SlackWorkspace  # noqa: E402
 from src.integrations.slack.client import SlackConversationInfo, SlackCursorPage  # noqa: E402
@@ -214,3 +215,73 @@ class PublicDecisionByMentionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GuestRoomMissTest(unittest.TestCase):
+    """Asked in a room with a guest, a name that only connected-tool data holds is not "nothing matches":
+    the reply says where it lives and to ask in a DM, and tells nothing else about it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.graph = f"company_audience_miss_test{tests.TEST_GRAPH_SUFFIX}"
+        cls.patches = [mock.patch.object(falkordb_client, "graph_name", return_value=cls.graph), mock.patch.object(seed, "graph_name", return_value=cls.graph)]
+        for patch in cls.patches:
+            patch.start()
+        reset_and_seed(quillfern)
+        _, g = falkordb_client.connect()
+        g.query(
+            "CREATE (:Ticket {id: 'jira:default:20011', name: 'PAY-11', title: 'Refund the Initech overcharge', state: 'open', "
+            "source: 'jira', external_id: '20011', scope: 'org_internal'})"
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            falkordb_client.client().select_graph(cls.graph).delete()
+        finally:
+            for patch in cls.patches:
+                patch.stop()
+
+    def setUp(self):
+        self.run = uuid.uuid4().hex[:6].upper()
+        self.team = f"TMISS{self.run}"
+        self.slack = DirectorySlack(self.run, self.team)
+        self.alice, self.guest = f"UALICE{self.run}", f"UGUEST{self.run}"
+        for user in ("UBOT", self.alice):
+            self.slack.add(user)
+        self.slack.add(self.guest, guest=True)
+        self.room = f"CMIX{self.run}"
+        self.slack.members[self.room] = ["UBOT", self.alice, self.guest]
+        self.ws = SlackWorkspace(team_id=self.team, bot_user_id="UBOT", bot_name="company-brain", client=self.slack)
+
+    def tearDown(self):
+        for key in kv().keys(f"brain:slack:*{self.team}*"):
+            kv().delete(key)
+
+    def _ask(self, user: str, text: str) -> str:
+        before = len(self.slack.posts)
+        ev = SlackEventInner(type="app_mention", user=user, channel=self.room, channel_type="channel", text=f"<@UBOT> {text}", ts=f"{time.time():.6f}")
+        turn_service.run_slack_turn(self.ws, ev)
+        return self.slack.posts[-1][1] if len(self.slack.posts) > before else ""
+
+    def test_a_member_is_told_it_is_withheld_here_and_nothing_more(self):
+        reply = self._ask(self.alice, "what is PAY-11")
+        self.assertEqual(reply, compute.WITHHELD_REPLY.format(name="PAY-11"))
+        self.assertNotIn("Initech", reply)
+
+    def test_a_guest_asking_gets_the_plain_miss(self):
+        reply = self._ask(self.guest, "what is PAY-11")
+        self.assertNotIn("connected tool", reply)
+        self.assertNotIn("Initech", reply)
+
+    def test_a_name_nobody_has_is_still_nothing_matches(self):
+        self.assertNotIn("connected tool", self._ask(self.alice, "what is PAY-999"))
+
+
+class GuestRoomMissAgentTest(GuestRoomMissTest):
+    """The same through the agent turn (the model's path), with no model: keywords pick the tool."""
+
+    def setUp(self):
+        super().setUp()
+        compute.register_turn_agent(agent_turn.answer_turn)
+        self.addCleanup(compute.register_turn_agent, None)
