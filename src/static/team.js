@@ -103,6 +103,9 @@
     const read = (data.scopes || []).map((scope) => SCOPE_LABEL[scope] || scope).join(", ");
     $("#team-footer").textContent = `Read from: ${read}. Every line on this page is an edge in the graph.`;
     $("#team-body").hidden = false;
+    // A link to a section (/team/sales#runs) lands on it once the sections exist.
+    const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (target) target.scrollIntoView();
   }
 
   load();
