@@ -1,7 +1,7 @@
 """Check the model's tool routing on the demo questions, once, by hand.
 
 The only place this project spends model calls on purpose: one structured call per
-question (25 in all, fast profile), printing the tool and arguments the model chose
+question (28 in all, fast profile), printing the tool and arguments the model chose
 next to what the keyword router would do and what the recording script expects. Run
 it after changing a tool description or the routing prompt, read the table, and paste
 it into the pull request. It is not a test and must never run in CI.
@@ -26,7 +26,10 @@ from src.integrations.llm.model import ModelUnavailable  # noqa: E402
 
 BOT = "<@UBOT>"
 
-# (label, question, expected tool, thread the question is asked in)
+# (label, question, expected tool, thread the question is asked in). The expected tool can carry the
+# arguments it must get, each with the values allowed: blast_radius must not flip its direction.
+DEPENDENTS = ("blast_radius", {"direction": (None, "dependents")})
+DEPENDENCIES = ("blast_radius", {"direction": ("dependencies",)})
 QUESTIONS = [
     ("prod 1", "who owns the memory layer, and who else has worked on it", "who_knows", None),
     ("prod 2", "why do we store memory in FalkorDB instead of a hosted memory API", "decision_trace", None),
@@ -46,7 +49,7 @@ QUESTIONS = [
     ("quill 1", "who owns billing, and who else has worked on it", "who_knows", None),
     ("quill 2", "why did we move the memory layer off Postgres", "decision_trace", None),
     ("quill 3", "why did we move billing retries to the invoice worker", "decision_trace", None),
-    ("quill 4", "what breaks if auth goes down", "blast_radius", None),
+    ("quill 4", "what breaks if auth goes down", DEPENDENTS, None),
     (
         "quill 5",
         "who should look at it",
@@ -62,7 +65,7 @@ QUESTIONS = [
     ("quill 9", "who else should review notebook#52", "who_should_know", None),
     # The Sales beat, on Quillfern with its Sales team imported.
     ("sales S1", "who owns renewals, and who else has worked on it", "who_knows", None),
-    ("sales S2", "what breaks if hubspot goes down", "blast_radius", None),
+    ("sales S2", "what breaks if hubspot goes down", DEPENDENTS, None),
     ("sales S3", "why did we change pricing", "decision_trace", None),
     ("sales B4", "what if priya shah leaves", "if_person_leaves", None),
     # The any-team tools.
@@ -71,6 +74,10 @@ QUESTIONS = [
     ("team 3", "I just joined Sales, what should I know", "onboarding_brief", None),
     ("team 4", "brief me on the payments team", "onboarding_brief", None),
     ("team 5", "who connects Sales and Engineering", "connectors", None),
+    ("team 6", "what does the payments team own", "onboarding_brief", None),
+    # blast_radius the other way: what a service itself depends on.
+    ("deps 1", "what does the invoice worker depend on", DEPENDENCIES, None),
+    ("deps 2", "what are billing's dependencies", DEPENDENCIES, None),
 ]
 
 
@@ -92,19 +99,32 @@ def main() -> int:
                 chosen = agent._choose_with_model(question, thread, agent.catalogue.list_tools())
             except (ModelUnavailable, agent.InvalidToolChoice) as error:
                 chosen = agent.ToolChoice("(failed)", {"error": str(error)}, "model")
-        rows.append((label, question, chosen.tool, chosen.args, keywords.tool, expected))
+        rows.append((label, question, chosen.tool, chosen.args, keywords, expected))
 
     header = ("step", "question", "model tool", "model args", "keyword tool", "expected", "ok")
     print("| " + " | ".join(header) + " |")
     print("|" + "|".join(" --- " for _ in header) + "|")
     misses = 0
-    for label, question, tool, chosen_args, keyword_tool, expected in rows:
-        ok = tool == expected
+    for label, question, tool, chosen_args, keywords, expected in rows:
+        ok = _matches(tool, chosen_args, expected)
         misses += not ok
         shown_args = ", ".join(f"{key}={value!r}" for key, value in chosen_args.items())
-        print(f"| {label} | {question} | {tool} | {shown_args} | {keyword_tool} | {expected} | {'yes' if ok else 'NO'} |")
+        keyword_ok = "" if _matches(keywords.tool, keywords.args, expected) else " (miss)"
+        print(f"| {label} | {question} | {tool} | {shown_args} | {keywords.tool}{keyword_ok} | {_shown(expected)} | {'yes' if ok else 'NO'} |")
     print(f"\n{len(rows) - misses} of {len(rows)} match the recording script.", file=sys.stderr)
     return 1 if misses else 0
+
+
+def _matches(tool: str, chosen_args: dict, expected) -> bool:
+    name, required = (expected, {}) if isinstance(expected, str) else expected
+    return tool == name and all(chosen_args.get(key) in allowed for key, allowed in required.items())
+
+
+def _shown(expected) -> str:
+    if isinstance(expected, str):
+        return expected
+    name, required = expected
+    return name + " " + ", ".join(f"{key} in {'/'.join(str(value) for value in allowed)}" for key, allowed in required.items())
 
 
 if __name__ == "__main__":
