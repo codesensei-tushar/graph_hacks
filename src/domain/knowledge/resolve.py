@@ -230,11 +230,10 @@ class Rows(list):
         with self._lock:
             if self._words is None:
                 words: dict[str, set[str]] = {}
-                for row in self:
-                    for text in (row.name, row.aliases, row.title):
-                        for token in tokens(text):
-                            for form in _forms(token):
-                                words.setdefault(form, set()).add(token)
+                # The tokens of every name, alias and title are the words of the rows' own keys.
+                for token in {token for row in self for key_words in _row_keys(row)[2] for token in key_words}:
+                    for form in _forms(token):
+                        words.setdefault(form, set()).add(token)
                 self._words = words
         return self._words
 
@@ -647,24 +646,37 @@ def _keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int
     return rows.keys() if isinstance(rows, Rows) else _build_keys(rows)
 
 
-def _build_keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int]]:
-    first_names: dict[str, int] = {}
-    for row in rows:
-        if row.label == "Person":
-            words = tokens(row.name)
-            if words:
-                first_names[words[0]] = first_names.get(words[0], 0) + 1
-    keys = []
-    for row in rows:
+def _row_keys(row: EntityRow) -> tuple[Entity, list, set, list[str]]:
+    """One row's own keys (name, aliases, title), the word tuples they hold, and its name's words.
+    Worked out once per row and kept on it: a cached row serves every question until the graph changes."""
+    cached = row.__dict__.get("_keys")
+    if cached is None:
         entity = Entity(row.id, row.name, row.label, row.kind)
         seen: set[tuple[str, ...]] = set()
+        keys = []
         for text, kind in ((row.name, 0), *((alias, 1) for alias in row.aliases.split(",")), (row.title, 3)):
             words = tuple(tokens(text))
             if words and words not in seen:
                 seen.add(words)
                 keys.append((entity, text.strip(), words, kind))
+        cached = (entity, keys, seen, tokens(row.name) if row.label == "Person" else ())
+        row.__dict__["_keys"] = cached  # not a field: equality and the row's shape are unchanged
+    return cached
+
+
+def _build_keys(rows: list[EntityRow]) -> list[tuple[Entity, str, tuple[str, ...], int]]:
+    first_names: dict[str, int] = {}
+    for row in rows:
         if row.label == "Person":
-            words = tokens(row.name)
+            words = _row_keys(row)[3]
+            if words:
+                first_names[words[0]] = first_names.get(words[0], 0) + 1
+    keys = []
+    for row in rows:
+        entity, own, seen, name_words = _row_keys(row)
+        keys.extend(own)
+        if row.label == "Person":
+            words = name_words
             if words and len(words[0]) >= 3 and first_names.get(words[0]) == 1 and (words[0],) not in seen:
                 keys.append((entity, words[0].capitalize(), (words[0],), 2))
     return keys
