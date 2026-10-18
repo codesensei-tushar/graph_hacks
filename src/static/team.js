@@ -25,7 +25,8 @@
       render(data);
     } catch (error) {
       $("#team-name").textContent = "Team not found";
-      $("#team-line").textContent = `${error.message}. The graph does not guess: pick a team from the list on the home page.`;
+      const reason = String(error.message || "");
+      $("#team-line").textContent = `${reason.charAt(0).toUpperCase()}${reason.slice(1)}. The graph does not guess: pick a team from the list on the home page.`;
     }
   }
 

@@ -30,6 +30,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import Future
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -151,6 +152,8 @@ class TtlCache:
     """Values kept for ``ttl`` seconds, at most ``max_entries`` of them, the oldest dropped first.
 
     A failed computation is not cached. Cached values are shared, so callers treat them as read-only.
+    Callers asking for the same missing key at once share one computation: the first computes, the
+    rest wait for its value (or its error) instead of each walking the graph.
     """
 
     def __init__(self, ttl: float, max_entries: int, clock: Callable[[], float] = time.monotonic) -> None:
@@ -159,18 +162,33 @@ class TtlCache:
         self.clock = clock
         self._items: OrderedDict = OrderedDict()
         self._lock = threading.Lock()
+        self._pending: dict = {}
 
     def get_or_compute(self, key, compute: Callable[[], object]):
         with self._lock:
             hit = self._items.get(key)
             if hit is not None and hit[0] > self.clock():
                 return hit[1]
-        value = compute()
+            pending = self._pending.get(key)
+            owner = pending is None
+            if owner:
+                pending = self._pending[key] = Future()
+        if not owner:
+            return pending.result()
+        try:
+            value = compute()
+        except BaseException as error:
+            with self._lock:
+                self._pending.pop(key, None)
+            pending.set_exception(error)
+            raise
         with self._lock:
             self._items[key] = (self.clock() + self.ttl, value)
             self._items.move_to_end(key)
             while len(self._items) > self.max_entries:
                 self._items.popitem(last=False)
+            self._pending.pop(key, None)
+        pending.set_result(value)
         return value
 
     def clear(self) -> None:
@@ -425,10 +443,13 @@ def answer_question(question: str, tool: str | None = None, use_model: bool = Fa
     if use_model:
         # Admin only, and a model's choice can differ between calls: never cached.
         return _answer(question, tool, True, read_scopes)
-    if tuple(read_scopes) != DEFAULT_SCOPES:
-        # A member's answer (Slack, the console) reads private scopes: never cached, always current.
-        return _answer(question, tool, False, read_scopes)
-    return ANSWERS.get_or_compute(cache_key(question, tool), lambda: _answer(question, tool, False, read_scopes))
+    # One question reads each graph's generation from Redis once (the cache key, and every
+    # ``resolve.load_rows`` while answering), and again only after it writes.
+    with falkordb_client.generation_snapshot():
+        if tuple(read_scopes) != DEFAULT_SCOPES:
+            # A member's answer (Slack, the console) reads private scopes: never cached, always current.
+            return _answer(question, tool, False, read_scopes)
+        return ANSWERS.get_or_compute(cache_key(question, tool), lambda: _answer(question, tool, False, read_scopes))
 
 
 def _answer(question: str, tool: str | None, use_model: bool, read_scopes: list[str]) -> AskAnswer:

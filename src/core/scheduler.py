@@ -16,6 +16,7 @@ no org (queued before orgs) is the legacy org's, so jobs already queued keep wor
 
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -26,8 +27,13 @@ from src.db.falkordb_client import kv
 
 log = logging.getLogger(__name__)
 
-_QUEUE = "brain:schedule"
-_PAYLOADS = "brain:schedule:payload"
+# The Redis keys. One deployment has one queue; a test run names its own (``BRAIN_SCHEDULE_KEY``,
+# set by tests/__init__.py per TEST_GRAPH_SUFFIX), so two runs on one Redis never run, or drop as
+# "org no longer exists", each other's jobs.
+QUEUE = os.getenv("BRAIN_SCHEDULE_KEY", "") or "brain:schedule"
+PAYLOADS = f"{QUEUE}:payload"
+_QUEUE = QUEUE
+_PAYLOADS = PAYLOADS
 _POLL_SECONDS = 1.0
 
 _handlers: dict[str, Callable[[dict], None]] = {}

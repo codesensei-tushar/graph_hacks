@@ -49,6 +49,60 @@ class TtlCacheTest(unittest.TestCase):
             cache.get_or_compute("bad", fail)
         self.assertEqual(cache.get_or_compute("bad", lambda: "fine"), "fine")
 
+    def test_identical_concurrent_misses_compute_once(self):
+        import threading
+
+        cache = ask_api.TtlCache(ttl=60, max_entries=8, clock=Clock())
+        started, release = threading.Event(), threading.Event()
+        calls = []
+
+        def compute():
+            calls.append(1)
+            started.set()
+            release.wait(5)
+            return "answer"
+
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(cache.get_or_compute("q", compute))) for _ in range(5)]
+        threads[0].start()
+        started.wait(5)
+        for thread in threads[1:]:
+            thread.start()
+        release.set()
+        for thread in threads:
+            thread.join(5)
+        self.assertEqual((len(calls), results), (1, ["answer"] * 5))
+
+    def test_a_failure_reaches_every_waiter_and_is_not_kept(self):
+        import threading
+
+        cache = ask_api.TtlCache(ttl=60, max_entries=8, clock=Clock())
+        started, release = threading.Event(), threading.Event()
+
+        def fail():
+            started.set()
+            release.wait(5)
+            raise ask_api.ToolRefused("no")
+
+        errors = []
+
+        def ask():
+            try:
+                cache.get_or_compute("q", fail)
+            except ask_api.ToolRefused as error:
+                errors.append(error)
+
+        first = threading.Thread(target=ask)
+        first.start()
+        started.wait(5)
+        second = threading.Thread(target=ask)
+        second.start()
+        release.set()
+        first.join(5)
+        second.join(5)
+        self.assertEqual(len(errors), 2)
+        self.assertEqual(cache.get_or_compute("q", lambda: "fine"), "fine")
+
 
 class RateLimiterTest(unittest.TestCase):
     def test_each_client_gets_its_burst_then_the_steady_rate_and_a_retry_time(self):

@@ -98,7 +98,7 @@ def recover_passive_reaction_queue() -> None:
     job_id = kv().get(_SCHEDULE)
     if job_id is not None:
         job_id = job_id.decode() if isinstance(job_id, bytes) else job_id
-        if kv().zscore("brain:schedule", job_id) is None:
+        if kv().zscore(scheduler.QUEUE, job_id) is None:
             kv().delete(_SCHEDULE)
     if _pending_rows():
         _arm_reaction_queue()
