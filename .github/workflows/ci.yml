@@ -20,6 +20,10 @@ jobs:
         image: falkordb/falkordb-server:v4.22.1@sha256:2e99eb1cfa3309ce338beebe24b5e9f44f9eb8ead6d6ef63dcaca436afbbaeec
         ports:
           - 6379:6379
+        # Same limits as production (deploy/docker-compose.yml); the image defaults cap the
+        # queue at 25 and break the concurrent tests.
+        env:
+          FALKORDB_ARGS: MAX_QUEUED_QUERIES 100 TIMEOUT 10000 RESULTSET_SIZE -1
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
