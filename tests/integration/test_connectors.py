@@ -85,6 +85,8 @@ class FakeConnector(Connector):
         self.fail_next: Exception | None = None
         self.reject = False
         self.retry_after: float | None = None
+        # Set: backfill pages say where polling should resume, and a poll from there finds nothing new.
+        self.poll_from: str | None = None
         self.calls: list[tuple[str, str | None]] = []
 
     def check_credentials(self, install):
@@ -103,10 +105,14 @@ class FakeConnector(Connector):
         if self.fail_next is not None:
             error, self.fail_next = self.fail_next, None
             raise error
+        if cursor and cursor.startswith("poll:"):
+            return Page(next_cursor=cursor)
         issues = self.projects[container.external_id]
         start = int(cursor or 0)
         chunk = issues[start : start + PAGE_SIZE]
         page = Page(next_cursor=str(start + len(chunk)), has_more=start + len(chunk) < len(issues), retry_after=self.retry_after)
+        if self.poll_from is not None:
+            page.poll_cursor = self.poll_from
         for issue in chunk:
             self._emit(install, container, issue, page)
         return page
@@ -403,6 +409,27 @@ class ConnectorFrameworkTest(unittest.TestCase):
         self.assertEqual((state["has_more"], state["capped"], state["cursor"]), (False, True, "2"))
         self.assertGreaterEqual(state["due_at"] - state["last_fetch_at"], FAKE.poll_seconds * 1000)
 
+    def test_at_the_cap_polling_resumes_from_the_poll_cursor(self):
+        FAKE.poll_from = "poll:2026-10-05T10:00:00Z"
+        with mock.patch.object(sync, "MAX_ITEMS_PER_CONTAINER", 2):
+            _drain()
+            state = graph.get_state("fake:default:container:OPS")
+            self.assertEqual((state["cursor"], state["has_more"], state["backfilled"]), ("poll:2026-10-05T10:00:00Z", False, True))
+            self.assertNotIn("poll_cursor", state)
+            FAKE.calls.clear()
+            sync.sync_now("fake")
+            _drain()
+        # The next poll asks for what changed since the backfill's newest, not for older pages.
+        self.assertIn(("OPS", "poll:2026-10-05T10:00:00Z"), FAKE.calls)
+
+    def test_a_container_parked_too_far_out_is_due_now(self):
+        _drain()
+        now = int(time.time() * 1000)
+        graph.set_state("fake:default:container:OPS", INSTALL, due_at=now + 60_000)
+        graph.set_state("fake:default:container:SEC", INSTALL, due_at=now + 10**12)
+        report = sync.sync_step("fake")
+        self.assertEqual((report["status"], report["container"]), ("synced", "fake:default:container:SEC"))
+
     def test_huge_waits_are_clamped_and_a_parked_job_is_re_armed(self):
         FAKE.retry_after = 999_999_999
         report = sync.sync_step("fake")
@@ -438,6 +465,32 @@ class ConnectorFrameworkTest(unittest.TestCase):
         inside = ["org_shared", "org_internal"]
         self.assertIn("Kofi Mensah reaches Lena Fischer in 3 hops: Kofi Mensah → OPS-77", algorithms.path_between("Kofi Mensah", "Lena Fischer", inside).answer)
         self.assertIn("TKT-101 -[BLOCKS]-> OPS-78", [step.cite() for step in algorithms.path_between("TKT-101", "TKT-102", inside).path])
+        # The search over readable nodes is bounded, looks nodes up by label, and says how far it got.
+        queries = []
+        real = type(falkordb_client.connect()[1]).ro_query
+
+        def counting(graph_self, query, params=None, *args, **kwargs):
+            queries.append(query)
+            return real(graph_self, query, params, *args, **kwargs)
+
+        with mock.patch.object(type(falkordb_client.connect()[1]), "ro_query", counting), mock.patch.object(algorithms, "MAX_SEARCHED", 3):
+            capped = algorithms.path_between("Kofi Mensah", "Lena Fischer", public)
+        self.assertEqual(capped.answer, "No path between Kofi Mensah and Lena Fischer within 1 hop in what you can read.")
+        self.assertFalse([query for query in queries if "MATCH (n)-[r]-(m)" in query or "MATCH (a {id" in query])
+
+    def test_an_unconnected_pair_costs_no_search(self):
+        _rows("CREATE (:Service {id: 'island', name: 'Island Service'})")
+        queries = []
+        real = type(falkordb_client.connect()[1]).ro_query
+
+        def counting(graph_self, query, params=None, *args, **kwargs):
+            queries.append(query)
+            return real(graph_self, query, params, *args, **kwargs)
+
+        with mock.patch.object(type(falkordb_client.connect()[1]), "ro_query", counting):
+            result = algorithms.path_between("Kofi Mensah", "Island Service", ["org_shared"])
+        self.assertEqual(result.answer, "No path between Kofi Mensah and Island Service within 6 hops in what you can read.")
+        self.assertFalse([query for query in queries if "-[r]-(m)" in query])
 
     def test_a_container_keeps_at_most_the_cap(self):
         with mock.patch.object(sync, "MAX_ITEMS_PER_CONTAINER", 3):

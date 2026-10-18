@@ -27,6 +27,10 @@ MAX_DEPTH = 6
 MAX_PATH_LENGTH = 6
 # Equal-length routes kept when the readable-only search has to walk them out itself.
 MAX_ROUTES = 50
+# Nodes that search may visit before it gives up and says how far it looked. Public callers
+# reach it, so its cost is bounded whatever the graph holds.
+MAX_SEARCHED = 500
+_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 DEFAULT_LOAD_BEARING = 5
 MAX_LOAD_BEARING = 10
 
@@ -296,13 +300,14 @@ def path_between(source: str, target: str, scopes: list[str]) -> ToolResult:
     if start == end:
         return ToolResult(tool="path_between", answer=f"{start.name} is one node; name two things to find the route between them.")
 
-    rows = _shortest_paths(graph, start, end, KNOWLEDGE_RELS, scopes)
+    rows, searched = _shortest_paths(graph, start, end, KNOWLEDGE_RELS, scopes)
     if not rows:
-        rows = _shortest_paths(graph, start, end, KNOWLEDGE_RELS + TEAM_RELS, scopes)
+        rows, wider = _shortest_paths(graph, start, end, KNOWLEDGE_RELS + TEAM_RELS, scopes)
+        searched = min(searched, wider)
     if not rows:
         return ToolResult(
             tool="path_between",
-            answer=f"No path between {start.name} and {end.name} within {MAX_PATH_LENGTH} hops in what you can read.",
+            answer=f"No path between {start.name} and {end.name} within {searched} hop{'s' if searched != 1 else ''} in what you can read.",
         )
 
     hops_list = [hops for hops, _length in rows]
@@ -345,60 +350,83 @@ def _ends(graph, source: str, target: str, scopes: list[str]):
     return ends[0], ends[1]
 
 
-def _shortest_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: list[str]) -> list[tuple[list, int]]:
+def _node(var: str, entity: Entity) -> str:
+    """``(a:Label {id: $a})``: a labelled match uses the id index. The label is the resolver's, checked anyway."""
+    label = f":{entity.label}" if _LABEL.match(entity.label or "") else ""
+    return f"({var}{label} {{id: ${var}}})"
+
+
+def _shortest_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: list[str]) -> tuple[list[tuple[list, int]], int]:
+    """The shortest routes the asker may read, and how many hops were searched when there are none."""
     rows = graph.ro_query(
         f"""
-        MATCH (a {{id: $a}}), (b {{id: $b}})
+        MATCH {_node("a", start)}, {_node("b", end)}
         CALL algo.SPpaths({{sourceNode: a, targetNode: b, relTypes: $rels, relDirection: 'both', maxLen: {MAX_PATH_LENGTH}, pathCount: 0}})
         YIELD path
-        WHERE {_SCOPED_PATH}
         RETURN [i IN range(0, length(path) - 1) | [
                     nodes(path)[i].id, nodes(path)[i].name, labels(nodes(path)[i])[0],
                     type(relationships(path)[i]),
                     nodes(path)[i + 1].id, nodes(path)[i + 1].name, labels(nodes(path)[i + 1])[0],
                     startNode(relationships(path)[i]) = nodes(path)[i]
                ]] AS hops,
-               length(path)
+               length(path), {_SCOPED_PATH}
         """,
         {"a": start.id, "b": end.id, "rels": rels, "scopes": scopes},
     ).result_set
-    if rows:
+    if not rows:
+        return [], MAX_PATH_LENGTH  # no route at all, readable or not
+    readable = [(hops, length) for hops, length, ok in rows if ok]
+    if readable:
         # Some shortest route is readable, so the readable ones are the shortest the asker can have.
-        return [(hops, length) for hops, length in rows]
-    # SPpaths finds the shortest routes over every node and only then are unreadable ones dropped:
-    # a shortcut through something hidden (a Jira ticket, a private repo) would hide every longer
-    # route the asker may see, and hint that the shortcut exists. Search over readable nodes only.
+        return readable, MAX_PATH_LENGTH
+    # Every shortest route runs through something hidden (a Jira ticket, a private repo). Those
+    # must not hide a longer route the asker may see, nor hint that a shortcut exists.
     return _readable_shortest_paths(graph, start, end, rels, scopes)
 
 
-def _readable_shortest_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: list[str]) -> list[tuple[list, int]]:
+def _readable_shortest_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: list[str]) -> tuple[list[tuple[list, int]], int]:
     """Every shortest route (at most ``MAX_ROUTES``) through nodes the asker may read, by a
-    breadth-first search one hop at a time, in both edge directions, up to ``MAX_PATH_LENGTH``."""
+    breadth-first search one hop at a time, in both edge directions, up to ``MAX_PATH_LENGTH``.
+
+    Each hop looks nodes up by label, so the id indexes are used, and the search stops once it
+    has seen ``MAX_SEARCHED`` nodes. With no route it returns how many hops it covered in full.
+    """
     seen = {start.id: (0, start.name, start.label)}
     parents: dict[str, list[tuple[str, str, bool]]] = {}
     frontier = [start.id]
+    searched = 0
     for depth in range(1, MAX_PATH_LENGTH + 1):
-        rows = graph.ro_query(
-            f"""
-            MATCH (n)-[r]-(m)
-            WHERE n.id IN $frontier AND type(r) IN $rels AND {resolve.SCOPED.format(var="m")}
-            RETURN n.id, type(r), startNode(r) = n, m.id, m.name, labels(m)[0]
-            """,
-            {"frontier": frontier, "rels": rels, "scopes": scopes},
-        ).result_set
+        by_label: dict[str, list[str]] = defaultdict(list)
+        for node_id in frontier:
+            by_label[seen[node_id][2]].append(node_id)
         frontier = []
-        for from_id, rel, forward, to_id, to_name, to_label in rows:
-            if to_id is None:
+        for label, ids in sorted(by_label.items()):
+            if not _LABEL.match(label or ""):
                 continue
-            if to_id not in seen:
-                seen[to_id] = (depth, to_name, to_label)
-                frontier.append(to_id)
-            if seen[to_id][0] == depth and (from_id, rel, forward) not in parents.setdefault(to_id, []):
-                parents[to_id].append((from_id, rel, forward))
+            rows = graph.ro_query(
+                f"""
+                MATCH (n:{label})-[r]-(m)
+                WHERE n.id IN $ids AND type(r) IN $rels AND {resolve.SCOPED.format(var="m")}
+                RETURN n.id, type(r), startNode(r) = n, m.id, m.name, labels(m)[0]
+                """,
+                {"ids": ids, "rels": rels, "scopes": scopes},
+            ).result_set
+            for from_id, rel, forward, to_id, to_name, to_label in rows:
+                if to_id is None:
+                    continue
+                if to_id not in seen:
+                    seen[to_id] = (depth, to_name, to_label)
+                    frontier.append(to_id)
+                if seen[to_id][0] == depth and (from_id, rel, forward) not in parents.setdefault(to_id, []):
+                    parents[to_id].append((from_id, rel, forward))
+        searched = depth
         if end.id in seen or not frontier:
             break
+        if len(seen) > MAX_SEARCHED:
+            log.info("[path_between] readable search stopped at %d nodes, %d hops", len(seen), depth)
+            break
     if end.id not in seen:
-        return []
+        return [], searched if frontier else MAX_PATH_LENGTH
     routes: list[list] = []
 
     def walk(node_id: str, tail: list) -> None:
@@ -415,7 +443,7 @@ def _readable_shortest_paths(graph, start: Entity, end: Entity, rels: list[str],
         [[a, seen[a][1], seen[a][2], rel, b, seen[b][1], seen[b][2], forward] for a, rel, forward, b in route]
         for route in routes
     ]
-    return [(route, len(route)) for route in hops]
+    return [(route, len(route)) for route in hops], MAX_PATH_LENGTH
 
 
 # --- PageRank ------------------------------------------------------------------------------
