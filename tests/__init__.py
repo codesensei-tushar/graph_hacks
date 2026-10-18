@@ -11,6 +11,8 @@ import os
 # time without resetting each other's graph, e.g. TEST_GRAPH_SUFFIX=_a pytest.
 TEST_GRAPH_SUFFIX = os.environ.get("TEST_GRAPH_SUFFIX", "")
 os.environ["FALKORDB_GRAPH"] = f"company_test{TEST_GRAPH_SUFFIX}"
+# The control graph (orgs, workspace routes) gets the same treatment.
+os.environ["BRAIN_CONTROL_GRAPH"] = f"brain_control_test{TEST_GRAPH_SUFFIX}"
 os.environ["SLACK_OWNER_ID"] = "UOWNER"
 os.environ["SLACK_ADMIN_IDS"] = ""
 # Tests never call a real model; LLM-gated code takes its no-model fallback.
