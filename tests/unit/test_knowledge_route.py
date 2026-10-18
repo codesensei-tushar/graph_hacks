@@ -15,7 +15,7 @@ class RouteTest(unittest.TestCase):
             "what breaks if auth goes down, two hops out": ("blast_radius", {"name": "what breaks if auth goes down, two hops out", "depth": 2}),
             "which services are load bearing": ("load_bearing", {"limit": algorithms.DEFAULT_LOAD_BEARING}),
             "how is maya connected to the invoice worker": ("path_between", {"source": "how is maya connected to the invoice worker", "target": ""}),
-            "what have we said about billing": ("related_memories", {"name": "what have we said about billing"}),
+            "what have we said about billing": ("related_memories", {"name": "billing"}),
             "who said the retries were flaky": ("recall", {"query": "who said the retries were flaky"}),
             "why did we cut vector recall": ("decision_trace", {"topic": "why did we cut vector recall"}),
             "is the billing retries decision still the last word": (
@@ -392,6 +392,18 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
         # Named things stay where they were.
         self.assertEqual(ask_service.route("who owns the enterprise accounts")[0], "who_owns")
         self.assertEqual(ask_service.route("list the services in payments"), ("find", {"label": "Service", "team": "payments"}))
+
+    def test_a_bare_key_and_whats_open_in_a_project(self):
+        self.assertEqual(ask_service.route("PAY-999"), ("ticket_status", {"name": "PAY-999"}))
+        self.assertEqual(ask_service.route("PLAT-7?"), ("ticket_status", {"name": "PLAT-7?"}))
+        self.assertNotEqual(ask_service.route("utf-8")[0], "ticket_status")
+        self.assertNotEqual(ask_service.route("PR-45")[0], "ticket_status")
+        self.assertEqual(ask_service.route("what's open in PLAT"), ("find", {"label": "Ticket", "state": "open", "project": "PLAT"}))
+        self.assertEqual(ask_service.route("what is open in the PAY project"), ("find", {"label": "Ticket", "state": "open", "project": "PAY"}))
+        # A word that is not a project key keeps the route it had.
+        for question in ("what's open in billing", "what's open in payments"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("who_knows", {"name": question}))
 
     def test_other_ticket_questions_keep_their_tools(self):
         cases = {

@@ -40,17 +40,20 @@ def containers(graph, scopes: list[str]) -> list[tuple[str, str, str, str]]:
     return [tuple(row) for row in rows]
 
 
-def resolve_container(graph, text: str, scopes: list[str]) -> Entity | None:
-    """The one readable container the text names by its key ("PLAT", any case) or its name ("Payments project")."""
+def resolve_container(graph, text: str, scopes: list[str], by: str = "any") -> Entity | None:
+    """The one readable container the text names by its key ("PLAT", any case) or its full name
+    ("Quillfern Payments"). ``by`` is "key", "name" or "any"."""
     found = containers(graph, scopes)
-    words = set(resolve.tokens(text))
-    by_key = [row for row in found if row[2] and row[2].lower() in words]
-    if len(by_key) == 1:
-        return _entity(by_key[0])
-    rows = [resolve.EntityRow(id=row[0], name=row[1], label="Container") for row in found]
-    resolution = resolve.resolve_rows(text, rows, ("Container",))
-    if resolution.found:
-        return _entity(next(row for row in found if row[0] == resolution.entity.id))
+    if by in ("key", "any"):
+        words = set(resolve.tokens(text))
+        by_key = [row for row in found if row[2] and row[2].lower() in words]
+        if len(by_key) == 1:
+            return _entity(by_key[0])
+    if by in ("name", "any"):
+        rows = [resolve.EntityRow(id=row[0], name=row[1], label="Container") for row in found]
+        resolution = resolve.resolve_rows(text, rows, ("Container",), partial=False)
+        if resolution.found:
+            return _entity(next(row for row in found if row[0] == resolution.entity.id))
     return None
 
 

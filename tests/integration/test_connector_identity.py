@@ -143,7 +143,8 @@ class ConnectorIdentityTest(unittest.TestCase):
                     result, _choice = agent.run_choice(choice, question, SLACK)
                     self.assertEqual(result.tool, tool)
                     self.assertTrue(result.found, result.answer)
-                    self.assertIn("Arjun Mehta", result.answer)
+                    # Told to the asker: "You're ...", "If you leave, ...", their own tickets.
+                    self.assertTrue(result.answer.startswith(("You're the Billing engineer", "If you leave,", "No open tickets worked on by or assigned to Arjun Mehta")), result.answer)
             # Someone else named in the question stays the subject.
             choice = agent_turn.for_the_asker(agent.choose_with_keywords("what if Lena leaves, should I worry"), "what if Lena leaves, should I worry", request)
             self.assertIn("Lena", choice.args["name"])
@@ -157,7 +158,7 @@ class ConnectorIdentityTest(unittest.TestCase):
             self.assertEqual(choice.args["name"], "person:p-dup")
             result, _choice = agent.run_choice(choice, "what if I leave", SLACK)
             # The namesake asking holds nothing; the seeded Arjun's billing is not theirs.
-            self.assertEqual(result.answer, "Arjun Mehta is in the graph, and nothing is linked to them yet.")
+            self.assertEqual(result.answer, "Nothing is linked to you yet.")
         finally:
             g.query("MATCH (n) WHERE n.id IN ['p-dup', 'UDUP'] DETACH DELETE n")
 

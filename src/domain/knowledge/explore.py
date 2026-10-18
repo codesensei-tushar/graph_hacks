@@ -206,12 +206,15 @@ def resolve_node(graph, text: str, scopes: list[str]) -> Resolution:
             return team
     from src.domain.knowledge import coverage  # coverage reads the connectors' cap; imported when needed
 
+    # A synced project by its full name ("what is Quillfern Payments") before a word of it that is
+    # another thing's alias ("payments"); by its key ("explore PLAT") before part of another name.
+    named = coverage.resolve_container(graph, text, scopes, by="name")
+    if named is not None:
+        return Resolution(query=text, entity=named)
     exact = resolve.resolve_name(text, EXPLORABLE, scopes, graph=graph, partial=False)
     if exact.found:
         return exact
-    # A synced project by its key or name ("explore PLAT"): what it holds, before part of another name
-    # ("plat" is the start of Platform) is taken for it.
-    project = coverage.resolve_container(graph, text, scopes)
+    project = coverage.resolve_container(graph, text, scopes, by="key")
     if project is not None:
         return Resolution(query=text, entity=project)
     return resolve.resolve_name(text, EXPLORABLE, scopes, graph=graph)

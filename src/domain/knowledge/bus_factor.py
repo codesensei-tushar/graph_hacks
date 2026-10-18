@@ -50,6 +50,28 @@ class AtRisk:
 
 
 def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
+    """``_if_person_leaves``, told as "you" when the Slack turn named the asker ("what if I leave")."""
+    result = _if_person_leaves(question, scopes)
+    if (question or "").startswith(people.PERSON_REF) and result.found:
+        _, graph = connect()
+        asker = people.resolve_person(question, scopes, graph).entity
+        if asker is not None:
+            result.answer = in_second_person(result.answer, asker.name)
+    return result
+
+
+def in_second_person(answer: str, name: str) -> str:
+    """"If Arjun Mehta leaves, ..." told to Arjun: "If you leave, ..."."""
+    for theirs, yours in (
+        (f"If {name} leaves, ", "If you leave, "), (f"only {name} ", "only you "), (f"{name} is its only owner", "you are its only owner"),
+        (f"{name} is the only one", "you are the only one"), (f"{name} is in the graph, and nothing is linked to them yet.", "Nothing is linked to you yet."),
+        ("on them alone", "on you alone"), ("everything they own", "everything you own"),
+    ):
+        answer = answer.replace(theirs, yours)
+    return answer
+
+
+def _if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
     """What only this person owns, knows, decided, or is working on, the furthest-reaching first."""
     _, graph = connect()
     resolution = people.resolve_person(question, scopes, graph)

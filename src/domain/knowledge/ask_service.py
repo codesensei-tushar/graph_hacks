@@ -176,6 +176,11 @@ _SHOULD_KNOW = re.compile(
 )
 _TICKET_ID = re.compile(r"\b(?!pr-\d)[a-z]{2,}-\d+\b", re.IGNORECASE)
 _TKT_ID = re.compile(r"^TKT-(\d+)$")
+# A ticket key and nothing else, written as a tracker writes it: "PAY-999", "PLAT-7?".
+_BARE_KEY = re.compile(r"^\s*(?!PR-\d)[A-Z][A-Z0-9]{1,9}-\d+\s*[?.!]*\s*$")
+# "what's open in PLAT", "what is open in the PAY project".
+# The project is its key as the tracker writes it (uppercase): "what's open in billing" is not a project.
+_OPEN_IN = re.compile(r"^\s*[Ww]hat(?:'s|s| is) (?:still )?open in (?:the )?(?:[Jj]ira )?(?:project )?([A-Z][A-Z0-9]{1,9})(?: project)?\s*[?.!]*\s*$")
 # Someone to go to: "who should we ping about the auth outage" wants the people who know Auth,
 # not what breaks, so it is routed before blast radius, which shares "outage". Pinging about a
 # pull request ("who should I ping about notebook#45") is about a change.
@@ -262,6 +267,12 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     text = question.strip()
     if not text:
         return "none", {}
+    if tickets and _BARE_KEY.match(text):
+        # "PAY-999" on its own: the ticket, or what is synced of its project.
+        return "ticket_status", {"name": text}
+    if open_in := _OPEN_IN.match(text):
+        # "what's open in PLAT": the open tickets of a synced project.
+        return "find", {"label": "Ticket", "state": "open", "project": open_in.group(1)}
     first, rest = split_compound(text)
     if rest:
         # "who owns billing and what breaks if auth goes down": the first question; the agent answers the second after it.
@@ -339,8 +350,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
-    if _RELATED_MEMORIES.search(text):
-        return "related_memories", {"name": text}
+    if (said := _RELATED_MEMORIES.search(text)) is not None:
+        # "what have we said about the refund batch": the thing after the phrase, not "have" or "we".
+        named = text[said.end() :].strip(" ?.!")
+        return "related_memories", {"name": named or text}
     if _RECALL.search(text):
         return "recall", {"query": text}
     about_a_change = _SHOULD_KNOW.search(text) or (_ASK_WHO.search(text) and coordination.pr_reference(text))
@@ -433,6 +446,8 @@ def ingest_ticket(title: str, about: str, scope: str) -> TicketCreated:
 
 def who_owns(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
+    if (project := _project_named(graph, question, scopes)) is not None:
+        return project
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found:
         return fallback.before_refusing(question, scopes, _miss("who_owns", resolution))
@@ -518,6 +533,8 @@ def who_knows(question: str, scopes: list[str], context: str | None = None) -> T
     """``context``, when given, is the whole question ``question`` was cut from ("I am new on payments,
     who should I talk to about X"): resolved instead when the cut names nothing."""
     _, graph = connect()
+    if (project := _project_named(graph, question, scopes)) is not None:
+        return project
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found and context and (whole := resolve.resolve_name(context, ANSWER_LABELS, scopes, graph=graph)).found:
         question, resolution = context, whole
@@ -833,6 +850,13 @@ def _search(text: str, scopes: list[str]) -> ToolResult:
     from src.domain.knowledge import search
 
     return search.search(text, scopes)
+
+
+def _project_named(graph, question: str, scopes: list[str]) -> ToolResult | None:
+    """A synced project named in full ("what is Quillfern Payments"): what it holds, before a word of its
+    name that is another thing's alias ("payments") is taken for the question's subject. None otherwise."""
+    project = coverage.resolve_container(graph, question, scopes, by="name")
+    return _explore().explore_node(graph, project, scopes, 1) if project is not None else None
 
 
 def _miss(tool: str, resolution: Resolution, kind: str = "service, document, or ticket") -> ToolResult:
