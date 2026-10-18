@@ -28,6 +28,8 @@ touch a seeded or team-imported node. Additive changes only from here on.
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from src.core.tenancy import LEGACY_ORG_ID
+
 ORG_INTERNAL = "org_internal"
 
 # Labels an item may take. A Jira issue is a Ticket; a CRM company is a Service with kind 'account'.
@@ -82,6 +84,11 @@ class Install:
     source: str
     id: str = "default"
     config: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False, hash=False)
+    # The org the install belongs to; its records go to that org's graph. Env installs are the
+    # legacy org's. ``key`` leaves it out: ids are per graph, and each org has its own graph.
+    org: str = LEGACY_ORG_ID
+    # 'env' (CONNECTOR_* variables), 'token' or 'oauth' (a ConnectorInstall node, src/connectors/store.py).
+    auth: str = "env"
 
     @property
     def key(self) -> str:
@@ -127,6 +134,35 @@ class Container:
     # False: the container and its items are org_internal. True: their scope is the container's own,
     # and only people whose linked account ``readers()`` returns may read it, in a DM.
     restricted: bool = False
+
+
+@dataclass(frozen=True)
+class AvailableContainer:
+    """A container the install could sync, offered for selection in the console. ``key`` is what the
+    connector's ``container_field`` stores (a Jira project key); ``external_id`` is ``Container.external_id``."""
+
+    external_id: str
+    key: str
+    name: str
+
+
+@dataclass(frozen=True)
+class OAuthSpec:
+    """How a source's OAuth app is reached (src/connectors/oauth.py drives it).
+
+    The client id and secret are read from the settings named here (``JIRA_OAUTH_CLIENT_ID``), never
+    from ``CONNECTOR_*``. The callback is ``<PUBLIC_URL>/console/oauth/<source>/callback``.
+    """
+
+    authorize_url: str
+    token_url: str
+    scopes: tuple[str, ...]
+    client_id_setting: str
+    client_secret_setting: str
+    # Extra query parameters for the authorize URL (Atlassian: audience, prompt).
+    extra_params: Mapping[str, str] = field(default_factory=dict, compare=False, hash=False)
+    # Whether the token response carries a refresh token that rotates on use.
+    rotating_refresh: bool = False
 
 
 @dataclass(frozen=True)
@@ -238,6 +274,14 @@ class Connector:
     required: tuple[str, ...] = ()
     # True when the source can push deliveries to POST /connectors/<source>/webhook.
     accepts_webhooks: bool = False
+    # The console's OAuth flow for this source, or None when it is connected by env or token only.
+    oauth: OAuthSpec | None = None
+    # Install fields that are credentials. A stored install keeps them encrypted (``secret_enc``),
+    # the rest in ``config_json``; env installs read both from CONNECTOR_*.
+    secret_fields: tuple[str, ...] = ()
+    # The install field that holds the selected containers, comma-separated keys (Jira: "projects").
+    # Empty: the connector picks its own containers and the console offers no selection.
+    container_field: str = ""
 
     def check_credentials(self, install: Install) -> InstallInfo:
         """One cheap call that proves the credentials work (Jira: /myself)."""
@@ -246,6 +290,11 @@ class Connector:
     def containers(self, install: Install) -> list[Container]:
         """The containers to sync now. One that disappears from this list is removed with its items."""
         raise NotImplementedError
+
+    def available_containers(self, install: Install) -> list[AvailableContainer]:
+        """Every container the credentials can see, for the console to select from. Defaults to
+        ``containers()``, for a source whose containers are not chosen."""
+        return [AvailableContainer(external_id=c.external_id, key=c.external_id, name=c.name) for c in self.containers(install)]
 
     def fetch(self, install: Install, container: Container, cursor: str | None) -> Page:
         """One page of items changed since ``cursor`` (None: the backfill). Newest first on a backfill,
