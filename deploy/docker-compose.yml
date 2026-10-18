@@ -2,7 +2,8 @@
 # /opt/brain/.env (IMAGE_TAG and the secrets, root-only) next to it.
 #
 # Only nginx publishes ports. FalkorDB (6379) and the browser (3000) are reachable on the
-# internal Docker network only; the browser goes out through nginx at gdb.noobsurd.space.
+# internal Docker network only; the browser goes out through nginx at falkordb.noobsurd.space
+# (gdb.noobsurd.space until the certificate covers the new name; BROWSER_HOST in .env says which).
 name: brain
 
 services:
@@ -80,8 +81,8 @@ services:
     image: falkordb/falkordb-browser:v2.7.0@sha256:07852f547dad7d33d5008ea9de28ba92d476c764a199650876efe313c07ea942
     restart: unless-stopped
     environment:
-      NEXTAUTH_URL: https://gdb.noobsurd.space
-      AUTH_URL: https://gdb.noobsurd.space
+      NEXTAUTH_URL: https://${BROWSER_HOST:-gdb.noobsurd.space}
+      AUTH_URL: https://${BROWSER_HOST:-gdb.noobsurd.space}
       # Fixed secret so sessions survive container restarts (the image would otherwise mint one per container).
       AUTH_SECRET: ${NEXTAUTH_SECRET:?}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?}
