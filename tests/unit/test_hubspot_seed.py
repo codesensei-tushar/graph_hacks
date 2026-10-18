@@ -46,7 +46,13 @@ class SeedTest(unittest.TestCase):
         counts, lines = _run(account, apply=False)
         self.assertEqual((counts["companies"], counts["deals"]), (20, 26))
         self.assertEqual({method for method, _ in account.calls}, {"GET"})
-        self.assertIn("owner  Dev Patel: HubSpot user 102 has dev@quillfern.example.com; their accounts will link to Dev Patel", lines)
+        # Three books of business over four users, in turn by id.
+        self.assertEqual(lines[:3], [
+            "owner  renewals: HubSpot user 101, Priya Shah <priya@quillfern.example.com>",
+            "owner  new business: HubSpot user 102, Dev Patel <dev@quillfern.example.com>",
+            "owner  operations: HubSpot user 103, Noor Haddad <noor@quillfern.example.com>",
+        ])
+        self.assertIn("create company Larkspur Freightways [customer] larkspur-freightways.example owner=Priya Shah (user 101, renewals)", lines)
         self.assertEqual(lines[-1], "would create 20 companies and 26 deals; 0 already there; 0 skipped")
 
     def test_apply_creates_marked_records_once(self):
@@ -61,9 +67,9 @@ class SeedTest(unittest.TestCase):
             self.assertNotIn("amount", record["properties"])
         self.assertTrue(all(company["properties"]["domain"].endswith(".example") for company in companies))
         larkspur = next(company for company in companies if company["properties"]["name"] == "Larkspur Freightways")
-        self.assertEqual(larkspur["properties"]["hubspot_owner_id"], "102")
+        self.assertEqual(larkspur["properties"]["hubspot_owner_id"], "101")
         upgrade = next(deal for deal in deals if deal["properties"]["dealname"] == "Larkspur Freightways: Fleet tier upgrade")
-        self.assertEqual((upgrade["properties"]["hubspot_owner_id"], upgrade["properties"]["dealstage"]), ("101", "contractsent"))
+        self.assertEqual((upgrade["properties"]["hubspot_owner_id"], upgrade["properties"]["dealstage"]), ("102", "contractsent"))
         self.assertEqual(upgrade["associations"][0]["to"], {"id": larkspur["id"]})
 
         counts, lines = _run(account, apply=True)
@@ -78,11 +84,16 @@ class SeedTest(unittest.TestCase):
         self.assertEqual(account.records["companies"][0], STRANGER)
         self.assertFalse([deal for deal in account.records["deals"] if deal["properties"]["dealname"].startswith("Tidewhistle")])
 
-    def test_without_the_team_emails_the_accounts_go_to_the_accounts_own_users(self):
-        account = FakeAccount(owners=[{"id": "7", "email": "founder@startup.example.org", "firstName": "Ada", "lastName": "Lane", "type": "PERSON"}])
-        _, lines = _run(account, apply=False)
-        self.assertIn("owner  Dev Patel: no HubSpot user has dev@quillfern.example.com; their accounts go to user 7 (Ada Lane), who will not link to Dev Patel", lines)
-        self.assertIn("create company Larkspur Freightways [customer] larkspur-freightways.example owner=Dev Patel (HubSpot user 7)", lines)
+    def test_one_user_owns_every_book_and_no_user_leaves_them_ownerless(self):
+        account = FakeAccount(owners=[{"id": "7", "email": "Founder@Startup.example.org", "firstName": "Ada", "lastName": "Lane", "type": "PERSON"}])
+        _, lines = _run(account, apply=True)
+        self.assertEqual(lines[:3], [f"owner  {book}: HubSpot user 7, Ada Lane <founder@startup.example.org>" for book in seed_hubspot.BOOKS])
+        self.assertEqual({record["properties"]["hubspot_owner_id"] for record in account.records["companies"] + account.records["deals"]}, {"7"})
+
+        nobody = FakeAccount(owners=[])
+        _, lines = _run(nobody, apply=True)
+        self.assertEqual(lines[0], "owner  renewals: no active user; no owner")
+        self.assertFalse([record for record in nobody.records["companies"] if "hubspot_owner_id" in record["properties"]])
 
 
 if __name__ == "__main__":

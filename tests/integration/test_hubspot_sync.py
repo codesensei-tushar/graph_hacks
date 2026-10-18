@@ -150,6 +150,14 @@ class HubSpotSyncTest(unittest.TestCase):
         self.assertEqual(_ask("who owns Larkspur Freightways").answer, "The Larkspur Freightways account is owned by Priya Shah.")
         self.assertEqual(_rows("MATCH (:Person {id: 'dev'})-[r]->(:Service {name: 'Larkspur Freightways'}) RETURN type(r)"), [["WORKED_ON"]])
 
+    def test_an_admin_mapping_links_an_owner_whose_login_is_another_email(self):
+        # Riley's HubSpot login is a partner address; the admin says Riley is Noor in the brain.
+        registry.configure(Install("hubspot", config={"token": "pat-fake-never-shown", "people": "104=Noor@Quillfern.example.com"}))
+        sync.sync_now("hubspot", full=True)
+        self._drain()
+        self.assertEqual(_rows("MATCH (:ExternalUser {external_id: '104'})-[:IS]->(p:Person) RETURN p.id"), [["noor"]])
+        self.assertEqual(_ask("who owns Bramblecote Analytics").answer, "The Bramblecote Analytics account is owned by Noor Haddad.")
+
     def test_a_second_full_sync_changes_nothing(self):
         def counts():
             return _rows("MATCH (n) WHERE n.source = 'hubspot' OR n.install = 'hubspot:default' RETURN count(n)")[0][0], _rows("MATCH ()-[r {install: 'hubspot:default'}]->() RETURN count(r)")[0][0]

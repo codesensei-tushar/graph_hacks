@@ -67,6 +67,7 @@ so they never see an account, an owner or a stage from HubSpot.
    | Variable | |
    | --- | --- |
    | `CONNECTOR_HUBSPOT_TOKEN` | required; the install exists once it is set |
+   | `CONNECTOR_HUBSPOT_PEOPLE` | optional: `ownerId=email` pairs, comma-separated, for owners whose HubSpot login is not their work email (see Identity) |
    | `CONNECTOR_HUBSPOT_API_VERSION` | optional: `2026-09` (the default, HubSpot's dated paths such as `/crm/objects/2026-09/companies`), or `v3` for the numbered paths |
    | `CONNECTOR_HUBSPOT_INSTALL_ID` | optional; `default` |
 
@@ -89,23 +90,36 @@ One code path, HubSpot's CRM search sorted on `hs_lastmodifieddate`, 100 compani
 
 The owners list and the deal stage labels are read once every ten minutes.
 
-**Not yet:** webhooks (polling only), and a company deleted or merged in HubSpot stays in the
-graph until a later version notices deletions.
+**Not yet:** webhooks (polling only). A company deleted or merged in HubSpot, or one that stops
+being an account (no longer a customer, and its deals deleted), stays in the graph as it was
+last synced until a later version notices removals.
 
 ## Identity
 
-An owner becomes a Person's account only when their HubSpot login email is the email of exactly
-one Person in the graph. Quillfern's Sales team file gives Priya, Dev and Noor
-`@quillfern.example.com` emails, so for the demo the HubSpot users who own the accounts must
-have those emails, or an owner stays an account of their own: `who_knows` names them under
-their HubSpot name, while `who_owns` and the team pages only count Persons. In a real team, the
-team file (or Slack) and HubSpot use the same work emails and this takes care of itself.
+An owner becomes a Person's account only when their email is the email of exactly one Person
+in the graph; the connector never creates a Person. Until then the owner is an account of its
+own: `who_knows` names them under their HubSpot name, while `who_owns` and the team pages only
+count Persons. Once a Person with that email arrives (a team file, `onboard team:` or Slack),
+the next sync links them and their `OWNS` and `WORKED_ON` edges move onto the Person. The same
+people then cover Jira and HubSpot alike.
+
+When a HubSpot login is not the email the brain knows someone by, an admin says so:
+
+```sh
+CONNECTOR_HUBSPOT_PEOPLE=81538190=priya@acme.com,60158084=dev@acme.com
+```
+
+Each pair is a HubSpot owner id (Settings, Users; or the owners API's `id`, not `userId`) and
+the email to link that owner by. It replaces the login email for linking only, and still links
+only when exactly one Person has the email. A pair that is not a numeric id and an email is
+ignored.
 
 ## Demo data
 
 `scripts/seed_hubspot.py` creates 20 invented companies and 26 deals in the HubSpot account the
-token belongs to: Dev's renewals, Priya's new business, Noor's paperwork, two customers who left
-and two companies whose only deals were lost. No contacts and no amounts.
+token belongs to, in three books of business: renewals (ten customers, two of whom left), new
+business (seven, one whose only deal was lost) and operations (three). No contacts and no
+amounts.
 
 ```sh
 set -a; . ~/.config/company-brain/connectors.env; set +a
@@ -116,12 +130,12 @@ set -a; . ~/.config/company-brain/connectors.env; set +a
 It only ever creates, never updates or deletes, and touches only what it made: each company's
 domain ends in `.example` (reserved, so no real company has one), and every company and deal
 has a description that starts with `[company-brain-seed]`. A domain already in the account
-without that marker is skipped with its deals, and a second run creates nothing. Each account
-goes to the HubSpot user whose email is its account manager's in the team file; the dry run
-says which, and which accounts will not link because no user has that email.
+without that marker is skipped with its deals, and a second run creates nothing. The books go
+to the account's active users in turn, by owner id (with one user, that user owns all three);
+the dry run prints who gets which.
 
-Then, in Slack:
+Then, in Slack, once the owners are people in the brain:
 
-- `who knows Larkspur Freightways`: Dev owns it and won the renewal; Priya is on the upgrade.
-- `who owns Saltwick Outfitters`: Dev, for a customer who left.
-- `what if Dev Patel leaves`: the accounts only he owns, with Priya next in line where she has a deal.
+- `who knows Larkspur Freightways`: who owns it and won the renewal, and who is on the upgrade.
+- `who owns Saltwick Outfitters`: the owner of a customer who left.
+- `what if <the renewals owner> leaves`: the accounts only they own, with the next in line where someone else has a deal.

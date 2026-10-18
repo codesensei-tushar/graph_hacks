@@ -101,6 +101,14 @@ class EdgesAndUsersTest(unittest.TestCase):
         # A user with no name reads as their email.
         self.assertEqual(mapping.owner_user(INSTALL, owners["105"]).name, "sam@quillfern.example.com")
 
+    def test_an_admin_can_say_which_email_an_owner_goes_by(self):
+        pairs = ["104=Riley.Chen@Quillfern.example.com", " 101 = priya@quillfern.example.com ", "nobody=x@y.example", "105", "106=not-an-email"]
+        emails = mapping.people(pairs)
+        self.assertEqual(emails, {"104": "riley.chen@quillfern.example.com", "101": "priya@quillfern.example.com"})
+        riley = next(owner for owner in load("owners_page2.json")["results"] if owner["id"] == "104")
+        self.assertEqual(mapping.owner_user(INSTALL, riley, emails.get("104")).email, "riley.chen@quillfern.example.com")
+        self.assertEqual(mapping.owner_user(INSTALL, riley, emails.get("999")).email, "riley@partner.example.org")
+
     def test_only_active_owners_hold_an_edge(self):
         edges = mapping.company_edges(INSTALL, COMPANIES["9003"], [DEALS["7005"]], STAGES, active={"101", "102", "103", "104"})
         # Saltwick's lost renewal belongs to a user who has since been deactivated.

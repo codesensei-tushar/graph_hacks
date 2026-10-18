@@ -94,9 +94,22 @@ def deal_counts(deal: dict, now: float, window_days: int = DEAL_WINDOW_DAYS) -> 
     return any((when := parse_time(props.get(name))) is not None and when >= cutoff for name in ("createdate", "closedate"))
 
 
-def owner_user(install: Install, owner: dict) -> ExternalUser:
+def people(pairs: list[str]) -> dict[str, str]:
+    """``CONNECTOR_HUBSPOT_PEOPLE``: ``ownerId=email`` pairs an admin asserts, for owners whose HubSpot
+    login is not the email the graph knows them by. A pair that is not a numeric id and an email is skipped."""
+    found: dict[str, str] = {}
+    for pair in pairs:
+        owner_id, _, email = pair.partition("=")
+        owner_id, email = owner_id.strip(), email.strip().lower()
+        if owner_id.isdigit() and "@" in email:
+            found[owner_id] = email
+    return found
+
+
+def owner_user(install: Install, owner: dict, email: str | None = None) -> ExternalUser:
+    """``email``, when given, is the admin's (``people``) and replaces the HubSpot login for linking."""
     owner_id = str(owner["id"])
-    email = (owner.get("email") or "").strip().lower()
+    email = (email or owner.get("email") or "").strip().lower()
     name = " ".join(part for part in ((owner.get("firstName") or "").strip(), (owner.get("lastName") or "").strip()) if part)
     return ExternalUser(id=install.user_id(owner_id), source=install.source, external_id=owner_id, name=name or email or f"HubSpot owner {owner_id}", email=email)
 

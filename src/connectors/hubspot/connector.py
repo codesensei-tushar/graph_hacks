@@ -127,7 +127,8 @@ class HubSpotConnector(Connector):
             page.items.append(mapping.company_item(install, container.id, company, portal, ui_domain))
             deals = [counted[deal] for deal in linked.get(str(company["id"]), []) if deal in counted]
             page.edges.extend(mapping.company_edges(install, company, deals, stages, active=owners))
-        page.users = [mapping.owner_user(install, owners[owner]) for owner in mapping.owner_ids(companies, list(counted.values())) if owner in owners]
+        emails = mapping.people(install.get_list("people"))
+        page.users = [mapping.owner_user(install, owners[owner], emails.get(owner)) for owner in mapping.owner_ids(companies, list(counted.values())) if owner in owners]
         return page
 
     # --- what is reused between pages --------------------------------------------------------

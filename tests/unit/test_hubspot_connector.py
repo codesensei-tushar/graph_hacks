@@ -117,6 +117,12 @@ class BackfillTest(unittest.TestCase):
         self.assertEqual(([item.external_id for item in capped.items], capped.has_more), (["company:9003"], False))
         self.assertEqual(_cursor(capped), {"mode": "poll", "phase": "companies", "since": SERVER_MS - hubspot.OVERLAP_MS})
 
+    def test_the_people_setting_gives_an_owner_the_email_the_admin_names(self):
+        install = Install("hubspot", config={"token": "pat-test", "people": "104=noor@quillfern.example.com,bad"})
+        page = self.connector.fetch(install, self.container, None)
+        self.assertEqual({user.external_id: user.email for user in page.users}["104"], "noor@quillfern.example.com")
+        self.assertEqual({user.external_id: user.email for user in page.users}["102"], "dev@quillfern.example.com")
+
     def test_an_unreadable_cursor_starts_over(self):
         self.assertEqual(len(self.connector.fetch(INSTALL, self.container, "not json").items), 5)
 
