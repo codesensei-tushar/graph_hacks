@@ -95,7 +95,7 @@ class WiringTest(unittest.TestCase):
         self.assertIn("await page.ask(question)", self.tour_js)
 
     def test_the_button_waits_for_the_script_and_the_page_loads_it_after_app_js(self):
-        self.assertIn('<button type="button" class="link-btn tour-start" id="tour-start" hidden>60-second tour</button>', self.index)
+        self.assertIn('<div class="hero-foot">\n      <button type="button" class="btn btn-ghost tour-start" id="tour-start" hidden>Take the 60-second tour</button>', self.index)
         self.assertIn(".tour-start[hidden] { display: none; }", (STATIC / "tour.css").read_text())
         scripts = re.findall(r'<script src="/static/([a-z]+\.js)\?v=\d+"></script>', self.index)
         self.assertEqual(scripts[-2:], ["app.js", "tour.js"])

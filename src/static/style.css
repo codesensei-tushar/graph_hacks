@@ -278,15 +278,12 @@ code { font-variant-ligatures: none; }
 .chips { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
 /* Room for three rows of example chips before they arrive, so nothing below them moves. */
 #chips { min-height: 118px; }
-/* Two chips and "More" fill one row of the 760 px block, and the tour link sits under them: 76 px
-   under the composer, as the hero's padding expects. The reserved height keeps the block from moving
-   as the chips arrive. */
+/* Two chips and "More" fill one row of the 760 px block, with room under them: 76 px under the
+   composer, as the hero's padding expects. The reserved height keeps the block from moving as the
+   chips arrive. The tour button sits at the hero's foot (tour.css). */
 .hero .chips { justify-content: flex-start; margin-top: 12px; }
 .hero #chips { min-height: 32px; }
-/* The guided tour (tour.js unhides it): a quiet link under the chips. */
-.hero .tour-start { margin-top: 10px; color: var(--ink-2); font-size: var(--fs-sm); }
-.hero .tour-start::before { content: "▶"; content: "▶" / ""; display: inline-block; margin-right: 0.5em; font-size: 0.75em; vertical-align: 0.1em; text-decoration: none; }
-.hero .tour-start:hover { color: var(--ink); }
+.hero .ask-area { padding-bottom: 34px; }
 /* Quiet pills under the composer: a hairline, no fill; "N more" is a plain underlined link. */
 .chip {
   display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border-radius: 999px; cursor: pointer;
