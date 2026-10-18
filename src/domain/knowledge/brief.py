@@ -14,7 +14,7 @@ edges that rank each person named.
 """
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import ask_service, kinds, resolve, team_page
+from src.domain.knowledge import ask_service, fallback, kinds, resolve, team_page
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import Entity, join_names
 
@@ -31,7 +31,8 @@ def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = resolve.resolve_name(question, ("Team",), scopes, graph=graph)
     if not resolution.found:
-        return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "team"), found=False, candidates=resolution.candidate_names())
+        miss = ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "team"), found=False, candidates=resolution.candidate_names())
+        return fallback.before_refusing(question, scopes, miss)
     page = team_page.team_page(resolution.entity.id, scopes)
     result = ToolResult(tool=TOOL, answer="", candidates=resolution.candidate_names())
     result.extend(page.path)

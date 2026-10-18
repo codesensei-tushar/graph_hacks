@@ -95,6 +95,9 @@ QUESTIONS = [
         ],
     ),
     ("read 5", "what should I know about billing", "who_knows", None),
+    # search: words that name no node. "who knows about refunds" may go to who_knows, which falls back to search.
+    ("search 1", "search for webhooks", "search", None),
+    ("search 2", "anything about pdf layout", "search", None),
 ]
 
 

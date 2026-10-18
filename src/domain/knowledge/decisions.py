@@ -30,9 +30,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import catalogue, resolve
+from src.domain.knowledge import catalogue, fallback, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
 from src.domain.knowledge.resolve import Entity, join_names
+
+_WHY = re.compile(r"\bwhy\b", re.IGNORECASE)
 
 ORG_SHARED = "org_shared"
 SCOPED = "coalesce({var}.scope, 'org_shared') IN $scopes"
@@ -327,12 +329,14 @@ def decision_trace(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = _named_decision(graph, question, scopes)
     if not resolution.found:
-        return ToolResult(
+        miss = ToolResult(
             tool="decision_trace",
             answer=resolve.describe_miss(resolution, "decision"),
             found=False,
             candidates=resolution.candidate_names(),
         )
+        # "what has maya decided" can still be answered; "why did we pick kafka" asks for a reason the graph lacks.
+        return miss if _WHY.search(question) else fallback.before_refusing(question, scopes, miss)
     named = resolution.entity
     current = current_decision(graph, named.id, scopes) or _decision(graph, named.id)
     result = ToolResult(tool="decision_trace", answer="", candidates=resolution.candidate_names())

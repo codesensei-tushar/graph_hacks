@@ -53,6 +53,7 @@ EXAMPLES: dict[str, list[str]] = {
         "what have we said about billing",
         "what are our riskiest services",
         "what should I read before touching the invoice worker",
+        "who knows about refunds",
         "who knows the payments gateway",
     ],
     "company-brain": [
@@ -89,7 +90,7 @@ DEMO: dict[str, list[dict[str, str]]] = {
         {"prompt": "who owns the linear integration", "expect": "Not in the graph. The answer says so and names the nearest matches. It never guesses."},
     ],
 }
-_QUESTION_KEYS = ("name", "topic", "query", "source")
+_QUESTION_KEYS = ("name", "topic", "query", "text", "source")
 
 # The Slack commands that write the graph. Typed here, they get the read that answers the
 # same need, and a notice that the write itself happens in Slack behind an Approve card.

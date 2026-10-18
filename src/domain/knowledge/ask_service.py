@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, coordination, kinds, memories, resolve
+from src.domain.knowledge import algorithms, bridges, coordination, fallback, kinds, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -96,6 +96,12 @@ _TICKET_ID = re.compile(r"\b(?!pr-\d)[a-z]{2,}-\d+\b", re.IGNORECASE)
 _ASK_WHO = re.compile(r"\bwho should (?:i|we) (?:ping|ask|talk to)\b", re.IGNORECASE)
 # People between teams. "how is maya connected to the invoice worker" is a path question.
 _CONNECTORS = re.compile(r"\bwho (?:connects|bridges|links)\b|\b(?:bridges?|connectors?|go-betweens?) between\b", re.IGNORECASE)
+# Words to look for, not a thing to resolve: "search for webhooks", "look up refunds", "anything about
+# PDF layout", "mentions of TKT-102". "search-service" and "search brain" name things and stay where they were.
+_SEARCH = re.compile(
+    r"^\s*(?:search(?: the graph| everything)? for|look ?up)\b|\banything (?:about|on|mentioning)\b|\bmentions? of\b",
+    re.IGNORECASE,
+)
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:
 # reading_list strips it from the question before resolving the name.
 READING_LIST = re.compile(
@@ -131,6 +137,9 @@ def route(question: str) -> tuple[str, dict]:
         return "path_between", {"source": text, "target": ""}
     if READING_LIST.search(text):
         return "reading_list", {"name": text}
+    if _SEARCH.search(text):
+        # Before decisions and memories: "search for decisions about refunds" wants every hit, not one decision.
+        return "search", {"text": text}
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
@@ -199,7 +208,7 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found:
-        return _miss("who_owns", resolution)
+        return fallback.before_refusing(question, scopes, _miss("who_owns", resolution))
     target = resolution.entity
 
     result = ToolResult(tool="who_owns", answer="", candidates=resolution.candidate_names())
@@ -267,7 +276,8 @@ def who_knows(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found:
-        return _miss("who_knows", resolution)
+        # "who knows about refunds" names a topic, not a thing: the graph may still answer.
+        return fallback.before_refusing(question, scopes, _miss("who_knows", resolution))
     result = knowers(graph, resolution.entity, scopes)
     result.candidates = resolution.candidate_names()
     return result
@@ -495,7 +505,15 @@ _ROUTED = {
     "load_bearing": lambda args, scopes: algorithms.load_bearing(args.get("limit")),
     "related_memories": lambda args, scopes: memories.related_memories(args["name"], scopes, args.get("k")),
     "recall": lambda args, scopes: memories.recall(args["query"], scopes, args.get("k")),
+    "search": lambda args, scopes: _search(args["text"], scopes),
 }
+
+
+def _search(text: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``search.py``, which reads decisions (and so the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import search
+
+    return search.search(text, scopes)
 
 
 def _miss(tool: str, resolution: Resolution, kind: str = "service, document, or ticket") -> ToolResult:
