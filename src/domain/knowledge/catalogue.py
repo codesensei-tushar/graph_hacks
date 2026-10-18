@@ -75,6 +75,13 @@ def _run_onboarding_brief(args: dict, scopes: list[str]) -> ToolResult:
     return brief.onboarding_brief(args["name"], scopes)
 
 
+def _run_what_changed(args: dict, scopes: list[str]) -> ToolResult:
+    # Imported here: what changed follows decisions forward, and decisions registers into this catalogue.
+    from src.domain.knowledge import what_changed
+
+    return what_changed.what_changed(args.get("name") or "", scopes, args.get("days"), args.get("only"))
+
+
 def _run_reading_list(args: dict, scopes: list[str]) -> ToolResult:
     # Imported here: the reading list follows decisions forward, and decisions registers into this catalogue.
     from src.domain.knowledge import reading_list
@@ -299,6 +306,29 @@ register(
             ["name"],
         ),
         run=_run_reading_list,
+    )
+)
+register(
+    ToolSpec(
+        name="what_changed",
+        description=(
+            "What changed lately, as a dated digest, newest first: decisions made (and what they replaced), pull "
+            "requests opened or merged, tickets filed or updated, and what people said, grouped by the thing they are "
+            "about. For one service it also reads what that service depends on, up to three hops, so a failure is "
+            "traced to the change upstream; for a team, everything it runs; with nothing named, the whole company. Use "
+            "for 'what changed this week', 'what's new in payments', 'billing is failing, what changed', 'what did "
+            "sales decide recently'. For why one decision was made, use decision_trace; for a list of what exists now "
+            "(the open tickets, every decision), not this."
+        ),
+        args_schema=_schema(
+            {
+                "name": {"type": "string", "description": "The service or team the question is about, copied from the question; omit for the whole company."},
+                "days": {"type": "integer", "minimum": 1, "maximum": 365, "description": "How far back, when the question says (today 1, this week 7, this month 30, recently 14)."},
+                "only": {"type": "string", "enum": ["decisions", "tickets", "pull_requests", "memories"], "description": "One kind of change inside the window, when the question asks for one."},
+            },
+            [],
+        ),
+        run=_run_what_changed,
     )
 )
 register(

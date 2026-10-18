@@ -14,7 +14,7 @@ than ``MAX_QUESTION_CHARS`` is refused with ``QuestionTooLong``; keyword answers
 proof report are kept for ``CACHE_TTL_SECONDS`` per graph, so a chip clicked twice walks the
 graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``.
 
-The page offers an example chip only when it answers with a path on the graph in use, so a chip whose
+The page offers an example chip only when it answers with a path or a dated memory on the graph in use, so a chip whose
 data the live graph lacks stays hidden until a seed refresh brings it back.
 """
 
@@ -55,6 +55,7 @@ EXAMPLES: dict[str, list[str]] = {
         "what should I read before touching the invoice worker",
         "who knows about refunds",
         "who is Arjun Mehta",
+        "what changed this week",
         "who knows the payments gateway",
     ],
     "company-brain": [
@@ -309,7 +310,7 @@ def examples() -> Examples:
     """The seeded company and the questions to offer for it. An unknown company gets the Quillfern set.
 
     Chips are offered only when they answer: every question but the last is asked here and
-    dropped unless it is ``found`` and walks a path, so a graph missing a chip's data never
+    dropped unless it is ``found`` and walks a path or cites a memory, so a graph missing a chip's data never
     offers it. The path matters for the memory tools, which find the thing named and still
     answer "no memory mentions it" on a graph with no memories. The last is the deliberate
     refusal and is always kept, unasked, as the last. Asking goes
@@ -324,10 +325,10 @@ def examples() -> Examples:
 
 
 def _answers(question: str) -> bool:
-    """Whether an example chip answers with a path on the graph in use. A chip that raises is dropped and logged."""
+    """Whether an example chip answers with a path or a memory on the graph in use. A chip that raises is dropped and logged."""
     try:
         answer = answer_question(question)
-        return answer.found and bool(answer.path)
+        return answer.found and bool(answer.path or answer.memories)
     except Exception as error:
         log.warning("[ask] example chip dropped (%s): %s", error, question)
         return False

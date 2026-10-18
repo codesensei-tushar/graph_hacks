@@ -1,7 +1,7 @@
 """Check the model's tool routing on the demo questions, once, by hand.
 
 The only place this project spends model calls on purpose: one structured call per
-question (35 in all, fast profile), printing the tool and arguments the model chose
+question (41 in all, fast profile), printing the tool and arguments the model chose
 next to what the keyword router would do and what the recording script expects. Run
 it after changing a tool description or the routing prompt, read the table, and paste
 it into the pull request. It is not a test and must never run in CI.
@@ -98,6 +98,11 @@ QUESTIONS = [
     # search: words that name no node. "who knows about refunds" may go to who_knows, which falls back to search.
     ("search 1", "search for webhooks", "search", None),
     ("search 2", "anything about pdf layout", "search", None),
+    # what_changed: a dated window around a thing, a team or the company.
+    ("changed 1", "what changed this week", "what_changed", None),
+    ("changed 2", "what's new in payments", "what_changed", None),
+    ("changed 3", "billing is failing, what changed", "what_changed", None),
+    ("changed 4", "what did the sales team decide recently", ("what_changed", {"only": ("decisions",)}), None),
 ]
 
 

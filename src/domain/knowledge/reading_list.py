@@ -84,7 +84,7 @@ def reading_list(question: str, scopes: list[str]) -> ToolResult:
     if not resolution.found:
         return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "service, system, or process"), found=False, candidates=resolution.candidate_names())
     target = resolution.entity
-    walked = _walk(graph, target, scopes)
+    walked = walk(graph, target, scopes)
     readings = _documents(graph, walked, scopes)
     described = {reading.describes.id for reading in readings if reading.describes}
     standing = _standing(graph, walked, scopes)[:MAX_DECISIONS]
@@ -142,11 +142,14 @@ def named(question: str) -> str:
     return " ".join(rest.split())
 
 
-def _walk(graph, target: Entity, scopes: list[str]) -> list[Walked]:
-    """The target, then every visible thing it depends on, nearest first; one route each, the first by name on a tie."""
+def walk(graph, target: Entity, scopes: list[str], depth: int = MAX_DEPTH) -> list[Walked]:
+    """The target, then every visible thing it depends on within ``depth`` hops, nearest first; one route each, the first by name on a tie.
+
+    ``depth`` is a module constant of the caller, written into the query as a literal bound.
+    """
     rows = graph.ro_query(
         f"""
-        MATCH path = (:Service {{id: $id}})-[:DEPENDS_ON*1..{MAX_DEPTH}]->(d:Service)
+        MATCH path = (:Service {{id: $id}})-[:DEPENDS_ON*1..{int(depth)}]->(d:Service)
         WHERE all(n IN nodes(path) WHERE {SCOPED.format(var="n")} AND NOT {kinds.KIND_OF.format(var="n")} IN $excluded)
         RETURN d.id, d.name, {kinds.KIND_OF.format(var="d")}, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name]
         """,
