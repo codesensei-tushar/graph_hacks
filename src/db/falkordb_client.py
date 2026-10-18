@@ -16,6 +16,12 @@ query passes through. It does two things and forwards everything else untouched:
   same ``QueryCall`` for every query: before it runs, and after it returns or raises (with
   ``duration_ms``, and ``result`` or ``error``, filled in). Register with ``add_query_hook``.
   A hook that raises is logged and skipped; it never fails or changes the query.
+
+It also keeps each graph's **generation**: a counter in Redis that every ``query`` changing
+something (nodes, edges, properties, labels) and every ``delete`` bumps. Caches of what a graph
+holds (the answer cache) put ``generation(name)`` in their key, so a write anywhere, in any
+process, makes them read again: a disconnected tool's data is not served from a cache after its
+nodes are deleted. Within ``generation_snapshot()`` (one question) Redis is asked once per graph.
 """
 
 import logging
@@ -42,6 +48,12 @@ graph_reads_disabled: ContextVar[bool] = ContextVar("graph_reads_disabled", defa
 query_timeout_ms: ContextVar[int | None] = ContextVar("query_timeout_ms", default=None)
 
 _WRITE = re.compile(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE)\b", re.IGNORECASE)
+
+GENERATION_KEY = "brain:graph_generation:{}"
+# Generations already read in this context, by graph name; set by ``generation_snapshot``.
+_generations: ContextVar[dict | None] = ContextVar("graph_generations", default=None)
+# The statistics of a write that changed something.
+_CHANGES = ("nodes_created", "nodes_deleted", "relationships_created", "relationships_deleted", "properties_set", "properties_removed", "labels_added", "labels_removed")
 
 
 @contextmanager
@@ -115,6 +127,12 @@ class _GraphProxy:
     def ro_query(self, q: str, params=None, timeout=None, **kwargs):
         return self._run("ro_query", q, params, timeout, kwargs)
 
+    def delete(self):
+        try:
+            return self._graph.delete()
+        finally:
+            bump_generation(getattr(self._graph, "name", ""))
+
     def _run(self, method: str, q: str, params, timeout, kwargs):
         if timeout is None:
             timeout = query_timeout_ms.get()
@@ -123,6 +141,8 @@ class _GraphProxy:
         started = time.perf_counter()
         try:
             call.result = getattr(self._graph, method)(q, params, timeout=timeout, **kwargs)
+            if method == "query" and _changed(call.result):
+                bump_generation(call.graph)
             return call.result
         except BaseException as error:
             call.error = error
@@ -189,3 +209,46 @@ def connect():
 def kv():
     """The Redis connection under FalkorDB. Holds short-lived keys: event dedupe, approvals, bot threads."""
     return client().connection
+
+
+def _changed(result) -> bool:
+    try:
+        return any(getattr(result, stat, 0) for stat in _CHANGES)
+    except Exception:  # an unexpected result shape counts as a change: a cache may reload, never go stale
+        return True
+
+
+def generation(name: str) -> int | None:
+    """How many changing writes graph ``name`` has had; None when Redis cannot say (cache nothing then)."""
+    seen = _generations.get()
+    if seen is not None and name in seen:
+        return seen[name]
+    try:
+        value = int(kv().get(GENERATION_KEY.format(name)) or 0)
+    except Exception as error:
+        log.warning("[falkordb] generation of %s unreadable: %s", name, error)
+        return None
+    if seen is not None:
+        seen[name] = value
+    return value
+
+
+def bump_generation(name: str) -> None:
+    """Mark graph ``name`` changed: every cache keyed on its generation reads again."""
+    seen = _generations.get()
+    if seen is not None:
+        seen.pop(name, None)
+    try:
+        kv().incr(GENERATION_KEY.format(name))
+    except Exception as error:
+        log.warning("[falkordb] generation of %s not bumped: %s", name, error)
+
+
+@contextmanager
+def generation_snapshot() -> Iterator[None]:
+    """Within the block each graph's generation is read from Redis once, and again after a write."""
+    token = _generations.set({})
+    try:
+        yield
+    finally:
+        _generations.reset(token)

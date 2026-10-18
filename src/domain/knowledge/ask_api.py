@@ -11,8 +11,9 @@ and edges of that path keyed by id, so the page can draw the traversal it is rea
 
 The surface is public, so it is protected here rather than in the route: a question longer
 than ``MAX_QUESTION_CHARS`` is refused with ``QuestionTooLong``; keyword answers and the
-proof report are kept for ``CACHE_TTL_SECONDS`` per graph, so a chip clicked twice walks the
-graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``
+proof report are kept for ``CACHE_TTL_SECONDS`` per graph and graph generation (``cache_key``), so a
+chip clicked twice walks the graph once and a write is seen at once; only public (``org_shared``)
+answers are kept; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``
 on average, with bursts of up to ``RATE_BURST``. Only the routes that can walk the graph for
 a new key are counted (a question, an explorer walk, an MCP call); the page's cacheable
 reads are served from the cache uncounted.
@@ -222,9 +223,17 @@ def admit(client: str | None) -> RateDecision:
     return LIMITER.check(client or "unknown")
 
 
+def cache_key(*parts) -> tuple:
+    """An ``ANSWERS`` key for the graph in use at its current generation: any write to the graph
+    (a sync page, a disconnect, a seed, an approved ticket) changes the key, so nothing it changed
+    is served from the cache."""
+    name = falkordb_client.graph_name()
+    return (name, falkordb_client.generation(name), *parts)
+
+
 def public_proof() -> ProofReport:
     """The proof report for the graph in use, computed at most once per cache period."""
-    return ANSWERS.get_or_compute(("proof", falkordb_client.graph_name()), run_proof)
+    return ANSWERS.get_or_compute(cache_key("proof"), run_proof)
 
 
 @dataclass(frozen=True)
@@ -370,8 +379,10 @@ def answer_question(question: str, tool: str | None = None, use_model: bool = Fa
     if use_model:
         # Admin only, and a model's choice can differ between calls: never cached.
         return _answer(question, tool, True, read_scopes)
-    key = (falkordb_client.graph_name(), question, tool, tuple(read_scopes))
-    return ANSWERS.get_or_compute(key, lambda: _answer(question, tool, False, read_scopes))
+    if tuple(read_scopes) != DEFAULT_SCOPES:
+        # A member's answer (Slack, the console) reads private scopes: never cached, always current.
+        return _answer(question, tool, False, read_scopes)
+    return ANSWERS.get_or_compute(cache_key(question, tool), lambda: _answer(question, tool, False, read_scopes))
 
 
 def _answer(question: str, tool: str | None, use_model: bool, read_scopes: list[str]) -> AskAnswer:
