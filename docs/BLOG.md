@@ -31,7 +31,7 @@ Four groups of nodes share one graph.
 
 One convention does most of the work. Every node written from Slack or GitHub carries a `scope`: `org_shared` for public channels and public repos, `slack_channel_<id>` for a private channel, `user_<id>` for one person's DMs with the bot, `github_repo_<id>` for a private repo. Seeded company knowledge has no scope and counts as shared. Every query ends with the same filter, `coalesce(n.scope, 'org_shared') IN $scopes`, where `$scopes` is what the asker may read. The full model, label by label, is in the README.
 
-[[Image 2: FalkorDB Browser, one Service with its DEPENDS_ON, OWNS and TOUCHES edges and a Memory with MENTIONS.]]
+![The FalkorDB Browser on the replay graph: Billing Service in the centre with its DEPENDS_ON, OWNS and TOUCHES edges, and two Memory nodes that MENTION it.](images/02-browser-graph.png)
 
 ## The agent never writes Cypher
 
@@ -145,14 +145,13 @@ The line we kept coming back to: the answer is the path.
 
 ## Capturing the images
 
-Images 1, 3, 5 and 6 are in `docs/images/`, taken from the ask page and the proof route against a local replay of the synthetic company (headless Chrome at 2x, light theme). Two remain, both by hand. Every screenshot comes from the Quillfern replay or the dev workspace loaded with it, never from a real workspace. Capture at 2x on a 1440 px wide window, light theme, crop to the content, no browser chrome, and replace the marker with `![caption](images/0N-name.png)`.
+Images 1, 3, 5 and 6 are in `docs/images/`, taken from the ask page and the proof route against a local replay of the synthetic company (headless Chrome at 2x, light theme). Image 2 is the FalkorDB Browser on the same replay graph (`local_demo`), logged in and driven by headless Chrome at 2x: `MATCH (s:Service {id: 'billing-service'})-[r]-(n) RETURN s, r, n LIMIT 25` in the graph view zoomed to fill a 1440 by 1300 window, and four nodes dragged off edges they sat on. One remains, by hand. Every screenshot comes from the Quillfern replay or the dev workspace loaded with it, never from a real workspace. Capture at 2x on a 1440 px wide window, light theme, crop to the content, no browser chrome, and replace the marker with `![caption](images/0N-name.png)`.
 
 | File | Where | Type | Must be visible |
 | --- | --- | --- | --- |
-| `docs/images/02-browser-graph.png` | FalkorDB Browser at http://localhost:3000 (it opens on a login form: host `localhost`, port `6379`), the replay graph | Run `MATCH (s:Service {id: 'billing-service'})-[r]-(n) RETURN s, r, n LIMIT 25` and switch to the graph view | Billing Service in the centre with `DEPENDS_ON`, `OWNS`, `TOUCHES` and at least one `MENTIONS` edge from a Memory node; edge labels readable. Drag nodes apart if they overlap. |
 | `docs/images/04-decision-before-after.png` | Slack, #engineering, two replies side by side (or stacked, crop both) | First `why did we move billing retries to the invoice worker` (before). Then, as the same person and within 15 minutes, post `we're moving billing retries to the invoice worker, decided in today's sync` (the message the decision will quote), then `decision: billing retries move to the invoice worker`, Approve on the card that says what it replaces, then the same question again (after) | Left or top: the refusal with the memory line. Right or bottom: the decision with "Decided in #engineering on <date> by <you>: “we're moving billing retries …”", "This replaced *...* (decided <date>)" and the `SUPERSEDES`, `DECIDED_IN` and `RECORDED_FROM` path lines. Include the approval card if it fits; its "replacing *...*" text is the strongest frame. |
 
-For image 4, load the dev workspace first: `python scripts/replay_workspace.py --app-url http://localhost:8000 --team <T> --bot <U> --map ...` as docs/SETUP.md describes, then type the questions yourself so the replies carry real Slack rendering. Delete this section once both are in.
+For image 4, load the dev workspace first: `python scripts/replay_workspace.py --app-url http://localhost:8000 --team <T> --bot <U> --map ...` as docs/SETUP.md describes, then type the questions yourself so the replies carry real Slack rendering. Delete this section once it is in.
 
 ## Before publishing
 
