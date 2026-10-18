@@ -14,6 +14,11 @@ from src.db.falkordb_client import connect
 
 SHARED_TEAM_BRAIN_CONTAINER_TAG = "org_shared"
 AGENT_SELF_CONTAINER_TAG = "agent_self"
+# What connected tools (Jira, HubSpot) write: every Slack asker reads it, the public web page,
+# the team pages and MCP never do. Nothing is ever written to it from Slack.
+ORG_INTERNAL_CONTAINER_TAG = "org_internal"
+# A restricted connector container's own scope: ``connector_<hash of the container id>``.
+CONNECTOR_SCOPE_PREFIX = "connector_"
 
 
 def private_container_tag_for(user_id: str) -> str:

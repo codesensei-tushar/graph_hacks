@@ -122,15 +122,17 @@ def blast_radius(question: str, scopes: list[str], depth=None, direction=None) -
         return _dependencies(graph, target, resolution, wanted, scopes)
 
     # Always walk to the ceiling so the reply can say where the walk stopped finding anything new.
+    # Every node on a route must be readable, as for any path: a route through a service the
+    # asker cannot see is not shown, and neither is what lies beyond it.
     rows = graph.ro_query(
         f"""
         MATCH path = (dependent:Service)-[:DEPENDS_ON*1..{MAX_DEPTH}]->(service:Service {{id: $id}})
-        WHERE all(n IN nodes(path) WHERE NOT {kinds.KIND_OF.format(var="n")} IN $excluded)
+        WHERE {_SCOPED_PATH} AND all(n IN nodes(path) WHERE NOT {kinds.KIND_OF.format(var="n")} IN $excluded)
         RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name],
                {kinds.KIND_OF.format(var="dependent")}
         ORDER BY length(path), dependent.name
         """,
-        {"id": target.id, "excluded": sorted(kinds.NOT_DEPENDABLE)},
+        {"id": target.id, "excluded": sorted(kinds.NOT_DEPENDABLE), "scopes": scopes},
     ).result_set
     # Every shortest route to each dependent: the first row sets the length, equal-length rows add their edges.
     shortest: dict[str, list[tuple[str, int, list[str], list[str]]]] = {}
@@ -364,23 +366,28 @@ def _shortest_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: 
 # --- PageRank ------------------------------------------------------------------------------
 
 
-def load_bearing(limit=DEFAULT_LOAD_BEARING) -> ToolResult:
-    """The services the rest of the company leans on: PageRank over DEPENDS_ON."""
+def load_bearing(limit=DEFAULT_LOAD_BEARING, scopes: list[str] | None = None) -> ToolResult:
+    """The services the rest of the company leans on: PageRank over DEPENDS_ON.
+
+    Only services the asker may read are ranked, and the dependents counted for each are the ones
+    reached over readable routes. No scopes means the company-wide ``org_shared`` only.
+    """
     try:
         count = max(1, min(MAX_LOAD_BEARING, int(limit)))
     except (TypeError, ValueError):
         count = DEFAULT_LOAD_BEARING
+    scopes = list(scopes) if scopes else [resolve.ORG_SHARED]
     _, graph = connect()
     ranked = graph.ro_query(
         f"""
         CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score
         WITH node, score
-        WHERE NOT {kinds.KIND_OF.format(var="node")} IN $excluded
+        WHERE NOT {kinds.KIND_OF.format(var="node")} IN $excluded AND {resolve.SCOPED.format(var="node")}
         RETURN node.id, node.name, score
         ORDER BY score DESC, node.name
         LIMIT $limit
         """,
-        {"limit": count, "excluded": sorted(kinds.NOT_DEPENDABLE)},
+        {"limit": count, "excluded": sorted(kinds.NOT_DEPENDABLE), "scopes": scopes},
     ).result_set
     result = ToolResult(tool="load_bearing", answer="")
     if not ranked:
@@ -391,18 +398,20 @@ def load_bearing(limit=DEFAULT_LOAD_BEARING) -> ToolResult:
     for index, (service_id, name, score) in enumerate(ranked):
         dependents = graph.ro_query(
             f"""
-            MATCH (dependent:Service)-[:DEPENDS_ON*1..{MAX_DEPTH}]->(service:Service {{id: $id}})
+            MATCH path = (dependent:Service)-[:DEPENDS_ON*1..{MAX_DEPTH}]->(service:Service {{id: $id}})
+            WHERE {_SCOPED_PATH}
             RETURN count(DISTINCT dependent)
             """,
-            {"id": service_id},
+            {"id": service_id, "scopes": scopes},
         ).result_set[0][0]
         direct = graph.ro_query(
-            """
-            MATCH (dependent:Service)-[:DEPENDS_ON]->(service:Service {id: $id})
+            f"""
+            MATCH (dependent:Service)-[:DEPENDS_ON]->(service:Service {{id: $id}})
+            WHERE {resolve.SCOPED.format(var="dependent")}
             RETURN dependent.id, dependent.name
             ORDER BY dependent.name
             """,
-            {"id": service_id},
+            {"id": service_id, "scopes": scopes},
         ).result_set
         for dependent_id, dependent_name in direct:
             result.add(PathStep(dependent_name, "DEPENDS_ON", name, from_id=dependent_id, to_id=service_id, from_label="Service", to_label="Service"))

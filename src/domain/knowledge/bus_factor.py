@@ -213,8 +213,8 @@ def _dependents(graph, service_id: str, params: dict, reach: dict[str, int]) -> 
     if service_id not in reach:
         reach[service_id] = graph.ro_query(
             f"""
-            MATCH (dependent:Service)-[:DEPENDS_ON*1..{MAX_DEPTH}]->(:Service {{id: $service}})
-            WHERE {SCOPED.format(var="dependent")} AND NOT {kinds.KIND_OF.format(var="dependent")} IN $excluded
+            MATCH path = (dependent:Service)-[:DEPENDS_ON*1..{MAX_DEPTH}]->(:Service {{id: $service}})
+            WHERE all(n IN nodes(path) WHERE {SCOPED.format(var="n")}) AND NOT {kinds.KIND_OF.format(var="dependent")} IN $excluded
             RETURN count(DISTINCT dependent)
             """,
             {"service": service_id, "scopes": params["scopes"], "excluded": sorted(kinds.NOT_DEPENDABLE)},
