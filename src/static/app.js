@@ -324,7 +324,8 @@
     out.replaceChildren();
     if (data.notice) out.append(el("p", { class: "notice" }, data.notice));
     out.append(el("p", { class: data.found ? "text" : "text refused" }, data.answer));
-    if (data.grid && data.grid.kind === "risk_map" && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });
+    // risk_map and person_profile return the same grid shape; one table draws both.
+    if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });
 
     BrainGraph.renderPath(out, data.nodes || [], data.edges || [], { tool: data.tool, depth: data.depth });
     if (data.tool === "blast_radius" && data.found) addDepthButtons(question, data.depth);

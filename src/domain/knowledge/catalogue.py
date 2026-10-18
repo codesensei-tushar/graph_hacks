@@ -98,6 +98,13 @@ def _run_risk_map(_args: dict, scopes: list[str]) -> ToolResult:
     return risk_map.risk_map(scopes)
 
 
+def _run_person_profile(args: dict, scopes: list[str]) -> ToolResult:
+    # person_profile reads decisions, which registers into this catalogue on import.
+    from src.domain.knowledge import person_profile
+
+    return person_profile.person_profile(args["name"], scopes)
+
+
 def _run_related_memories(args: dict, scopes: list[str]) -> ToolResult:
     return memories.related_memories(args["name"], scopes, args.get("k", memories.DEFAULT_K))
 
@@ -350,6 +357,23 @@ register(
         ),
         args_schema=_schema({}, []),
         run=_run_risk_map,
+    )
+)
+register(
+    ToolSpec(
+        name="person_profile",
+        description=(
+            "Who a person is and what they hold: role and team, the things they own, work on or know (with how much "
+            "depends on each), documents they wrote, their pull requests and reviews, open tickets, the decisions they "
+            "proposed or approved and whether each still stands, who they work with most, and what rests on them alone. "
+            "Use for 'who is X', 'what does X own / work on / know', 'what is X working on', 'who does X work with', "
+            "'what has X decided'. For X leaving, use if_person_leaves; for who knows a service, who_knows."
+        ),
+        args_schema=_schema(
+            {"name": {"type": "string", "description": "The person the question is about, copied from the question."}},
+            ["name"],
+        ),
+        run=_run_person_profile,
     )
 )
 register(

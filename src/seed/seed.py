@@ -131,8 +131,9 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
 
     # A team file can name each member's Slack user, so Slack answers and mentions find the person.
     for slack_user, person in getattr(company, "SLACK_USERS", ()):
+        # Named after the person when first written, as a memory's speaker is; a name Slack gave it stays.
         graph.query(
-            "MERGE (u:SlackUser {id: $u}) WITH u MATCH (p:Person {id: $p}) MERGE (u)-[:IS]->(p)",
+            "MATCH (p:Person {id: $p}) MERGE (u:SlackUser {id: $u}) ON CREATE SET u.name = p.name MERGE (u)-[:IS]->(p)",
             {"u": slack_user, "p": person},
         )
 

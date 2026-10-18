@@ -26,6 +26,13 @@ log = logging.getLogger(__name__)
 Step = Callable[[str, list[str]], ToolResult | None]
 
 
+def _person(question: str, scopes: list[str]) -> ToolResult | None:
+    # Imported here: person_profile reads decisions, which registers a catalogue tool.
+    from src.domain.knowledge import person_profile
+
+    return person_profile.profile_or_none(question, scopes)
+
+
 def _search(question: str, scopes: list[str]) -> ToolResult | None:
     # Imported here: search reads decisions, which registers a catalogue tool.
     from src.domain.knowledge import search
@@ -33,8 +40,8 @@ def _search(question: str, scopes: list[str]) -> ToolResult | None:
     return search.if_topic(question, scopes)
 
 
-# Person first, then explore, when those tools land (see the module docstring); search last.
-STEPS: tuple[Step, ...] = (_search,)
+# Person first, then explore when it lands (see the module docstring); search last.
+STEPS: tuple[Step, ...] = (_person, _search)
 
 
 def before_refusing(question: str, scopes: list[str], miss: ToolResult) -> ToolResult:
