@@ -53,6 +53,8 @@ _NUMBER = re.compile(r"(?:\b(?:pr|pull request)[\s-]*#?\s*|(?<![\w#])#)(\d+)\b|^
 # Words that sit before "#45" without naming a repo; after "issue" the number is not a pull request's.
 _NOT_A_REPO = frozenset({"pr", "pull", "issue", "issues"})
 _ISSUE_BEFORE = re.compile(r"\bissues?\s*$", re.IGNORECASE)
+# "issue #12" or "issue 12": an issue named by its number, looked up as a pull request is.
+_ISSUE_NUMBER = re.compile(r"\bissues?\s*#?\s*(\d+)\b", re.IGNORECASE)
 # Past work in this order when a person shares several: pull requests, tickets, decisions.
 _WORK_ORDER = {"PullRequest": 0, "Ticket": 1, "Decision": 2}
 
@@ -241,10 +243,14 @@ def _resolve(graph, question: str, scopes: list[str]):
 
     A document or ticket named by its name is answered here as ``who_knows`` answers it, so
     every surface that runs this tool (keywords, the model, MCP) gets the same fall-through.
+    An issue named by its number ("issue #12"), like one named as ``notebook#12``, is refused.
     """
     reference = pr_reference(question)
     if reference is not None:
         return _pull_request_named(graph, question, reference, scopes)
+    numbered = _ISSUE_NUMBER.search(question)
+    if numbered and (issue := _issue(graph, (None, int(numbered.group(1))), scopes)) is not None:
+        return _not_a_change(issue)
     resolution = resolve.resolve_name(question, LABELS, scopes, graph=graph)
     if not resolution.found:
         return _miss(resolution)
@@ -281,7 +287,7 @@ def _pull_request_named(graph, question: str, reference: tuple[str | None, int],
     if repo is not None:
         rows = [row for row in rows if _in_repo(row, repo)]
         if not rows:
-            return _near_miss(graph, question, f"{repo}#{number}", scopes)
+            return _near_miss(graph, question, reference, scopes)
     elif len(rows) > 1:
         words = set(resolve.tokens(question))
         rows = [row for row in rows if set(resolve.tokens(_repo_of(row))) <= words] or rows
@@ -303,15 +309,38 @@ def _in_repo(row: tuple, repo: str) -> bool:
 
 
 def _repo_of(row: tuple) -> str:
-    """The repo part of a pull request's name: "notebook" for notebook#45."""
+    """The repo part of a pull request's or issue's name: "notebook" for notebook#45."""
     return row[1].rsplit("#", 1)[0]
 
 
-def _near_miss(graph, question: str, named: str, scopes: list[str]) -> ToolResult:
-    """A repo#number that is no readable pull request: an issue by that name is refused as one; else the nearest names."""
+def _issue(graph, reference: tuple[str | None, int], scopes: list[str]) -> Entity | None:
+    """The one readable GitHub issue with this number, in the named repo when there is one, or None.
+
+    The repo is matched as a pull request's is: "notebook" or "quillfern/notebook" names
+    quillfern/notebook, and "acme/notebook" does not.
+    """
+    repo, number = reference
+    rows = graph.ro_query(
+        f"""
+        MATCH (t:Ticket {{number: $number}})
+        WHERE {SCOPED.format(var="t")}
+        OPTIONAL MATCH (t)-[:IN_REPO]->(r:Repo)
+        WHERE {SCOPED.format(var="r")}
+        RETURN t.id, t.name, coalesce(r.full_name, '')
+        ORDER BY t.name
+        """,
+        {"number": number, "scopes": scopes},
+    ).result_set
+    if repo is not None:
+        rows = [row for row in rows if _in_repo(row, repo)]
+    return Entity(rows[0][0], rows[0][1], "Ticket") if len(rows) == 1 else None
+
+
+def _near_miss(graph, question: str, reference: tuple[str, int], scopes: list[str]) -> ToolResult:
+    """A repo#number that is no readable pull request: an issue there is refused as one; else the nearest names."""
+    if (issue := _issue(graph, reference, scopes)) is not None:
+        return _not_a_change(issue)
     near = resolve.resolve_name(question, ("PullRequest", "Ticket"), scopes, graph=graph)
-    if near.found and near.entity.label == "Ticket" and near.entity.name.lower() == named.lower():
-        return _not_a_change(near.entity)
     # A loose match is never taken: "docs#1234" is not docs#12345, it is the nearest name.
     candidates = ([Candidate(near.entity, near.entity.name)] if near.found else []) + near.candidates
     return _miss(Resolution(query=question, reason="no_match", candidates=candidates[: resolve.MAX_CANDIDATES]))
