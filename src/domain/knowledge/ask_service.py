@@ -298,8 +298,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
-    if _RELATED_MEMORIES.search(text):
-        return "related_memories", {"name": text}
+    if (said := _RELATED_MEMORIES.search(text)) is not None:
+        # "what have we said about the refund batch": the thing after the phrase, not "have" or "we".
+        named = text[said.end() :].strip(" ?.!")
+        return "related_memories", {"name": named or text}
     if _RECALL.search(text):
         return "recall", {"query": text}
     about_a_change = _SHOULD_KNOW.search(text) or (_ASK_WHO.search(text) and coordination.pr_reference(text))

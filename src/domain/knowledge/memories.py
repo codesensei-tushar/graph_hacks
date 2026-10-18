@@ -14,6 +14,8 @@ from src.domain.memory.search_brain import search_brain
 
 MENTIONABLE = ("Service", "Document", "Ticket", "Decision")
 DEFAULT_K = 5
+# Memories the refusal fallback shows when only chat answers.
+FALLBACK_K = 3
 MAX_K = 10
 SNIPPET = 48
 
@@ -27,7 +29,11 @@ def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResul
     resolution = resolve.resolve_name(question, MENTIONABLE, scopes, graph=graph)
     if not resolution.found:
         kind = "service, document, ticket, or decision"
-        return ToolResult(tool="related_memories", answer=resolve.describe_miss(resolution, kind), found=False, candidates=resolution.candidate_names())
+        miss = ToolResult(tool="related_memories", answer=resolve.describe_miss(resolution, kind), found=False, candidates=resolution.candidate_names())
+        # A topic rather than a thing ("what have we said about the refund batch"): search, then recall.
+        from src.domain.knowledge import fallback  # fallback's steps import the tools, this one included
+
+        return fallback.before_refusing(question, scopes, miss)
     target = resolution.entity
     limit = _clamp(k)
 

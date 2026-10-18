@@ -11,7 +11,9 @@ The order is the contract, so the tools that plug in here never compete:
 
 1. a person the question names: ``person_profile``;
 2. any other node a name resolves to: ``explore``, its neighbourhood;
-3. words in what people wrote or said, when the question asks about a topic: ``search``.
+3. words in what people wrote or said, when the question asks about a topic: ``search``;
+4. what was said in chat that matches the question: ``recall`` ("when does the refund batch run"
+   after "remember: the refund batch runs at 02:00 UTC").
 
 A step returns a found ``ToolResult`` or None. A step that raises is logged and skipped.
 """
@@ -47,8 +49,44 @@ def _search(question: str, scopes: list[str]) -> ToolResult | None:
     return search.if_topic(question, scopes)
 
 
-# Person first, then explore (see the module docstring); search last.
-STEPS: tuple[Step, ...] = (_person, _explore, _search)
+def _recall(question: str, scopes: list[str]) -> ToolResult | None:
+    """What was said in chat that matches the question's words: "when does the refund batch run" after
+    "remember: the refund batch runs at 02:00 UTC". Only a memory the asker can read and that matches."""
+    from src.domain.knowledge import memories
+
+    from src.domain.knowledge import resolve
+
+    found = memories.recall(question, scopes, memories.FALLBACK_K)
+    # Every word the question names must be in the memory: a loose match would answer a question
+    # about something else ("who owns Larkspur" with a note about the memory layer).
+    words = [word for word in resolve.core(question).split() if len(word) >= 3 and word not in _ASKING]
+    if not words:
+        return None
+    found.memories = [memory for memory in found.memories if all(_said(word, memory.text) for word in words)]
+    if not found.memories:
+        return None
+    first = found.memories[0]
+    when = f", {first.learned_at}" if first.learned_at else ""
+    found.answer = f"From what was said in chat: “{first.text}” ({first.author}{when})." + (
+        f" {len(found.memories) - 1} more below." if len(found.memories) > 1 else ""
+    )
+    return found
+
+
+# Question words the resolver keeps that say what is asked, not about what.
+_ASKING = frozenset({"when", "does", "time", "run", "runs", "happen", "happens", "often", "much", "many", "long"})
+
+
+def _said(word: str, text: str) -> bool:
+    """The word, or its stem (four letters), is a word of the text: "runs" for "run", "batches" for "batch"."""
+    from src.domain.knowledge import resolve
+
+    stem = word[:4] if len(word) > 4 else word
+    return any(token == word or token.startswith(stem) for token in resolve.tokens(text))
+
+
+# Person first, then explore (see the module docstring); search, then what was said in chat, last.
+STEPS: tuple[Step, ...] = (_person, _explore, _search, _recall)
 
 
 def before_refusing(question: str, scopes: list[str], miss: ToolResult) -> ToolResult:
