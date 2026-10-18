@@ -415,6 +415,22 @@ h3 { letter-spacing: -0.01em; }
 
 .canvas { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); background-image: radial-gradient(color-mix(in oklab, var(--ink-3) 18%, transparent) 1px, transparent 1.2px); background-size: 20px 20px; }
 .canvas svg { display: block; font-family: var(--font); }
+/* A drawing wider than a phone scrolls sideways; a fade at each edge with more beyond it, and a cue
+   that sits on the bottom border, clear of the nodes (the drawing pads 22px) and of the legend. */
+.canvas-frame { position: relative; }
+.canvas-frame::before, .canvas-frame::after {
+  content: ""; position: absolute; top: 1px; bottom: 1px; width: 48px; pointer-events: none;
+  opacity: 0; transition: opacity var(--fast) var(--ease);
+}
+.canvas-frame::before { left: 1px; border-radius: var(--radius) 0 0 var(--radius); background: linear-gradient(to left, transparent, var(--bg)); }
+.canvas-frame::after { right: 1px; border-radius: 0 var(--radius) var(--radius) 0; background: linear-gradient(to right, transparent, var(--bg)); }
+.canvas-frame.more-left::before, .canvas-frame.more-right::after { opacity: 1; }
+.scroll-cue {
+  position: absolute; z-index: 1; right: 12px; bottom: -10px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--ink-2); font: 500 0.72rem/1 var(--mono); pointer-events: none;
+  opacity: 0; transition: opacity var(--fast) var(--ease);
+}
+.canvas-frame.more-right:not(.more-left) .scroll-cue { opacity: 1; }
 .canvas .node { outline: none; cursor: default; }
 .canvas .node .body { transform-box: fill-box; transform-origin: center; }
 .canvas .node rect { stroke-width: 1.5px; }
@@ -692,6 +708,8 @@ footer.site a { color: var(--ink-2); }
 }
 
 @media (max-width: 420px) {
+  /* The sample line keeps its node count; the edge count is in the stats right below. */
+  .live-bar .count-edges { display: none; }
   .askbar { padding-left: 14px; }
   .askbar .btn { padding: 0 14px; }
   .askbar .btn kbd { display: none; }
