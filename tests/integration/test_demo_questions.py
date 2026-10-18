@@ -14,7 +14,7 @@ from src.db import falkordb_client
 from src.domain.knowledge import ask_service
 from src.seed import quillfern, seed
 
-GRAPH = "company_demo_questions_test"
+GRAPH = f"company_demo_questions_test{tests.TEST_GRAPH_SUFFIX}"
 ORG = [ask_service.ORG_SHARED]
 NEW_TICKET = "A new ticket just landed about a billing bug. Who should look at it?"
 
