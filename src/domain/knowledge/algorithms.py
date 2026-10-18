@@ -16,7 +16,7 @@ import re
 import uuid
 from collections import defaultdict
 
-from src.db.falkordb_client import client, connect, graph_reads_disabled
+from src.db.falkordb_client import connect, graph_reads_disabled, scratch_graph
 from src.domain.knowledge import fallback, kinds, people, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import Entity, join_names
@@ -735,17 +735,31 @@ def _propagate_hubs(people: list[str], hubs: dict[str, dict]) -> dict[str, int]:
     """
     if graph_reads_disabled.get() or not hubs:
         return {person: index for index, person in enumerate(people)}
-    scratch = client().select_graph(f"brain_lp_{uuid.uuid4().hex}")
+    scratch = scratch_graph(f"brain_lp_{uuid.uuid4().hex}")
     try:
-        for person in people:
-            scratch.query("CREATE (:Person {id: $id})", {"id": person})
-        for service_id, members in sorted(hubs.items()):
-            scratch.query("CREATE (:Work {id: $id})", {"id": service_id})
-            for person in sorted(members):
-                scratch.query(
-                    "MATCH (p:Person {id: $p}), (w:Work {id: $w}) CREATE (p)-[:AT]->(w), (w)-[:AT]->(p)",
-                    {"p": person, "w": service_id},
-                )
+        # One round trip, in the order the per-node writes used (label propagation's ties follow
+        # node and edge order): every person, then each hub followed by its edges to its members.
+        position = {person: index for index, person in enumerate(people)}
+        scratch.query(
+            """
+            UNWIND $people AS person_id
+            CREATE (p:Person {id: person_id})
+            WITH collect(p) AS people
+            UNWIND $hubs AS hub
+            CREATE (w:Work {id: hub.id})
+            WITH people, w, hub
+            UNWIND hub.members AS member
+            WITH people[member] AS p, w
+            CREATE (p)-[:AT]->(w), (w)-[:AT]->(p)
+            """,
+            {
+                "people": list(people),
+                "hubs": [
+                    {"id": service_id, "members": [position[person] for person in sorted(members) if person in position]}
+                    for service_id, members in sorted(hubs.items())
+                ],
+            },
+        )
         rows = scratch.ro_query(
             """
             CALL algo.labelPropagation({nodeLabels: ['Person', 'Work'], relationshipTypes: ['AT']})
