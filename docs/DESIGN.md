@@ -78,7 +78,7 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 ### 2.6 For builders
 
 - Heading: **The same tools, over MCP.**
-- Body: "Every read-only tool in the catalogue is served at `/mcp` over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, behind a token." The count comes from `/api/ask/tools`: "**{n}** read-only tools".
+- Body: "Every read-only tool in the catalogue is served at `/mcp` over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, no token needed: 30 calls a minute per address." The count comes from `/api/ask/tools`: "**{n}** read-only tools".
 - The tool list, rendered from `/api/ask/tools`: name and description, one line each.
 - The client snippet from the README's MCP section, as a code panel.
 - Links: the README's data model and query list, local setup ("`docker compose up -d`, then two commands"), and the repository once it is public.
