@@ -131,6 +131,11 @@ QUESTIONS = [
     ("ticket 3", "who is working on PAY-11", "ticket_status", None),
     ("ticket 4", "what blocks PAY-11", "ticket_status", None),
     ("ticket 5", "which tickets are blocked", "find", None),
+    # One pull request of this repo, the live demo's questions.
+    ("pr 1", "what did PR #207 do", "pr_explain", None),
+    ("pr 2", "who did #216", "pr_explain", None),
+    ("pr 3", "what does graph_hacks#207 affect", "pr_explain", None),
+    ("pr 4", "who should know about PR #216", "who_should_know", None),
     # The CRM.
     ("crm 1", "show me our customers", "find", None),
     ("crm 2", "open opportunities", "find", None),
