@@ -168,6 +168,22 @@ An owner or admin clicks **Connect** in the console.
 | `account_claimed` | Another org already reads this Jira site or HubSpot portal |
 | `oauth_failed` | Anything else: the code exchange or the account lookup failed, the consent covers no Jira site on atlassian.net, or the app's client id or secret is missing. The backend logs the failure type, never its text. |
 
+## People
+
+Jira often hides emails, so many synced accounts link to no person. `src/api/v1/console_people.py`
+(owners and admins) lets the org link them; this replaces `CONNECTOR_*_PEOPLE` for console orgs.
+
+- `GET /console/api/people/unlinked`: `{unlinked: [{id, name, source: "jira"|"hubspot", items,
+  suggestions: [{person_id, name, reason: "same_name"|"same_email_domain"}]}], people: [{id, name}]}`.
+  At most 500 accounts, most active first; at most 5 suggestions each; public mail domains suggest
+  nobody. No email or domain is ever returned.
+- `POST /console/api/people/link` (JSON, CSRF) `{external_user_id, person_id}`: writes
+  `(:ExternalUser)-[:IS {via: "admin", by, at}]->(:Person)` and moves the account's OWNS/WORKED_ON
+  onto the person. Audited as `people.link`. 200 `{ok, external_user_id, person: {id, name}, changed}`;
+  404 unknown account or person (in this org); 409 when the account is already linked by email.
+  An admin link can be corrected by linking again. Like an email link, it lets the person read, in a
+  DM, the restricted Jira projects the account can read.
+
 ## Tokens at run time
 
 Connectors get their bearer token from `src/connectors/oauth.py`'s `bearer_for(install)`:
