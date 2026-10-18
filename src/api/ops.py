@@ -6,6 +6,10 @@ production, and a clock for the last verified Slack request. ``/mcp`` is served 
 ``slack_last_event_at`` moves when ``/slack/events`` or ``/slack/interactions`` answers
 200, which those routes only do after the signature checks out (unsigned requests get
 401). The clock lives in this process, so it resets on restart.
+
+``GET /ops/metrics`` (admin token) returns the graph query metrics of
+``src/core/query_metrics.py``: per tool and per org, counts, p50/p95, timeouts and queue
+refusals. ``install`` registers its query hook. Also per process, also reset on restart.
 """
 
 import dataclasses
@@ -19,6 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.api.v1.slack_install import _admin_denial
+from src.core import query_metrics
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.onboarding.team_import import MAX_FILE_BYTES, TeamFileError, check_team, contents, describe, import_team
@@ -52,6 +57,14 @@ def healthz():
         "falkordb": _falkordb_status(),
         "slack_last_event_at": last.isoformat() if last else None,
     }
+
+
+@router.get("/ops/metrics")
+def metrics(request: Request):
+    """Graph query metrics since this process started. Names tools and org ids, never query text."""
+    if denied := _admin_denial(request):
+        return denied
+    return query_metrics.snapshot()
 
 
 @router.post("/ops/seed")
@@ -118,4 +131,5 @@ class SlackEventClock:
 
 def install(app: FastAPI) -> None:
     app.include_router(router)
+    query_metrics.install()
     app.add_middleware(SlackEventClock)
