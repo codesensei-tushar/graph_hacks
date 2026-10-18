@@ -113,6 +113,27 @@ class ChannelAudienceTest(unittest.TestCase):
         self.assertNotIn("connector_x", tags)
 
 
+class ApprovedActionAudienceTest(unittest.TestCase):
+    """An approved write runs with the audience its request had: a guest or Slack Connect room
+    never reads org_internal, so a decision cannot name (or link to) a connector account."""
+
+    def test_approved_decision_from_an_external_room_does_not_read_org_internal(self):
+        from src.domain.slack import compute
+
+        graph_name = f"company_audience_approval_test{tests.TEST_GRAPH_SUFFIX}"
+        with mock.patch.object(falkordb_client, "graph_name", return_value=graph_name), mock.patch.object(seed, "graph_name", return_value=graph_name):
+            try:
+                reset_and_seed(quillfern)
+                _, g = falkordb_client.connect()
+                g.query("CREATE (:Service {id: 'hubspot:default:company:9', name: 'Initech Secret Deal', kind: 'account', scope: 'org_internal', external_id: 'company:9'})")
+                text = compute.execute_approved_action("record_decision", {"title": "Discount policy", "about": "initech"}, "org_shared", internal_audience=False)
+                self.assertNotIn("Initech", text)
+                linked = g.query("MATCH (d:Decision)-[:ABOUT]->(:Service {id: 'hubspot:default:company:9'}) RETURN count(d)").result_set[0][0]
+                self.assertEqual(linked, 0)
+            finally:
+                falkordb_client.client().select_graph(graph_name).delete()
+
+
 class AppMentionPrivacyTest(unittest.TestCase):
     def test_conversations_info_decides_when_channel_type_is_missing(self):
         public = SlackConversationInfo(id="CPUB", is_private=False)

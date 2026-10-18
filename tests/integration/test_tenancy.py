@@ -227,7 +227,7 @@ class TenancyTest(unittest.TestCase):
 
     # --- the install callback writes the route -----------------------------------------------
 
-    def _install(self, org_id: str, team: str):
+    def _install(self, org_id: str, team: str, refusal=None):
         from fastapi import FastAPI
 
         app = FastAPI()
@@ -235,7 +235,8 @@ class TenancyTest(unittest.TestCase):
         state = uuid.uuid4().hex
         kv().set(f"slack:oauth:{state}", json.dumps({"return_to": "http://test", "org": org_id}), ex=60)
         oauth = SlackOAuthResult(team_id=team, team_name="Routed Co", bot_token="xoxb-routed", bot_user_id="UBOT", authed_user_id="UADMIN", scopes="chat:write", app_id="A1")
-        with mock.patch.object(slack_install, "exchange_slack_oauth", return_value=oauth), mock.patch.object(slack_install, "bootstrap_slack_workspace"), mock.patch.object(slack_install, "greet_slack_installer"):
+        with mock.patch.object(slack_install, "exchange_slack_oauth", return_value=oauth), mock.patch.object(slack_install, "bootstrap_slack_workspace"), \
+                mock.patch.object(slack_install, "greet_slack_installer"), mock.patch.object(slack_install, "_install_refusal", side_effect=refusal or (lambda ref, team_id, user: None)):
             return TestClient(app).get(f"/slack/oauth/callback?code=c&state={state}")
 
     def test_install_callback_stores_the_workspace_in_the_org_and_routes_the_team(self):
@@ -262,17 +263,92 @@ class TenancyTest(unittest.TestCase):
         team = f"TREF{uuid.uuid4().hex[:6].upper()}"
         seen = []
 
-        def refusal(team_id, user):
+        def refusal(ref, team_id, user):
             # Called after the token is stored, as A's check reads the workspace to ask Slack.
             seen.append((team_id, user, tenancy.current_org(), workspace_module.get_workspace_row(team_id) is not None))
             return "not_a_member"
 
-        with mock.patch.object(slack_install, "_membership_refusal", side_effect=refusal):
-            self.assertEqual(self._install(self.x.id, team).status_code, 403)
+        self.assertEqual(self._install(self.x.id, team, refusal=refusal).status_code, 403)
         self.assertEqual(seen, [(team, "UADMIN", self.x.id, True)])
         self.assertIsNone(orgs.routed_org_id(team))
         with tenancy.org_context(self.x.id):
             self.assertIsNone(workspace_module.get_workspace_row(team))
+
+    def test_the_installer_and_the_orgs_creator_must_both_belong_to_the_workspace(self):
+        asked = []
+
+        def membership(team_id, user):
+            asked.append(user)
+            return None if user in ("UX", "UADMIN") else "not_a_member"
+
+        with mock.patch.object(slack_install, "_membership_refusal", side_effect=membership):
+            # x was created by TX:UX.
+            self.assertIsNone(slack_install._install_refusal(orgs.get_org_ref(self.x.id), "TX", "UADMIN"))
+            self.assertEqual(asked, ["UADMIN", "UX"])
+            self.assertEqual(slack_install._install_refusal(orgs.get_org_ref(self.x.id), "TOTHER", "UADMIN"), "creator_not_in_workspace")
+            self.assertEqual(slack_install._install_refusal(orgs.get_org_ref(self.x.id), "TX", "UGUEST"), "not_a_member")
+
+    def test_a_team_the_legacy_org_serves_cannot_be_taken_before_or_after_migration(self):
+        team = f"TLEG{uuid.uuid4().hex[:6].upper()}"
+        workspace_module.upsert_workspace(team_id=team, bot_token_enc="plain:xoxb-legacy", team_name="Legacy Co")
+        try:
+            self.assertIsNone(orgs.routed_org_id(team))
+            self.assertEqual(self._install(self.x.id, team).status_code, 409)
+            self.assertIsNone(orgs.routed_org_id(team))
+            with tenancy.org_context(self.x.id):
+                self.assertIsNone(workspace_module.get_workspace_row(team))
+            self.assertEqual(workspace_module.get_workspace_row(team)["bot_token_enc"], "plain:xoxb-legacy")
+        finally:
+            workspace_module.forget_workspace_row(team)
+
+    def test_installs_into_new_orgs_wait_for_the_migration(self):
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(slack_install.router)
+        object.__setattr__(settings, "brain_admin_token", ADMIN)
+        try:
+            with mock.patch.object(orgs, "legacy_migrated", return_value=False):
+                response = TestClient(app).get(f"/slack/oauth/install?org={self.x.id}", headers={"authorization": f"Bearer {ADMIN}"}, follow_redirects=False)
+            self.assertEqual(response.status_code, 409)
+        finally:
+            object.__setattr__(settings, "brain_admin_token", "")
+
+    def test_a_failed_route_lookup_is_answered_503_not_run_in_legacy(self):
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(slack_routes.router)
+        body = {
+            "type": "event_callback", "team_id": "TANY", "event_id": f"Ev{uuid.uuid4().hex}",
+            "event": {"type": "message", "user": "U1", "channel": "C1", "channel_type": "channel", "text": "hi", "ts": "1.1"},
+        }
+        raw, headers = self._signed(body)
+        with mock.patch.object(orgs, "routed_org_id", side_effect=ConnectionError("control graph down")), \
+                mock.patch.object(slack_routes, "get_workspace_by_team_id") as lookup:
+            response = TestClient(app).post("/slack/events", content=raw, headers=headers)
+        self.assertEqual(response.status_code, 503)
+        lookup.assert_not_called()
+        with mock.patch.object(orgs, "routed_org_id", side_effect=ConnectionError("down")), self.assertRaises(orgs.RouteUnavailable):
+            orgs.org_ref_for_team("TANY")
+
+    def test_a_member_joining_a_channel_drops_its_audience_verdict(self):
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(slack_routes.router)
+        team, channel = f"TAUD{uuid.uuid4().hex[:6].upper()}", "CAUD1"
+        kv().set(f"brain:slack:audience:{team}:{channel}", "1", ex=60)
+        kv().set(f"brain:slack:directory:{team}", "{}", ex=60)
+        body = {
+            "type": "event_callback", "team_id": team, "event_id": f"Ev{uuid.uuid4().hex}",
+            "event": {"type": "member_joined_channel", "user": "UGUEST", "channel": channel, "channel_type": "C", "ts": "1.1"},
+        }
+        raw, headers = self._signed(body)
+        with mock.patch.object(slack_routes, "get_workspace_by_team_id", return_value=None):
+            TestClient(app).post("/slack/events", content=raw, headers=headers)
+        self.assertIsNone(kv().get(f"brain:slack:audience:{team}:{channel}"))
+        self.assertIsNone(kv().get(f"brain:slack:directory:{team}"))
 
     def test_deactivated_users_are_not_members(self):
         from src.integrations.slack.client import _slack_user_info_from_member

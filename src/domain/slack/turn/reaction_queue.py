@@ -215,7 +215,12 @@ def run_passive_reaction_queue(payload: dict) -> None:
     row = pending[0]
     from src.domain import orgs
 
-    with tenancy.org_context(orgs.org_ref_for_team(row.get("team_id"))):
+    try:
+        org = orgs.org_ref_for_team(row.get("team_id"))
+    except orgs.RouteUnavailable:
+        _arm_reaction_queue(60)  # the row stays pending; try again when the control graph answers
+        return
+    with tenancy.org_context(org):
         _run_row(row, now)
 
 

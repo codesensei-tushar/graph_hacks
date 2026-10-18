@@ -707,7 +707,7 @@ def _suspend_for_approval(workspace, ev, control, stream, outcome, channel: str,
             "turn_control": {"thread_key": control.thread_key, "turn_id": control.turn_id, "revision": control.revision},
             # Fixed at request time, like the container: whether the room may read org_internal.
             "internal_audience": channel_audience.is_internal_audience(
-                workspace.client, workspace.team_id, channel, is_dm=is_direct_message(ev), asker=ev.user
+                workspace.client, workspace.team_id, channel, is_dm=is_direct_message(ev) or is_direct_conversation_event(ev), asker=ev.user
             ),
         },
     )

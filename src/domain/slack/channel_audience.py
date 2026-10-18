@@ -10,8 +10,9 @@ reads ``org_internal`` only when the room's whole audience is internal:
   (``is_restricted``/``is_ultra_restricted``), no external user (``is_stranger``, or simply
   not in this team's directory).
 
-Every lookup failure answers False (fail closed). Results are cached in kv for ten minutes:
-the team directory per team, the verdict per channel.
+Every lookup failure answers False (fail closed). Results are cached in kv for two minutes:
+the team directory per team, the verdict per channel. A member joining a channel, or a new
+person joining the team, drops the cached answers at once (``forget``).
 """
 
 import json
@@ -21,7 +22,7 @@ from src.db.falkordb_client import kv
 
 log = logging.getLogger(__name__)
 
-CACHE_SECONDS = 10 * 60
+CACHE_SECONDS = 2 * 60
 MAX_DIRECTORY_PAGES = 50  # 10,000 people
 MAX_CHANNEL_MEMBERS = 5000
 
@@ -63,6 +64,15 @@ def _directory(client, team_id: str) -> tuple[frozenset[str], bool] | None:
     except Exception:
         pass
     return frozenset(members), outsiders
+
+
+def forget(team_id: str, channel: str | None = None) -> None:
+    """Drop the cached directory of ``team_id`` and, with ``channel``, its verdict."""
+    keys = [f"brain:slack:directory:{team_id}"] + ([f"brain:slack:audience:{team_id}:{channel}"] if channel else [])
+    try:
+        kv().delete(*keys)
+    except Exception:
+        log.warning("[slack] audience cache not cleared team=%s", team_id)
 
 
 def is_full_member(client, team_id: str, slack_user_id: str | None) -> bool:

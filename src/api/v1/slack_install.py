@@ -35,6 +35,7 @@ from src.domain.slack.lifecycle_api import exchange_slack_oauth
 from src.domain.slack.manifest import SLACK_SCOPES, oauth_callback_url, slack_app_manifest
 from src.domain.slack.token_crypto import encrypt_token
 from src.domain.slack.workspace import (
+    bot_identity,
     disconnect_slack_workspace,
     forget_workspace_row,
     get_workspace_row,
@@ -74,16 +75,17 @@ def _admin_org(org: str | None) -> tenancy.OrgRef | None:
         return None
 
 
-async def _console_admin_org(request: Request) -> tenancy.OrgRef | None:
-    """The signed-in console admin's org, or None (console off, no session, not an admin)."""
+async def _console_install_org(request: Request) -> tenancy.OrgRef | None:
+    """The org of a signed-in console session that may add the bot: the org's creator before its
+    first install, or its owner (package A's ``console_pending``). None otherwise."""
     if not settings.console_enabled:
         return None
     try:
-        from src.domain.console.session import console_admin  # package A
+        from src.domain.console.session import console_pending  # package A
     except ImportError:
         return None
     try:
-        session = console_admin(request)
+        session = console_pending(request)
         if inspect.isawaitable(session):
             session = await session
     except Exception:
@@ -93,6 +95,31 @@ async def _console_admin_org(request: Request) -> tenancy.OrgRef | None:
         return tenancy.resolve(org_id) if org_id else None
     except (LookupError, TypeError):
         return None
+
+
+def _legacy_serves(team_id: str) -> bool:
+    """Whether the legacy org already serves ``team_id`` (a stored install, or the env bot's team),
+    route or not: such a team is never taken over by another org's install."""
+    with tenancy.org_context(tenancy.legacy_org()):
+        if get_workspace_row(team_id) is not None:
+            return True
+        identity = bot_identity() if settings.slack_enabled else None
+    return bool(identity) and identity.get("team_id") == team_id
+
+
+def _install_refusal(ref: tenancy.OrgRef, team_id: str, installer: str | None) -> str | None:
+    """Why the org may not take this workspace, or None: the installer, and the org's creator, must
+    both be full members of it (package A's check, in the org's context)."""
+    refusal = _membership_refusal(team_id, installer)
+    if refusal is not None:
+        return refusal
+    org = orgs.get_org(ref.id)
+    creator_team, _, creator = ((org.created_by if org else None) or "").partition(":")
+    if creator and creator_team != team_id:
+        return "creator_not_in_workspace"
+    if creator and creator != installer:
+        return _membership_refusal(team_id, creator)
+    return None
 
 
 def _membership_refusal(team_id: str, slack_user_id: str | None):
@@ -137,12 +164,15 @@ def disconnect(request: Request, team_id: str | None = None, org: str | None = N
 
 @router.get("/oauth/install")
 async def oauth_install(request: Request, token: str | None = None, org: str | None = None):
-    ref = await _console_admin_org(request) if not token and not request.headers.get("authorization") else None
+    ref = await _console_install_org(request) if not token and not request.headers.get("authorization") else None
     if ref is None:
         if denied := _admin_denial(request, token):
             return denied
         if (ref := _admin_org(org)) is None:
             return JSONResponse({"error": "no such org"}, status_code=404)
+    if not tenancy.is_legacy(ref) and not orgs.legacy_migrated():
+        # Until the legacy org's teams are routed, any of them could be claimed by a new org.
+        return JSONResponse({"error": "orgs are not set up yet: run POST /ops/orgs/migrate first"}, status_code=409)
     if not settings.slack_oauth_enabled:
         return HTMLResponse(
             "Slack is not configured: set SLACK_CLIENT_ID, SLACK_CLIENT_SECRET and SLACK_SIGNING_SECRET.",
@@ -177,6 +207,8 @@ def oauth_callback(request: Request, background: BackgroundTasks, code: str | No
 
     oauth = exchange_slack_oauth(code, oauth_callback_url(_origin(request)))
     routed = orgs.routed_org_id(oauth.team_id)
+    if routed is None and not tenancy.is_legacy(ref) and _legacy_serves(oauth.team_id):
+        routed = tenancy.LEGACY_ORG_ID
     if routed is not None and routed != ref.id:
         log.warning("[slack] install of team=%s into org=%s refused: routed to org=%s", oauth.team_id, ref.id, routed)
         return HTMLResponse("<!doctype html><title>Company Brain</title><p>This Slack workspace is already connected to another Company Brain org.</p>", status_code=409)
@@ -194,7 +226,7 @@ def oauth_callback(request: Request, background: BackgroundTasks, code: str | No
         )
         # A's check asks Slack with the bot token just stored, so it runs after the store; a refused
         # first install is taken back out, and the team is never routed to the org.
-        refusal = _membership_refusal(oauth.team_id, oauth.authed_user_id) if not tenancy.is_legacy(ref) else None
+        refusal = _install_refusal(ref, oauth.team_id, oauth.authed_user_id) if not tenancy.is_legacy(ref) else None
         if refusal is not None:
             if not existed:
                 forget_workspace_row(oauth.team_id)
@@ -245,7 +277,11 @@ def _link_org(token: str) -> tenancy.OrgRef:
 
 @router.get("/account-link/{token}")
 def account_link_preview(token: str):
-    with tenancy.org_context(_link_org(token)):
+    try:
+        ref = _link_org(token)
+    except orgs.RouteUnavailable:
+        return _page("<p>Company Brain is briefly unavailable. Try again in a minute.</p>", 503)
+    with tenancy.org_context(ref):
         return _account_link_preview(token)
 
 
@@ -266,7 +302,10 @@ def _account_link_preview(token: str):
 async def account_link_complete(token: str, request: Request, background: BackgroundTasks):
     # Parsed by hand: FastAPI's Form() needs python-multipart, which isn't installed.
     email = (parse_qs((await request.body()).decode()).get("email") or [""])[0]
-    ref = _link_org(token)
+    try:
+        ref = _link_org(token)
+    except orgs.RouteUnavailable:
+        return _page("<p>Company Brain is briefly unavailable. Try again in a minute.</p>", 503)
     with tenancy.org_context(ref):
         return _account_link_complete(token, email, background, ref)
 
