@@ -175,7 +175,7 @@ def _not_a_ticket(question: str, scopes: list[str], miss: ToolResult, graph=None
 
 
 def _unknown_key(graph, question: str, scopes: list[str]) -> str | None:
-    """"PAY-999 isn't in the graph; Jira PAY is synced (PAY-1 to PAY-17).", or None when the key is no tracker's."""
+    """"I can't find PAY-999 in the graph; Jira PAY is synced (PAY-1 to PAY-17).", or None when the key is no tracker's."""
     match = HANDLE.search(question or "")
     if match is None:
         return None
@@ -185,9 +185,9 @@ def _unknown_key(graph, question: str, scopes: list[str]) -> str | None:
     if synced is not None:
         source, low, high = synced
         span = f" ({project}-{low} to {project}-{high})" if low is not None else ""
-        return f"{key} isn't in the graph; {source} {project} is synced{span}. It may be newer than the last sync, or one the sync does not keep."
+        return f"I can't find {key} in the graph; {source} {project} is synced{span}. It may be newer than the last sync, or one the sync does not keep."
     if match.group(0).split("-", 1)[0].isupper():
-        return f"{key} isn't in the graph. It may be in a project that is not shared with Company Brain."
+        return f"I can't find {key} in the graph. It may be in a project that is not shared with Company Brain."
     return None
 
 

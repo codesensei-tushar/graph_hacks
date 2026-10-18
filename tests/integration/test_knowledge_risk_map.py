@@ -202,6 +202,35 @@ class RiskMapWithSalesTest(_Graph):
         self.assertIn(f"The HubSpot system (PageRank {hubspot['pagerank']:.2f}): 2 things depend on it, only Noor Haddad knows it", result.answer)
         self.assertTrue(result.answer.startswith("Risk sits with 10 of 13 things"))
 
+    def test_knowers_for_many_things_at_once_match_one_at_a_time(self):
+        _, graph = falkordb_client.connect()
+        things = [
+            ask_service.Entity(service_id, name, "Service", kind)
+            for service_id, name, kind in graph.ro_query("MATCH (s:Service) RETURN s.id, s.name, coalesce(s.kind, 'service')").result_set
+        ]
+        for scopes in (ORG, ["org_shared", "org_internal"]):
+            together = ask_service.knowers_many(graph, things, scopes)
+            for thing in things:
+                alone = ask_service.knowers_many(graph, [thing], scopes)[thing.id]
+                with self.subTest(thing=thing.name, scopes=scopes):
+                    self.assertEqual(together[thing.id].result.path, alone.result.path)
+                    self.assertEqual((together[thing.id].open_tickets, together[thing.id].more_open), (alone.open_tickets, alone.more_open))
+
+    def test_the_map_costs_the_same_few_queries_however_many_things_there_are(self):
+        _, graph = falkordb_client.connect()
+        calls = []
+        original = type(graph).ro_query
+
+        def counted(self, *args, **kwargs):
+            calls.append(args[0])
+            return original(self, *args, **kwargs)
+
+        with mock.patch.object(type(graph), "ro_query", counted):
+            ranked = risk_map.rows(graph, ORG)
+        self.assertEqual(len(ranked), 13)
+        # things, PageRank, reach, and knowers' seven reads: never one per thing.
+        self.assertLessEqual(len(calls), 12)
+
 
 class RiskMapEdgeCasesTest(_Graph):
     graph_name = SMALL_GRAPH

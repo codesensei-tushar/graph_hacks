@@ -81,6 +81,32 @@ class IndexedMatchingTest(unittest.TestCase):
                 self.assertEqual(indexed, scanned)
                 self.assertEqual(indexed, plain)
 
+    def test_a_partial_name_is_taken_as_scanning_every_row_takes_it(self):
+        def scan(text, rows):
+            # _partial_match as it read every row, before the index.
+            words = [word for word in resolve.core(text).split() if len(word) >= 3 and word not in resolve.GENERIC_MODIFIERS]
+            if not words:
+                return None
+            fits = {}
+            for row in rows:
+                if row.label not in resolve.PARTIAL_LABELS:
+                    continue
+                for key in (row.name, *row.aliases.split(",")):
+                    key_words = resolve.tokens(key)
+                    if not key_words or not all(any(resolve._fits(word, other) for other in key_words) for word in words):
+                        continue
+                    distinctive = [o for o in key_words if len(o) >= 3 and o not in resolve.STOPWORDS and not any(resolve.same_word(o, h) for h in resolve.GENERIC_HEADS)]
+                    covered = [o for o in distinctive if any(resolve._fits(word, o) for word in words)]
+                    if distinctive and 2 * len(covered) >= len(distinctive):
+                        fits.setdefault(row.id, resolve.Entity(row.id, row.name, row.label, row.kind))
+                        break
+            return (next(iter(fits.values())), " ".join(words)) if len(fits) == 1 else None
+
+        rows = ROWS + [EntityRow("larkspur", "Larkspur Freightways", "Service", kind="account"), EntityRow("ledger", "Ledger", "Service", kind="service")]
+        for question in (*self.QUESTIONS, "larkspur", "who owns lark", "freight", "ledg", "maya", "orti", "memory", "billing runbook", "mem lay", "invoice"):
+            with self.subTest(question=question):
+                self.assertEqual(resolve._partial_match(question, Rows(rows)), scan(question, rows))
+
 
 class FakeKv:
     def __init__(self):

@@ -136,7 +136,7 @@ class ConnectorIdentityTest(unittest.TestCase):
 
     def test_in_slack_i_and_me_are_the_asker(self):
         request = types.SimpleNamespace(asker_slack_user_id="UARJUN", read_tags=SLACK)
-        with mock.patch.object(agent_turn, "asker_person_ref", return_value="person:arjun"):
+        with mock.patch("src.domain.knowledge.asker.person_ref", return_value="person:arjun"):
             for question, tool in (("what team am I on", "person_profile"), ("what if I leave", "if_person_leaves"), ("my open tickets", "find")):
                 with self.subTest(question=question):
                     choice = agent_turn.for_the_asker(agent.choose_with_keywords(question), question, request)

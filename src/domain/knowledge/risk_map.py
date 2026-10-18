@@ -143,8 +143,9 @@ def rows(graph, scopes: list[str], ids: list[str] | None = None) -> list[RiskRow
     if not things:
         return []
     pagerank = algorithms.pagerank_by_id(graph)
-    reach: dict[str, int] = {}
-    ranked = [_row(graph, thing, pagerank, scopes, reach) for thing in things]
+    reach = _reach_all(graph, scopes, [thing[0] for thing in things])
+    known = ask_service.knowers_many(graph, [Entity(thing[0], thing[1], "Service", kinds.kind_or_default(thing[2])) for thing in things], scopes)
+    ranked = [_row(thing, pagerank, reach, known[thing[0]].result.path) for thing in things]
     ranked.sort(key=lambda row: (-row.score, -row.dependents, row.name))
     return ranked
 
@@ -154,7 +155,22 @@ def grid(ranked: list[RiskRow]) -> dict:
     return {"kind": TOOL, "columns": COLUMNS, "rows": [row.to_dict() for row in ranked[:MAX_ROWS]], "scoring": SCORING}
 
 
-def _row(graph, thing: list, pagerank: dict[str, float], scopes: list[str], reach: dict[str, int]) -> RiskRow:
+def _reach_all(graph, scopes: list[str], ids: list[str]) -> dict[str, int]:
+    """``bus_factor._dependents`` for every thing in ``ids`` in one query: how many visible things
+    depend on each, directly or through others, over routes the asker can read."""
+    rows = graph.ro_query(
+        f"""
+        MATCH path = (dependent:Service)-[:DEPENDS_ON*1..{bus_factor.MAX_DEPTH}]->(target:Service)
+        WHERE target.id IN $ids AND all(n IN nodes(path) WHERE {SCOPED.format(var="n")})
+          AND NOT {kinds.KIND_OF.format(var="dependent")} IN $excluded
+        RETURN target.id, count(DISTINCT dependent)
+        """,
+        {"ids": ids, "scopes": scopes, "excluded": sorted(kinds.NOT_DEPENDABLE)},
+    ).result_set
+    return dict(rows)
+
+
+def _row(thing: list, pagerank: dict[str, float], reach: dict[str, int], path: list[PathStep]) -> RiskRow:
     service_id, name, kind, team, owner_rows, documents = thing
     kind = kinds.kind_or_default(kind)
     team_id, team_name = team if team and team[0] is not None else (None, None)
@@ -163,8 +179,7 @@ def _row(graph, thing: list, pagerank: dict[str, float], scopes: list[str], reac
         key=lambda owner: owner.name,
     )
     entity = Entity(service_id, name, "Service", kind)
-    known = ask_service.knowers(graph, entity, scopes)
-    people = [person for person, _score, _reasons in ask_service.rank_people(known.path, entity)]
+    people = [person for person, _score, _reasons in ask_service.rank_people(path, entity)]
     account = kind in kinds.NOT_DEPENDABLE
     flags = {
         "one_person": len(people) <= 1,
@@ -178,7 +193,7 @@ def _row(graph, thing: list, pagerank: dict[str, float], scopes: list[str], reac
         team_id=team_id,
         team=team_name,
         owners=owners,
-        dependents=bus_factor._dependents(graph, service_id, {"scopes": scopes}, reach),
+        dependents=reach.get(service_id, 0),
         # Accounts never appear in load_bearing, so they get no PageRank either.
         pagerank=None if account or service_id not in pagerank else round(pagerank[service_id], 4),
         people=people,

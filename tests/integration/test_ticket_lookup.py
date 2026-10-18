@@ -92,13 +92,13 @@ class TicketLookupTest(unittest.TestCase):
     def test_an_unknown_key_in_a_synced_project_says_what_is_synced(self):
         result = _ask("what is PLAT-999")
         self.assertFalse(result.found)
-        self.assertTrue(result.answer.startswith("PLAT-999 isn't in the graph; Jira PLAT is synced (PLAT-7 to PLAT-12)."), result.answer)
+        self.assertTrue(result.answer.startswith("I can't find PLAT-999 in the graph; Jira PLAT is synced (PLAT-7 to PLAT-12)."), result.answer)
 
     def test_an_unknown_key_elsewhere_may_be_in_an_unshared_project(self):
-        self.assertEqual(_ask("what is ZED-5").answer, "ZED-5 isn't in the graph. It may be in a project that is not shared with Company Brain.")
-        self.assertNotIn("isn't in the graph", _ask("who is working on the billing service for q3-2026").answer)
+        self.assertEqual(_ask("what is ZED-5").answer, "I can't find ZED-5 in the graph. It may be in a project that is not shared with Company Brain.")
+        self.assertNotIn("I can't find", _ask("who is working on the billing service for q3-2026").answer)
         # The company-wide reader cannot see PLAT, so learns nothing about it.
-        self.assertEqual(_ask("what is PLAT-999", PUBLIC).answer, "PLAT-999 isn't in the graph. It may be in a project that is not shared with Company Brain.")
+        self.assertEqual(_ask("what is PLAT-999", PUBLIC).answer, "I can't find PLAT-999 in the graph. It may be in a project that is not shared with Company Brain.")
 
     # --- blocked, projects, caps -----------------------------------------------------------------
 
