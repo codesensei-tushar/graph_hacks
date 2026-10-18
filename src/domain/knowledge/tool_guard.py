@@ -8,7 +8,10 @@ whose message is ``TIMEOUT_REPLY``, for the surface to answer with. Every other 
 through untouched.
 
 Used around tool execution by ``GET /api/ask``, the explorer routes and
-``mcp_tools.call_tool``; the Slack turn is meant to use it the same way.
+``mcp_tools.call_tool``; the Slack turn is meant to use it the same way. The public surfaces
+pass ``timeout_ms=PUBLIC_QUERY_TIMEOUT_MS``, so each graph query they run stops at that
+instead of FalkorDB's server-wide ``TIMEOUT``: an anonymous caller cannot hold a worker or
+fill the query queue for Slack and sync. A guard without ``timeout_ms`` keeps the server's.
 """
 
 import logging
@@ -16,11 +19,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from redis.exceptions import ResponseError
+
+from src.db import falkordb_client
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 log = logging.getLogger(__name__)
 
 TIMEOUT_REPLY = "That took too long; try a narrower question."
+# Per query, for the public ask page, the explorer and MCP. The server's TIMEOUT (10 s) stays for Slack and sync.
+PUBLIC_QUERY_TIMEOUT_MS = 2000
 
 
 class ToolTimedOut(RuntimeError):
@@ -38,10 +45,14 @@ def is_timeout(error: BaseException) -> bool:
 
 
 @contextmanager
-def guard(surface: str, what: str = "") -> Iterator[None]:
-    """Turn a query timeout inside the block into ``ToolTimedOut``, logged once with ``surface`` and ``what``."""
+def guard(surface: str, what: str = "", timeout_ms: int | None = None) -> Iterator[None]:
+    """Turn a query timeout inside the block into ``ToolTimedOut``, logged once with ``surface`` and ``what``.
+
+    With ``timeout_ms``, every graph query in the block that names no timeout of its own stops at it.
+    """
     try:
-        yield
+        with falkordb_client.query_timeout(timeout_ms):
+            yield
     except ToolTimedOut:
         raise
     except Exception as error:
