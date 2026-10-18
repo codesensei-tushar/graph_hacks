@@ -32,8 +32,29 @@ The whole first screen (between 640 and 940 px tall), on a curved horizon: navy 
 
 - A centred 760 px block, left-aligned inside: the eyebrow `Graph Hacks · Track 03 · Company Brain on FalkorDB`; the headline in a light weight, **Ask how your company works.** then, muted, *Every answer shows the path it walked.*, with *path* and *walked* heavy, slanted and dotted-underlined; the composer; the example chips from `/api/ask/tools`.
 - The composer is the centre of the page: a wide frosted card with the question on top, a "Public channels only" status pill (true: the page reads `org_shared`) and a round send button named "Ask". The product is the demo: asking renders the answer and the walk in 2.2.
-- At the foot of the screen: the subline as a small caption at the bottom-left ("People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.") and **How it works ↗** at the bottom-right. Add **Watch the demo** only once the video link exists.
+- At the foot of the screen: the subline as a small caption at the bottom-left ("People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.") and, at the bottom-right, **Take the 60-second tour** beside **How it works ↗** (2.1b). Add **Watch the demo** only once the video link exists.
 - The nav is sparse, uppercase and spread across the top, with **Graph** after **Ask**.
+
+### 2.1b The 60-second tour
+
+Show, don't describe: **Take the 60-second tour** plays the product, live. `tour.js` walks six steps. Each step asks its question through the page (`window.BrainPage`, the one hook in `app.js`), so the answer, its walk, the cache and the address behave as a click's. It lights up what the answer shows (the page dims around it), replays the walk, and says in one caption what to notice:
+
+| Step | Asks | Lights up | On this graph |
+| --- | --- | --- | --- |
+| Every answer shows its path | `who owns billing, and who else has worked on it` | the drawing | who owns it, and how many edges the walk took |
+| It says what it does not know | `who knows the payments gateway` | the refusal | the nearest real things |
+| One person away from an outage | `what are our riskiest services` | the risk map | the first row: what depends on it, who knows it |
+| Everything one person holds | `who is Arjun Mehta` | the profile grid | what they hold, and what rests on them alone |
+| What changed this week | `what changed this week` | the digest | the count of changes (a quiet week widens to a month, and says so) |
+| Take FalkorDB out | nothing | the proof table | the proof line ("5 of 6 capabilities collapse …") |
+
+- **Live, not canned.** Under each caption, one line read off the step's own answer ("On this graph …"), with this graph's names and numbers. What that line names is marked in place once the step settles: the owner's `OWNS` edge and its line under the drawing (the drawing's own hover light), the Try instead row, the risk map's first row, the profile rows that rest on the person alone, and the proof line. A step's marks go when the step does.
+- **Honest.** A step whose question `/api/ask/tools` does not offer as an example chip on the graph in use is skipped, so the tour never shows a dead end; the counter counts what is left.
+- **Within the limit.** Five asks, at most eight (`MAX_ASKS`); a step seen again within a minute reads the page's cache.
+- **Controls.** A card in a corner with the step counter, a dot per step, Back, Pause/Play, Next (Finish on the last) and Skip. It plays about nine seconds a step and stops at the last; it pauses itself when the tab is hidden or the reader scrolls the page. Esc leaves; the arrow keys step while the card has focus. Leaving keeps the answer on screen and gives focus back to the button. Finish leaves the last answer on screen under a closing card, "That's the tour", with **Start again** and **Ask your own** (which leaves and focuses the ask box).
+- **Linkable.** `/?tour=1` starts it, `&step=N` at a step, and the address follows the tour, so a reload picks it up where it was. Leaving puts back the answer's own `?q=` address.
+- **Accessible.** The card is a labelled, non-modal dialog whose caption is announced; the dots are named "Step N: …". Under reduced motion it never plays on its own, scrolls without smoothing and shows progress instead of a running bar.
+- The recording view is untouched until the tour starts: the button sits beside How it works, and everything else is new classes in `tour.css`.
 
 ### 2.2 Live proof: ask the graph
 
@@ -47,7 +68,7 @@ The whole first screen (between 640 and 940 px tall), on a curved horizon: navy 
 
 Every answer is a place to go next, and every next click lands on an answer.
 
-- **Ask next.** Up to three follow-up questions under every answer that was found, after the `A -[REL]-> B` lines and before the footer, so the answer text, the drawing and its head stay where the recording frames them. They come from the tool and the path: after `who owns billing` they are what breaks if Billing Service goes down, what if Arjun Mehta (its owner) leaves, and what Billing Service depends on. The tool's own steps live in `app.js`'s `NEXT`; the rest are the first question of each node drawn. The question just asked is never offered again.
+- **Ask next.** Up to three follow-up questions under every answer that was found, after the footer line ("Tool … · picked by … · read from …"), so the answer text, the drawing, its head and the footer's provenance stay where the recording frames them; a frame that is cut cuts the optional rows. They come from the tool and the path: after `who owns billing` they are what breaks if Billing Service goes down, what if Arjun Mehta (its owner) leaves, and what Billing Service depends on. The tool's own steps live in `answer.js`'s `NEXT`; the rest are the first question of each node drawn. The question just asked is never offered again.
 - **Try instead.** A refusal keeps the server's sentence word for word and turns its nearest names into questions: "who knows the payments gateway" offers `who knows Billing Service` and `who knows API Gateway`.
 - **Click a node.** Every node in an answer's drawing asks its first question on click, Enter or Space, and its tooltip says which ("Click to ask: what if Arjun Mehta leaves"). The hero graph asks the same question, from the same mapping. Team pages keep their drawings passive.
 - **Walk with the keys.** On a focused node of any drawing, the arrow keys move along its edges: Right to what it points at, Left to what points at it, Up and Down to its neighbours in the column. Focus moves; nothing is asked until Enter.
@@ -220,7 +241,7 @@ Default to the operating system's setting, with a toggle in the header that reme
 4. **Nothing calls the model from the public page.** It uses the keyword router, as now.
 5. **No fabricated numbers, logos, testimonials or replies.** Every count comes from an API response. A quoted reply is either live or copied from a test that pins it, and labelled with where it comes from. No reference-project names anywhere.
 6. **Copy matches main.** If a sentence in section 2 stops being true, change the sentence, not the facts.
-7. **Performance.** No layout shift: reserve space for every async section with a skeleton of the final size. Page weight under about 320 KB before API JSON (300 KB until the risk grid, the explore affordances and the builders section), own JS under about 96 KB unminified, at most two font files, no images over 150 KB. Aim for Lighthouse 90 or better on performance and accessibility, mobile profile.
+7. **Performance.** No layout shift: reserve space for every async section with a skeleton of the final size. Page weight under about 340 KB before API JSON (300 KB until the risk grid, the explore affordances and the builders section, 320 KB until the tour), own JS under about 120 KB unminified (96 KB until the tour), at most two font files, no images over 150 KB. Aim for Lighthouse 90 or better on performance and accessibility, mobile profile.
 8. **Works without JavaScript** for everything that is not live: the hero copy, how it works, for builders and the footer render as static HTML. Live sections say "This part needs JavaScript".
 9. **Tests.** The existing page tests stay green, including the guard in `tests/unit/test_static_page.py`. New tests: every section in section 2 is present with its heading; no number in the HTML is hard-coded where section 2 says it comes from the API; the page makes no request outside the routes in point 2 and the vendored files; `/team/{id}` still renders.
 10. **The team page** (`/team/{id}`) adopts the same tokens, type and drawing in the same PR or the next one, so the two pages read as one site.
