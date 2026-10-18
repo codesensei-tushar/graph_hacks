@@ -173,6 +173,9 @@ class SlackMemoryScope:
     user_id: str | None = None
     # Slack user id, used to resolve the asker's private-channel read access.
     slack_user_id: str | None = None
+    # Whether everyone who reads the answer is a full member of the workspace (no guest, no Slack
+    # Connect). False drops org_internal and connector scopes from the reads (read_scope.py).
+    internal_audience: bool = True
 
 
 def slack_memory_container_tag(scope: SlackMemoryScope | None) -> str | None:
@@ -296,10 +299,14 @@ def slack_memory_scope_for_turn(
 
     # Privacy signals are monotonic: a live private event wins over cached public
     # conversation info, and cached private info stays the safer scope when the
-    # event is ambiguous.
-    is_private = is_private_slack_channel(channel, channel_type) or (
-        conversation_info is not None and conversation_info.is_private is True
-    )
+    # event is ambiguous. An event without channel_type (app_mention) says nothing about
+    # a C-channel, so conversations.info decides: a channel it reports public is public.
+    if channel_type is None and conversation_info is not None and isinstance(conversation_info.is_private, bool) and not (channel or "").startswith("G"):
+        is_private = conversation_info.is_private
+    else:
+        is_private = is_private_slack_channel(channel, channel_type) or (
+            conversation_info is not None and conversation_info.is_private is True
+        )
     if is_private:
         return SlackMemoryScope(kind="private_channel", channel_id=channel, channel_type=channel_type, user_id=user_id)
     return SlackMemoryScope(kind="shared", channel_id=channel, channel_type=channel_type)

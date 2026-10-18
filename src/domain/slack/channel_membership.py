@@ -22,17 +22,18 @@ def _now() -> int:
     return int(time.time() * 1000)
 
 
-def record_membership(channel_id: str, slack_user_id: str, now: int | None = None) -> None:
+def record_membership(channel_id: str, slack_user_id: str, now: int | None = None, is_private: bool | None = True) -> None:
+    """``is_private`` is set on the channel only when known (None leaves it as recorded)."""
     _, graph = connect()
     graph.query(
         """
         MERGE (c:Channel {id: $channel})
-        SET c.is_private = true
+        SET c.is_private = coalesce($private, c.is_private)
         MERGE (u:SlackUser {id: $user})
         MERGE (u)-[r:MEMBER_OF]->(c)
         SET r.updated_at = $now
         """,
-        {"channel": channel_id, "user": slack_user_id, "now": now or _now()},
+        {"channel": channel_id, "user": slack_user_id, "now": now or _now(), "private": is_private},
     )
 
 

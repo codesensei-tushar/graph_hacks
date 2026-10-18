@@ -7,6 +7,10 @@ asker belongs to, every private GitHub repo their linked GitHub account collabor
 and every restricted connector project their linked account may read (their full access
 surface). Public and private channels only ever read org_shared, org_internal and their
 own container.
+
+``org_internal`` is for full members of the org's workspaces: a turn whose audience is not
+all full members (a guest asking, a channel with guests, a Slack Connect channel:
+``scope.internal_audience`` False) reads neither it nor any restricted connector scope.
 """
 
 from src.connectors.graph import readable_container_scopes_for_slack_user
@@ -27,7 +31,8 @@ def resolve_brain_read_container_tags(
     # An explicit empty surface means read nothing, not fall back to the derived set.
     if override is not None:
         return list(dict.fromkeys(override))
-    tags = [SHARED_TEAM_BRAIN_CONTAINER_TAG, ORG_INTERNAL_CONTAINER_TAG]
+    internal = scope is None or scope.internal_audience is not False
+    tags = [SHARED_TEAM_BRAIN_CONTAINER_TAG] + ([ORG_INTERNAL_CONTAINER_TAG] if internal else [])
     scope_tag = slack_memory_container_tag(scope)
     if scope_tag and scope_tag not in tags:
         tags.append(scope_tag)
@@ -38,7 +43,7 @@ def resolve_brain_read_container_tags(
         for tag in readable_github_scopes_for_slack_user(scope.slack_user_id):
             if tag not in tags:
                 tags.append(tag)
-        for tag in readable_container_scopes_for_slack_user(scope.slack_user_id):
+        for tag in readable_container_scopes_for_slack_user(scope.slack_user_id) if internal else []:
             if tag not in tags:
                 tags.append(tag)
     return tags

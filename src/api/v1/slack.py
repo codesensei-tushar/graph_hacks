@@ -15,6 +15,11 @@ Event dispatch, in upstream order:
 | explicit (DM, @mention, thread, plain-name wake) | ``turn_service.run_slack_turn`` |
 | top-level chime candidate    | ``chime.run_slack_chime_in``                    |
 | other messages               | ``turn_service.run_slack_context_event``        |
+
+Every event and interaction runs in the org its Slack team is routed to (a ``WorkspaceRoute``
+in the control graph, cached for a minute), resolved before any graph call; a team with no
+route is the legacy org's, as every workspace installed before orgs is. Background tasks run
+after the request's context is gone, so each is handed its org (``tenancy.in_org``).
 """
 
 import json
@@ -25,7 +30,9 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, Response
 
 from src.core.config import settings
+from src.core.tenancy import OrgRef, in_org, org_context
 from src.db.falkordb_client import kv
+from src.domain import orgs
 from src.domain.slack import channel_membership, turn_service
 from src.domain.slack.channels import rollout
 from src.domain.slack.team_invite import (
@@ -99,6 +106,20 @@ def _run_team_join(key: str, team_id: str, user: dict) -> None:
         log.exception("[slack] on_slack_team_join failed")
 
 
+class _OrgTasks:
+    """``BackgroundTasks`` whose every task runs in ``org``."""
+
+    def __init__(self, background: BackgroundTasks, org: OrgRef) -> None:
+        self.background, self.org = background, org
+
+    def add_task(self, fn, *args, **kwargs) -> None:
+        self.background.add_task(in_org, self.org, fn, *args, **kwargs)
+
+
+def _org_for_team(team_id: str | None) -> OrgRef:
+    return orgs.org_ref_for_team(team_id)
+
+
 def _workspace_user_event(body: dict) -> tuple[str, str, str, dict] | None:
     if body.get("type") != "event_callback":
         return None
@@ -132,12 +153,17 @@ async def slack_events(request: Request, background: BackgroundTasks):
     if workspace_user:
         team_id, event_id, kind, user = workspace_user
         key = f"slack:evt:{event_id}"
-        if _seen(key) or get_workspace_by_team_id(team_id) is None:
+        if _seen(key):
             return {"ok": True}
+        org = _org_for_team(team_id)
+        tasks = _OrgTasks(background, org)
+        with org_context(org):
+            if get_workspace_by_team_id(team_id) is None:
+                return {"ok": True}
         if kind == "team_join":
-            background.add_task(_run_team_join, key, team_id, user)
+            tasks.add_task(_run_team_join, key, team_id, user)
         else:
-            background.add_task(_run_and_mark, key, on_slack_user_change, team_id, user)
+            tasks.add_task(_run_and_mark, key, on_slack_user_change, team_id, user)
         return {"ok": True}
 
     envelope = parse_envelope(body)
@@ -159,6 +185,13 @@ async def slack_events(request: Request, background: BackgroundTasks):
         _mark_seen(key)
         return {"ok": True}
 
+    org = _org_for_team(team_id)
+    with org_context(org):
+        return _dispatch_event(_OrgTasks(background, org), team_id, event_id, event, key)
+
+
+def _dispatch_event(background: _OrgTasks, team_id: str, event_id: str, event: SlackEventInner, key: str) -> dict:
+    """Everything after dedupe, in the team's org."""
     workspace = get_workspace_by_team_id(team_id)
     if workspace is None:
         _log_event("ignored", event, reason="workspace_not_connected")
@@ -265,6 +298,14 @@ async def slack_interactions(request: Request, background: BackgroundTasks):
     if not verify_slack_signature(raw_body, headers, settings.slack_signing_secret):
         return JSONResponse({"error": "invalid signature"}, status_code=401)
 
+    decoded = _decoded_payload(raw_body)
+    org = _org_for_team(((decoded or {}).get("team") or {}).get("id"))
+    background = _OrgTasks(background, org)
+    with org_context(org):
+        return _dispatch_interaction(background, raw_body, decoded)
+
+
+def _dispatch_interaction(background: _OrgTasks, raw_body: bytes, decoded: dict | None):
     approval = parse_interaction_payload(raw_body)
     if approval:
         background.add_task(
@@ -282,7 +323,6 @@ async def slack_interactions(request: Request, background: BackgroundTasks):
         background.add_task(rollout.start_public_channel_rollout, rollout_click)
         return {"ok": True}
 
-    decoded = _decoded_payload(raw_body)
     team_invite = parse_team_invite_interaction_payload(decoded) if decoded else None
     if team_invite:
         background.add_task(start_team_invite_wave, **team_invite)

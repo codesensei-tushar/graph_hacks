@@ -17,7 +17,9 @@ Person (``org_member`` true or unset). Identity follows theirs: a stable map fro
 web-confirmed link is never overwritten by an email match.
 
 Single-workspace mode still works: with ``SLACK_BOT_TOKEN`` set, a workspace with
-no stored install is synthesized from auth.test.
+no stored install is synthesized from auth.test. That is the legacy org's only: every
+function here works on the graph of the org in context (``tenancy.org_context``), and
+another org's workspaces are always stored OAuth installs.
 """
 
 import json
@@ -27,6 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 
+from src.core import tenancy
 from src.core.config import settings
 from src.db.falkordb_client import connect, kv
 from src.domain.slack import identity_lock
@@ -348,6 +351,11 @@ def _client_for(token: str) -> SlackClient:
     return SlackClient(token)
 
 
+def _env_mode() -> bool:
+    """Single-workspace mode (``SLACK_BOT_TOKEN``) applies to the legacy org only."""
+    return settings.slack_enabled and tenancy.is_legacy()
+
+
 def _env_client() -> SlackClient:
     return _client_for(settings.slack_bot_token)
 
@@ -410,7 +418,7 @@ def _workspace_from_row(row: dict) -> SlackWorkspace | None:
             log.exception("[slack] bot token decrypt failed team=%s", row["team_id"])
             return None
         client, source = _client_for(token), "oauth"
-    elif settings.slack_bot_token:
+    elif settings.slack_bot_token and tenancy.is_legacy():
         client, source = _env_client(), "env"
     else:
         return None
@@ -433,7 +441,7 @@ def get_workspace_by_team_id(team_id: str) -> SlackWorkspace | None:
         return _workspace_from_row(row)
 
     # Single-workspace mode: the env token's own team.
-    if not settings.slack_enabled:
+    if not _env_mode():
         return None
     identity = bot_identity()
     if not identity:
@@ -455,13 +463,33 @@ def get_workspace_by_team_id(team_id: str) -> SlackWorkspace | None:
 
 def list_connected_workspaces() -> list[SlackWorkspace]:
     out = [w for w in (_workspace_from_row(row) for row in list_workspace_rows() if row.get("bot_token_enc")) if w]
-    if settings.slack_enabled:
+    if _env_mode():
         identity = bot_identity()
         if identity and all(w.team_id != identity["team_id"] for w in out):
             env_ws = get_workspace_by_team_id(identity["team_id"])
             if env_ws:
                 out.append(env_ws)
     return out
+
+
+def list_all_connected_workspaces() -> list[tuple[tenancy.OrgRef, SlackWorkspace]]:
+    """Every org's connected workspaces, each with its org: the legacy org's, then each other org's
+    (startup recovery). An org whose graph cannot be read is logged and skipped."""
+    from src.domain import orgs
+
+    refs = [tenancy.legacy_org()]
+    try:
+        refs += [org.ref() for org in orgs.list_orgs() if not org.legacy]
+    except Exception:
+        log.exception("[slack] listing orgs failed; recovering the legacy org only")
+    found = []
+    for ref in refs:
+        try:
+            with tenancy.org_context(ref):
+                found += [(ref, workspace) for workspace in list_connected_workspaces()]
+        except Exception:
+            log.exception("[slack] listing workspaces failed org=%s", ref.id)
+    return found
 
 
 def get_workspace_status() -> dict:
@@ -573,7 +601,7 @@ def reset_slack_workspace_state(team_id: str) -> None:
 
 def _rows_for_teardown(team_id: str | None) -> list[dict]:
     rows = [row for row in list_workspace_rows() if team_id is None or row["team_id"] == team_id]
-    if not any(row.get("bot_token_enc") for row in rows) and settings.slack_enabled:
+    if not any(row.get("bot_token_enc") for row in rows) and _env_mode():
         identity = bot_identity()
         if identity and (team_id is None or identity["team_id"] == team_id):
             existing = next((row for row in rows if row["team_id"] == identity["team_id"]), None)
@@ -646,6 +674,18 @@ class SlackTeardownResult:
     reason: str | None = None  # not_connected | cleanup_failed
 
 
+def _unroute(team_id: str) -> None:
+    """A removed workspace stops routing to its org (the legacy org's teams need no route)."""
+    if tenancy.is_legacy():
+        return
+    from src.domain import orgs
+
+    try:
+        orgs.unroute_team(team_id)
+    except Exception:
+        log.exception("[slack] removing the workspace route failed team=%s", team_id)
+
+
 def disconnect_slack_workspace(team_id: str | None = None) -> SlackTeardownResult:
     """A held farewell fails before teardown so the retry can still post it."""
     from src.domain.slack.home_welcome import company_brain_disconnect_message
@@ -702,6 +742,7 @@ def teardown_slack_workspace(team_id: str | None = None, uninstall=uninstall_sla
             replaced = True
             continue
         graph.query("MATCH (m:SlackWorkspaceMember {team_id: $team}) DETACH DELETE m", {"team": row["team_id"]})
+        _unroute(row["team_id"])
         removed += 1
 
     if pending or replaced:

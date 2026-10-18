@@ -74,6 +74,8 @@ class SlackConversationInfo:
     is_member: bool | None = None
     is_archived: bool | None = None
     is_im: bool | None = None
+    # Shared with another organisation (Slack Connect), or an invitation to share is pending.
+    is_ext_shared: bool | None = None
 
 
 @dataclass
@@ -873,6 +875,7 @@ class SlackClient:
                 is_member=info.get("is_member"),
                 is_archived=info.get("is_archived"),
                 is_im=info.get("is_im"),
+                is_ext_shared=bool(info.get("is_ext_shared") or info.get("is_pending_ext_shared")),
             ),
         )
 

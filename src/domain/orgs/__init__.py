@@ -88,9 +88,22 @@ def get_org(org_id: str) -> Org | None:
     return _org(rows[0]) if rows else None
 
 
+_ref_cache: dict[str, tuple[float, OrgRef]] = {}
+
+
 def get_org_ref(org_id: str) -> OrgRef | None:
+    """The org's OrgRef, cached for a minute (the scheduler resolves one per job). An org's
+    graph never changes, so a cached ref is only ever stale for a deleted org."""
+    now = time.monotonic()
+    cached = _ref_cache.get(org_id)
+    if cached and now - cached[0] < ROUTE_CACHE_SECONDS:
+        return cached[1]
     org = get_org(org_id)
-    return org.ref() if org else None
+    if org is None:
+        _ref_cache.pop(org_id, None)
+        return None
+    _ref_cache[org_id] = (now, org.ref())
+    return org.ref()
 
 
 def list_orgs() -> list[Org]:
@@ -231,6 +244,7 @@ def teams_of(org_id: str) -> list[str]:
 def clear_route_cache() -> None:
     with _route_lock:
         _route_cache.clear()
+    _ref_cache.clear()
 
 
 # --- external accounts ---------------------------------------------------------------------

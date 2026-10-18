@@ -20,13 +20,14 @@ team), the console API (per session), background threads and BackgroundTasks (th
 the context at creation, so set it before ``add_task``/``Thread``, or inside the task).
 """
 
+import functools
 import logging
 import re
 import secrets
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar, Token
+from contextvars import ContextVar, Token, copy_context
 from dataclasses import dataclass
 
 from src.core.config import settings
@@ -75,6 +76,11 @@ def control_graph():
     from src.db.falkordb_client import client
 
     return client().select_graph(CONTROL_GRAPH)
+
+
+def current_org_or_none() -> OrgRef | None:
+    """The org in context, or None (no fallback, no log)."""
+    return _current.get()
 
 
 def current_org() -> str | None:
@@ -141,6 +147,20 @@ def set_org(org: "OrgRef | str") -> Token:
 
 def reset_org(token: Token) -> None:
     _current.reset(token)
+
+
+def bind(fn: Callable) -> Callable:
+    """``fn`` to run later in this context (and so this org): for ``threading.Thread(target=...)``,
+    which, unlike asyncio and Starlette's thread pool, does not carry context variables over."""
+    context = copy_context()
+    return functools.partial(context.run, fn)
+
+
+def in_org(org: "OrgRef | str", fn: Callable, *args, **kwargs):
+    """Call ``fn`` inside ``org_context(org)``: a BackgroundTask runs after the request's context
+    is gone, so pass ``background.add_task(in_org, org, fn, ...)``."""
+    with org_context(org):
+        return fn(*args, **kwargs)
 
 
 _CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz"
