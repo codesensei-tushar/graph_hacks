@@ -21,6 +21,9 @@ class Settings:
     control_graph: str = field(default_factory=lambda: os.getenv("BRAIN_CONTROL_GRAPH", "") or "brain_control")
     # A graph call with no org in context raises instead of falling back to the legacy org. Tests only.
     tenancy_strict: bool = field(default_factory=lambda: os.getenv("TENANCY_STRICT", "").lower() in ("1", "true", "yes"))
+    # Graph writes only: a write with no org in context raises instead of landing in the legacy org's
+    # graph. Reads keep the fallback. On in production (deploy/docker-compose.yml).
+    tenancy_write_strict: bool = field(default_factory=lambda: os.getenv("TENANCY_WRITE_STRICT", "").lower() in ("1", "true", "yes"))
     # The org console (/console, /auth). Off by default: production is unchanged until it is turned on.
     console_enabled: bool = field(default_factory=lambda: os.getenv("CONSOLE_ENABLED", "").lower() in ("1", "true", "yes"))
     # /docs, /redoc and /openapi.json list every route, admin ones included. Off by default; local development only.

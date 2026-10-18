@@ -22,6 +22,11 @@ query passes through. It does two things and forwards everything else untouched:
   ``duration_ms``, and ``result`` or ``error``, filled in). Register with ``add_query_hook``.
   A hook that raises is logged and skipped; it never fails or changes the query.
 
+- **Writes need an org.** A graph handed out with no org in context (the legacy fallback) refuses
+  a write (``CREATE``, ``MERGE``, ``SET``, ``DELETE``, ``REMOVE``, or ``delete()``) with
+  ``NoOrgContext`` while ``TENANCY_WRITE_STRICT`` is set (production): a code path that forgot
+  its org must not write another org's data into the legacy graph. Reads keep the fallback.
+
 It also keeps each graph's **generation**: a counter in Redis that every ``query`` changing
 something (nodes, edges, properties, labels) and every ``delete`` bumps. Caches of what a graph
 holds (the answer cache) put ``generation(name)`` in their key, so a write anywhere, in any
@@ -56,7 +61,7 @@ query_timeout_ms: ContextVar[int | None] = ContextVar("query_timeout_ms", defaul
 # When the request running in this context must be done by (time.monotonic()); None is no deadline.
 query_deadline: ContextVar[float | None] = ContextVar("query_deadline", default=None)
 
-_WRITE = re.compile(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE)\b", re.IGNORECASE)
+_WRITE = re.compile(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE|DROP)\b", re.IGNORECASE)
 
 GENERATION_KEY = "brain:graph_generation:{}"
 # Generations already read in this context, by graph name; set by ``generation_snapshot``.
@@ -156,19 +161,29 @@ class _GraphProxy:
     Every other attribute (``name``, ``delete``, ``explain``, ...) is the wrapped graph's own.
     """
 
-    def __init__(self, graph) -> None:
+    def __init__(self, graph, implicit_org: bool = False) -> None:
         self._graph = graph
+        # Handed out with no org in context: the legacy org's graph by fallback, not by choice.
+        self._implicit_org = implicit_org
+
+    def _check_write(self, q: str | None) -> None:
+        if self._implicit_org and settings.tenancy_write_strict and (q is None or _WRITE.search(q)):
+            from src.core.tenancy import NoOrgContext
+
+            raise NoOrgContext("graph write with no org in context: wrap the call in tenancy.org_context(org)")
 
     def __getattr__(self, name: str):
         return getattr(self._graph, name)
 
     def query(self, q: str, params=None, timeout=None, **kwargs):
+        self._check_write(q)
         return self._run("query", q, params, timeout, kwargs)
 
     def ro_query(self, q: str, params=None, timeout=None, **kwargs):
         return self._run("ro_query", q, params, timeout, kwargs)
 
     def delete(self):
+        self._check_write(None)
         try:
             return self._graph.delete()
         finally:
@@ -242,8 +257,11 @@ def dark_graph():
 def connect():
     if graph_reads_disabled.get():
         return None, DarkGraph(graph_name())
+    from src.core.tenancy import current_org_or_none
+
+    implicit = current_org_or_none() is None
     db = client()
-    return db, _GraphProxy(db.select_graph(graph_name()))
+    return db, _GraphProxy(db.select_graph(graph_name()), implicit_org=implicit)
 
 
 def kv():

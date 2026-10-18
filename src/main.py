@@ -97,6 +97,15 @@ def _recover() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Startup writes the legacy org's graph (seed, indexes, env connector installs) on purpose: say so,
+    # so TENANCY_WRITE_STRICT lets it. Threads started here do not inherit the context.
+    with tenancy.org_context(tenancy.legacy_org()):
+        _start()
+    async with mcp_api.session_lifespan():
+        yield
+
+
+def _start() -> None:
     _seed_if_empty()
     register_turn_agent(answer_turn)
     turn_reset.register()
@@ -120,8 +129,6 @@ async def lifespan(_app: FastAPI):
         log.warning("Slack is not configured: set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET, or the OAuth app credentials")
     if not settings.mcp_token:
         log.info("MCP is public and rate-limited; MCP_TOKEN lifts the limit")
-    async with mcp_api.session_lifespan():
-        yield
 
 
 # The API docs list every route, admin ones included: served only when DOCS_ENABLED is set.
@@ -147,3 +154,5 @@ ops.install(app)
 web.install(app)
 console_web.install(app)
 mcp_api.install(app)
+# Outermost: the legacy-only surfaces (public site, ask, MCP, GitHub, /ops/seed and /ops/import) run as the legacy org.
+app.add_middleware(tenancy.LegacyOrgRoutes)
