@@ -271,6 +271,8 @@ def _onboard(request: TurnRequest, write_tag: str | None, names: dict[str, str])
             args["decided_at"] = decided_at
         team = onboard_command.check(args, container, request.read_tags)
     except TeamFileError as error:
+        if onboard_command.NO_COMPANY in error.problems:
+            return TurnOutcome(reply=onboard_command.NO_COMPANY)
         return TurnOutcome(reply=f"I can't onboard that yet: {onboard_command.for_slack(error.problems)}.")
     return TurnOutcome(
         status="suspended",
