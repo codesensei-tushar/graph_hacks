@@ -4,9 +4,35 @@ A GitHub App feeds pull requests, reviews, and issues into the same FalkorDB gra
 
 The app is read-only. It stores titles, descriptions, people, file paths, and states. It never stores code or diffs.
 
-## Create the app
+## Register the app (operator page, no terminal)
 
-One app per environment, like Slack: a dev app on your ngrok URL and a production app on `https://brain.noobsurd.space`.
+One app per deployment. The operator registers it from a browser with GitHub's [App Manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest):
+
+1. Open `https://YOUR-HOST/ops/github/app` and enter `BRAIN_ADMIN_TOKEN` (kept in the tab's memory only).
+2. Pick a name (GitHub App names are unique across GitHub; the default is "Company Brain") and, optionally, the GitHub organization that should own the app. Empty means your personal account.
+3. **Register on GitHub** posts the manifest to `https://github.com/settings/apps/new` (or `https://github.com/organizations/<org>/settings/apps/new`) with a single-use `state`. Click **Create GitHub App** there.
+4. GitHub redirects to `/ops/github/app/created?code=...&state=...`. The server takes the state once, trades the code at [`POST /app-manifests/{code}/conversions`](https://docs.github.com/en/rest/apps/apps#create-a-github-app-from-a-manifest) for the app id, slug, private key, webhook secret, client id and client secret, and stores them in the control graph (`(:GitHubApp {id: 'default'})`). The secrets are encrypted with MultiFernet (`TOKEN_ENCRYPTION_KEYS`, `allow_plaintext=False`). Without a key, the page refuses to start. The whole flow must finish within an hour (GitHub's limit).
+
+The manifest it posts:
+
+| Field | Value |
+| --- | --- |
+| `url` | `PUBLIC_URL` |
+| `hook_attributes` | `{url: PUBLIC_URL/github/webhook, active: true}` |
+| `redirect_url` | `PUBLIC_URL/ops/github/app/created` |
+| `setup_url` | `PUBLIC_URL/console/oauth/github/setup`, with `setup_on_update: true` |
+| `callback_urls` | `PUBLIC_URL/console/oauth/github/verify` (the install check) and `PUBLIC_URL/github/oauth/callback` (`link github`) |
+| `public` | `true`, so other companies can install it on their own accounts |
+| `default_permissions` | `metadata`, `contents`, `pull_requests`, `issues`, `members`: all `read` |
+| `default_events` | `pull_request`, `pull_request_review`, `issues`, `repository`, `member` |
+
+`installation` and `installation_repositories` events reach every GitHub App, and GitHub refuses a subscription to them, so they are not listed. `members: read` is an organization permission. It is needed for the `member` event and does nothing on a personal account.
+
+A second registration is refused while one is stored, because it would strand the first app's installations. `GET /ops/github/app/status` (admin token) shows the app: its source, id, slug, owner and install link. It never shows a secret. `POST /ops/tokens/rewrap` re-encrypts the stored app with the other credentials.
+
+## Or: configure the app by environment (as before)
+
+Environment variables still work, and **they win** over a registered app whenever `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET` and a private key are set. Create the app by hand:
 
 **GitHub → Settings → Developer settings → GitHub Apps → New GitHub App**
 
@@ -14,7 +40,8 @@ One app per environment, like Slack: a dev app on your ngrok URL and a productio
 | --- | --- |
 | GitHub App name | `company-brain-dev` (names are global, so pick a free one) |
 | Homepage URL | The repo URL |
-| Callback URL | `https://YOUR-HOST/github/oauth/callback` |
+| Callback URL | `https://YOUR-HOST/github/oauth/callback` (and `https://YOUR-HOST/console/oauth/github/verify` to connect from the console) |
+| Setup URL | `https://YOUR-HOST/console/oauth/github/setup`, with "Redirect on update" on (only for the console) |
 | Request user authorization (OAuth) during installation | Off |
 | Webhook → Active | On |
 | Webhook URL | `https://YOUR-HOST/github/webhook` |
@@ -49,6 +76,7 @@ GITHUB_WEBHOOK_SECRET=<the openssl value>
 GITHUB_PRIVATE_KEY_PATH=/home/you/.config/company-brain/github-app.pem
 GITHUB_CLIENT_ID=Iv23...
 GITHUB_CLIENT_SECRET=...
+GITHUB_APP_SLUG=company-brain-dev   # optional: the console's Connect button links to github.com/apps/<slug>
 PUBLIC_URL=https://YOUR-HOST
 ```
 
@@ -113,6 +141,9 @@ A seeded `Person` with a `github` login (like `tushar` in `src/seed/company_brai
 
 | Path | Role |
 | --- | --- |
+| `src/api/v1/github_app.py`, `src/static/ops/github-app.*` | The operator page: register the app (manifest flow) |
+| `src/domain/github/app_registration.py` | The manifest, its state, the code conversion |
+| `src/integrations/github/app_config.py` | Which app runs: env, else the stored one (encrypted in the control graph) |
 | `src/api/v1/github.py` | `POST /github/webhook` (signature, dedupe on `X-GitHub-Delivery`, background work) and `GET /github/oauth/callback` |
 | `src/domain/github/webhooks.py` | What each event does |
 | `src/domain/github/ingest.py` | Pull requests, reviews, and issues into the graph |

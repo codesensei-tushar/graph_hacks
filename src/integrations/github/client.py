@@ -2,7 +2,12 @@
 
 The app signs a short JWT with its private key, trades it for an installation token
 (cached until shortly before it expires), and reads with that token. Everything here
-is read-only. ``GitHubClient`` is the seam tests replace with a fake.
+is read-only. ``GitHubClient`` is the seam tests replace with a fake. The app's id, key
+and OAuth credentials come from ``app_config.current()``: the environment, or the app
+registered from the operator page.
+
+A refusal is ``GitHubError``; when GitHub says to wait (a 429, or a 403 with
+``X-RateLimit-Remaining: 0`` or ``Retry-After``), ``retry_after`` holds the seconds to wait.
 """
 
 import calendar
@@ -14,11 +19,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from pathlib import Path
 
 import jwt
 
-from src.core.config import settings
+from src.integrations.github import app_config
 
 log = logging.getLogger(__name__)
 
@@ -31,9 +35,34 @@ _TOKEN_MARGIN_SECONDS = 300
 
 
 class GitHubError(RuntimeError):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, retry_after: float | None = None):
         super().__init__(f"GitHub {status}: {message}")
         self.status = status
+        # Seconds GitHub asked us to wait (rate limits), or None.
+        self.retry_after = retry_after
+
+
+class NotConfigured(GitHubError):
+    def __init__(self):
+        super().__init__(503, "no GitHub App is configured")
+
+
+def _retry_after(status: int, headers) -> float | None:
+    """The wait a rate-limited answer asks for: ``Retry-After``, else until ``X-RateLimit-Reset``."""
+    if status not in (403, 429) or headers is None:
+        return None
+    after = headers.get("Retry-After")
+    if after:
+        try:
+            return max(1.0, float(after))
+        except ValueError:
+            pass
+    if headers.get("X-RateLimit-Remaining") == "0" and headers.get("X-RateLimit-Reset"):
+        try:
+            return max(1.0, float(headers["X-RateLimit-Reset"]) - time.time() + 1)
+        except ValueError:
+            return 60.0
+    return 60.0 if status == 429 else None
 
 
 @dataclass(frozen=True)
@@ -57,7 +86,7 @@ def _request(method: str, url: str, token: str | None = None, body: dict | None 
             return (json.loads(raw) if raw else None), dict(response.headers)
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")[:300]
-        raise GitHubError(error.code, detail) from error
+        raise GitHubError(error.code, detail, _retry_after(error.code, error.headers)) from error
 
 
 def _next_link(headers: dict) -> str | None:
@@ -68,10 +97,11 @@ def _next_link(headers: dict) -> str | None:
     return None
 
 
-def _private_key() -> str:
-    if settings.github_private_key:
-        return settings.github_private_key.replace("\\n", "\n")
-    return Path(settings.github_private_key_path).expanduser().read_text()
+def _creds() -> app_config.AppCredentials:
+    creds = app_config.current()
+    if creds is None or not creds.private_key:
+        raise NotConfigured()
+    return creds
 
 
 class GitHubClient:
@@ -119,9 +149,42 @@ class GitHubClient:
 
 
 def app_jwt() -> str:
+    creds = _creds()
     now = int(time.time())
     # iat is backdated a minute for clock drift; GitHub caps exp at ten minutes.
-    return jwt.encode({"iat": now - 60, "exp": now + 9 * 60, "iss": settings.github_app_id}, _private_key(), algorithm="RS256")
+    return jwt.encode({"iat": now - 60, "exp": now + 9 * 60, "iss": creds.app_id}, creds.private_key, algorithm="RS256")
+
+
+# --- as the app itself (JWT) -------------------------------------------------------------------
+
+
+def get_app() -> dict:
+    """``GET /app``: the app's own record (slug, owner). Needs the JWT."""
+    data, _ = _request("GET", f"{API}/app", app_jwt())
+    return data or {}
+
+
+def get_installation(installation_id: int) -> dict:
+    """``GET /app/installations/{id}``: proves the installation is this app's, and names its account."""
+    data, _ = _request("GET", f"{API}/app/installations/{int(installation_id)}", app_jwt())
+    return data or {}
+
+
+def list_app_installations(limit: int = 300) -> list[dict]:
+    url: str | None = f"{API}/app/installations?per_page=100"
+    found: list[dict] = []
+    while url and len(found) < limit:
+        data, headers = _request("GET", url, app_jwt())
+        found.extend(data or [])
+        url = _next_link(headers)
+    return found[:limit]
+
+
+def convert_manifest(code: str) -> dict:
+    """``POST /app-manifests/{code}/conversions``: the new app's id, slug, pem, webhook secret and
+    OAuth credentials. No authentication: the one-hour code is the credential."""
+    data, _ = _request("POST", f"{API}/app-manifests/{urllib.parse.quote(code, safe='')}/conversions")
+    return data or {}
 
 
 _tokens: dict[int, tuple[str, float]] = {}
@@ -154,24 +217,43 @@ def client_for(installation_id: int) -> GitHubClient:
 
 
 def authorize_url(state: str, redirect_uri: str) -> str:
-    query = urllib.parse.urlencode({"client_id": settings.github_client_id, "state": state, "redirect_uri": redirect_uri})
+    creds = app_config.current()
+    query = urllib.parse.urlencode({"client_id": creds.client_id if creds else "", "state": state, "redirect_uri": redirect_uri})
     return f"{OAUTH}/authorize?{query}"
 
 
-def exchange_code_for_identity(code: str, redirect_uri: str) -> GitHubUserIdentity:
-    """Trade the OAuth code for a user token, read who it belongs to, then drop the token."""
-    params = urllib.parse.urlencode(
-        {
-            "client_id": settings.github_client_id,
-            "client_secret": settings.github_client_secret,
-            "code": code,
-            "redirect_uri": redirect_uri,
-        }
-    ).encode()
-    request = urllib.request.Request(f"{OAUTH}/access_token", data=params, method="POST", headers={"Accept": "application/json"})
+def _user_token(code: str, redirect_uri: str) -> str:
+    creds = app_config.current()
+    if creds is None or not creds.can_link:
+        raise NotConfigured()
+    params = urllib.parse.urlencode({"client_id": creds.client_id, "client_secret": creds.client_secret, "code": code, "redirect_uri": redirect_uri}).encode()
+    request = urllib.request.Request(f"{OAUTH}/access_token", data=params, method="POST", headers={"Accept": "application/json", "User-Agent": "company-brain"})
     with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
         token = json.loads(response.read()).get("access_token")
     if not token:
         raise GitHubError(400, "GitHub did not return a user token")
+    return token
+
+
+def exchange_code_for_identity(code: str, redirect_uri: str) -> GitHubUserIdentity:
+    """Trade the OAuth code for a user token, read who it belongs to, then drop the token."""
+    token = _user_token(code, redirect_uri)
     user, _ = _request("GET", f"{API}/user", token)
     return GitHubUserIdentity(id=int(user["id"]), login=str(user["login"]))
+
+
+def user_can_access_installation(code: str, redirect_uri: str, installation_id: int) -> GitHubUserIdentity | None:
+    """Trade the OAuth code for a user token and check that the installation is one the user can reach
+    (``GET /user/installations``), then drop the token. The setup URL's ``installation_id`` is anyone's
+    to type, so this is what proves the person in the browser installed (or administers) it. Returns the
+    user, or None when the installation is not theirs."""
+    token = _user_token(code, redirect_uri)
+    user, _ = _request("GET", f"{API}/user", token)
+    url: str | None = f"{API}/user/installations?per_page=100"
+    while url:
+        data, headers = _request("GET", url, token)
+        for installation in (data or {}).get("installations") or []:
+            if int(installation.get("id") or 0) == int(installation_id):
+                return GitHubUserIdentity(id=int(user["id"]), login=str(user["login"]))
+        url = _next_link(headers)
+    return None

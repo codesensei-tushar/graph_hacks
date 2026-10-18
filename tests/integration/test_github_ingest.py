@@ -23,6 +23,7 @@ from src.domain.github import account_link, backfill, repos, webhooks  # noqa: E
 from src.domain.knowledge import ask_service  # noqa: E402
 from src.domain.memory.read_scope import resolve_brain_read_container_tags  # noqa: E402
 from src.domain.memory.writeback import SlackMemoryScope  # noqa: E402
+from src.integrations.github import app_config  # noqa: E402
 from src.integrations.github.client import GitHubUserIdentity  # noqa: E402
 from src.seed import company_brain  # noqa: E402
 from src.seed.seed import reset_and_seed  # noqa: E402
@@ -161,7 +162,7 @@ class GitHubWebhookRouteTest(unittest.TestCase):
     def setUp(self):
         reset_and_seed(company_brain)
         configured = dataclasses.replace(settings, github_app_id="1", github_webhook_secret=SECRET, github_private_key="unused")
-        for target in (mock.patch.object(github_routes, "settings", configured), mock.patch.object(webhooks, "client_for", return_value=FakeGitHub())):
+        for target in (mock.patch.object(app_config, "settings", configured), mock.patch.object(webhooks, "client_for", return_value=FakeGitHub())):
             target.start()
             self.addCleanup(target.stop)
         from fastapi import FastAPI

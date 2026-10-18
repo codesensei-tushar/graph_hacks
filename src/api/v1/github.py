@@ -11,11 +11,12 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 
-from src.core.config import settings
 from src.db.falkordb_client import kv
 from src.domain.github.account_link import complete_github_link
 from src.domain.github.webhooks import handle_github_event
+from src.integrations.github import app_config
 from src.integrations.github.verify import verify_github_signature
 
 log = logging.getLogger(__name__)
@@ -39,11 +40,12 @@ def _run_and_mark(key: str, event: str, payload: dict) -> None:
 
 @router.post("/webhook")
 async def github_webhook(request: Request, background: BackgroundTasks):
-    if not settings.github_enabled:
+    creds = await run_in_threadpool(app_config.current)
+    if creds is None:
         return JSONResponse({"error": "GitHub is not configured"}, status_code=503)
     raw_body = await request.body()
     headers = {key.lower(): value for key, value in request.headers.items()}
-    if not verify_github_signature(raw_body, headers, settings.github_webhook_secret):
+    if not verify_github_signature(raw_body, headers, creds.webhook_secret):
         return JSONResponse({"error": "invalid signature"}, status_code=401)
     try:
         payload = json.loads(raw_body)
@@ -72,7 +74,7 @@ def _page(message: str, status_code: int = 200) -> HTMLResponse:
 
 @router.get("/oauth/callback")
 def github_oauth_callback(code: str = "", state: str = ""):
-    if not settings.github_link_enabled:
+    if not app_config.link_enabled():
         return _page("GitHub sign-in is not configured on this server.", 503)
     if not code or not state:
         return _page("GitHub didn't send a sign-in code. Send <code>link github</code> to the bot again.", 400)

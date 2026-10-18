@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
-from src.api.v1 import auth, connectors, console_connectors, console_oauth, console_people, console_teams, github, health, org_ops, proof, slack, slack_install
+from src.api.v1 import auth, connectors, console_connectors, console_oauth, console_people, console_teams, github, github_app, health, org_ops, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
 from src.connectors import store as connector_store
@@ -15,6 +15,7 @@ from src.core import scheduler, tenancy
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
+from src.integrations.github import app_config as github_app_config
 from src.domain.knowledge.search import ensure_search_indexes
 from src.domain import orgs
 from src.domain.memory.memory_service import ensure_indexes
@@ -117,7 +118,7 @@ def _start() -> None:
     channel_reset.register()
     token_install.register()
     scheduler.start()
-    if settings.github_enabled and not scheduler.exists(github_backfill.COLLABORATOR_REFRESH_JOB_ID):
+    if github_app_config.enabled() and not scheduler.exists(github_backfill.COLLABORATOR_REFRESH_JOB_ID):
         github_backfill.schedule_collaborator_refresh()
     # Connectors with CONNECTOR_<SOURCE>_* set: configure each install and arm its sync.
     connector_registry.load(settings.connector_env)
@@ -148,6 +149,7 @@ app = FastAPI(
 app.include_router(slack.router)
 app.include_router(slack_install.router)
 app.include_router(github.router)
+app.include_router(github_app.router)
 app.include_router(connectors.router)
 app.include_router(console_oauth.router)
 app.include_router(health.router)
