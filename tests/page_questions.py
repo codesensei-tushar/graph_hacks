@@ -1,6 +1,6 @@
 """The questions the ask page offers, read out of its scripts the way the page builds them.
 
-graph.js keeps the questions for a node in one ``const QUESTIONS = {...}`` literal and app.js the
+graph.js keeps the questions for a node in one ``const QUESTIONS = {...}`` literal and answer.js the
 follow-ups for a tool in one ``const NEXT = {...}`` literal, one entry per line. The unit test
 (each question routes to its tool) and the integration test (each is found on a fresh seed) both
 read them from there, so the page and its tests cannot drift apart.
@@ -28,7 +28,7 @@ def literal(script: str, name: str) -> dict[str, list[str]]:
 
 
 QUESTIONS = literal("graph.js", "QUESTIONS")
-NEXT = literal("app.js", "NEXT")
+NEXT = literal("answer.js", "NEXT")
 
 
 def fill(template: str, name: str) -> str:

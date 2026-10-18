@@ -1,7 +1,7 @@
 """Exploring from an answer: every question the page offers routes to the tool it is meant for.
 
 The page offers a node's questions from graph.js's QUESTIONS (the hero, the answer drawing,
-"Try instead") and a tool's follow-ups from app.js's NEXT ("Ask next"). This checks each
+"Try instead") and a tool's follow-ups from answer.js's NEXT ("Ask next"). This checks each
 template against the keyword router, filled with names of the right label from the Quillfern
 seed and its Sales team, and holds every NEXT step to a QUESTIONS template, so the integration
 test that asks QUESTIONS on a fresh seed covers every chip. No browser and no graph.
@@ -105,6 +105,7 @@ class WiringTest(unittest.TestCase):
         self.graph_js = (STATIC / "graph.js").read_text()
         self.hero_js = (STATIC / "hero.js").read_text()
         self.app_js = (STATIC / "app.js").read_text()
+        self.answer_js = (STATIC / "answer.js").read_text()
         self.team_js = (STATIC / "team.js").read_text()
 
     def test_the_hero_asks_what_the_answers_ask(self):
@@ -115,16 +116,24 @@ class WiringTest(unittest.TestCase):
 
     def test_answer_drawings_ask_and_team_drawings_stay_passive(self):
         self.assertIn("onAsk: askFromPage", self.app_js)
+        self.assertIn("BrainGraph.renderPath(out, data.nodes || [], data.edges || [], { tool: data.tool, depth: data.depth, onAsk });", self.answer_js)
         self.assertNotIn("onAsk", self.team_js)
         self.assertIn("Click to ask: ${question}", self.graph_js)
 
+    def test_one_answer_renderer_shared_by_every_ask_page(self):
+        # The public page draws answers through answer.js and keeps no copy of its own.
+        self.assertIn("BrainAnswer.render(out, data, question, {", self.app_js)
+        for own in ("const NEXT = {", "function chipRow(", "function nextQuestions(", "function addCopyLink("):
+            self.assertNotIn(own, self.app_js)
+            self.assertIn(own.split(" = ")[0].split("(")[0], self.answer_js)
+
     def test_ask_next_and_try_instead_are_labelled_lists_of_buttons(self):
-        self.assertIn('chipRow(data.found ? "Ask next" : "Try instead", next)', self.app_js)
-        self.assertIn('el("ul", { class: "next-list", "aria-label": label })', self.app_js)
-        self.assertIn("const MAX_NEXT = 3;", self.app_js)
+        self.assertIn('chipRow(data.found ? "Ask next" : "Try instead", next, onAsk)', self.answer_js)
+        self.assertIn('el("ul", { class: "next-list", "aria-label": label })', self.answer_js)
+        self.assertIn("const MAX_NEXT = 3;", self.answer_js)
 
     def test_the_row_comes_after_the_edge_lines_and_before_the_footer(self):
-        render = self.app_js[self.app_js.index("function render(data, question)"):]
+        render = self.answer_js[self.answer_js.index("function render(out, data, question, opts)"):]
         self.assertLess(render.index("BrainGraph.renderPath("), render.index("chipRow("))
         self.assertLess(render.index("chipRow("), render.index('el("p", { class: "footer-line" })'))
 
@@ -154,9 +163,12 @@ class WalkTest(unittest.TestCase):
             self.assertNotIn(storage, self.app_js[self.app_js.index("// --- The walk"):self.app_js.index("async function ask(")])
 
     def test_your_walk_comes_after_ask_next_and_before_the_footer(self):
-        render = self.app_js[self.app_js.index("function render(data, question)"):]
-        self.assertLess(render.index("chipRow("), render.index("walkRow()"))
-        self.assertLess(render.index("walkRow()"), render.index('el("p", { class: "footer-line" })'))
+        # answer.js draws the trail the page passes between "Ask next" and the footer; the page passes its walk.
+        answer_js = (STATIC / "answer.js").read_text()
+        render = answer_js[answer_js.index("function render(out, data, question, opts)"):]
+        self.assertLess(render.index("chipRow("), render.index("opts.trail()"))
+        self.assertLess(render.index("opts.trail()"), render.index('el("p", { class: "footer-line" })'))
+        self.assertIn("trail: walkRow,", self.app_js)
         self.assertIn('el("nav", { class: "next walk", "aria-label": "Your walk" })', self.app_js)
         self.assertIn('item.setAttribute("aria-current", "step");', self.app_js)
         self.assertIn("history.go(step - walk.at)", self.app_js)
@@ -176,9 +188,11 @@ class MoreWaysOnTest(unittest.TestCase):
         self.assertIn("    walkWithKeys(nodeEls, links);\n    if (meta.onAsk)", self.graph_js)
 
     def test_a_refusal_with_no_near_name_offers_the_example_chips_that_answer(self):
-        instead = self.app_js[self.app_js.index("function insteadOf("):self.app_js.index("function chipRow(")]
+        answer_js = (STATIC / "answer.js").read_text()
+        instead = answer_js[answer_js.index("function insteadOf("):answer_js.index("function insteadLater(")]
         self.assertIn("examplesAnswered", instead)
         self.assertIn("examplesAnswered = answered;", self.app_js)
+        self.assertIn("examples: () => examplesAnswered,", self.app_js)
 
     def test_a_team_page_links_its_people_things_decisions_and_tickets_to_their_questions(self):
         team_js = (STATIC / "team.js").read_text()
