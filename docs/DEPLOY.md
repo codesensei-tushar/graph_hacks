@@ -58,7 +58,8 @@ loopback. They exist only on the Compose network.
 | `deploy/nginx/` | `nginx.conf`, `http.conf` (pre-TLS), `https.conf`, shared TLS and proxy snippets |
 | `deploy/deploy.sh` | Deploy one SHA, health-check, roll back. Lives at `/opt/brain/deploy.sh` |
 | `deploy/bootstrap-tls.sh` | First certificate and the switch to HTTPS (repeatable) |
-| `deploy/systemd/` | Twice-daily renewal timer |
+| `deploy/systemd/` | Twice-daily renewal timer, nightly FalkorDB backup timer |
+| `deploy/backup/` | `falkordb-backup.py` (nightly backup, restore check) and the bucket's `lifecycle.json` |
 | `deploy/vm/startup.sh` | VM startup script: Docker, log caps, swap, registry credential helper |
 | `deploy/slack-app-manifest.yaml` | Manifest for the production Slack app |
 | `.github/workflows/ci.yml` | ruff, pytest (with a FalkorDB service), docker build |
@@ -228,6 +229,7 @@ sudo cat last_good_sha
 - FalkorDB limits are set on purpose; see "FalkorDB limits" below.
 - The boot disk is snapshotted daily at 20:30 UTC (02:00 IST), and snapshots are kept for 7
   days (`brain-daily-snapshots`).
+- FalkorDB itself is backed up nightly to GCS and kept 30 days; see "Backups and restore".
 - Budget alert: ₹3,500/month (about $40; the billing account is in INR), with emails to
   admin@wattcycle.ai at 50, 90 and 100 %, plus a forecast alert at 100 %.
 
@@ -260,6 +262,123 @@ sudo docker compose exec falkordb redis-cli GRAPH.CONFIG GET MAX_QUEUED_QUERIES 
 (`REDISCLI_AUTH` is set in the container, so no password is typed.) Locally, recreate the dev
 container with `docker compose up -d falkordb` to pick up the same values.
 
+## Backups and restore
+
+The boot-disk snapshot copies the FalkorDB volume as the disk happens to be at that moment.
+The FalkorDB backup is a real RDB snapshot, kept off the VM, with a record of what it should
+contain.
+
+| | |
+| --- | --- |
+| When | `brain-falkordb-backup.timer`, 21:30 UTC (03:00 IST) plus up to 15 min, after the disk snapshot |
+| What | `deploy/backup/falkordb-backup.py backup`, at `/opt/brain/falkordb-backup.py` |
+| Where | `gs://graphhacks-brain-8490-falkordb-backups/falkordb/YYYY/MM/DD/brain-falkordb-<UTC stamp>.rdb` and `.json` |
+| Kept | 30 days (lifecycle), then 7 more days as a noncurrent version (versioning), then deleted |
+| Who writes | `brain-vm-sa`, with `roles/storage.objectCreator` on the bucket only: it can add objects but not read, overwrite or delete them |
+
+Each run:
+
+1. counts the nodes per label and the edges per relationship type in every graph,
+2. runs `BGSAVE SCHEDULE` in the `falkordb` container and waits for it to finish (and
+   `rdb_last_bgsave_status:ok`),
+3. counts again; if the counts moved (a write landed while the snapshot was taken) it starts
+   over, up to three times, and otherwise records both sets with `"consistent": false`,
+4. copies the RDB out with `docker cp` (and starts over if another save finished meanwhile),
+5. uploads the RDB, then the manifest: the counts, the FalkorDB image, the RDB's size and
+   sha256. The upload uses the VM's token from the metadata server, the JSON API with
+   `ifGenerationMatch=0` (never overwrites), and checks the MD5 GCS reports.
+
+Nothing is kept on the VM; the RDB is staged in `/var/tmp` and deleted. `deploy.sh`
+installs the script and enables the timer on every deploy.
+
+```bash
+# On the VM
+systemctl list-timers brain-falkordb-backup.timer
+journalctl -u brain-falkordb-backup --since -2d
+sudo systemctl start brain-falkordb-backup     # a backup now (runs in the foreground)
+
+# From your machine
+gcloud storage ls -l gs://graphhacks-brain-8490-falkordb-backups/falkordb/** --configuration=graphhacks | tail
+```
+
+### Checking that a backup restores
+
+Run this on any machine with Docker (not the VM: its service account cannot read the
+bucket). It checks the sha256, loads the RDB into a throwaway FalkorDB container (no network,
+the image named in the manifest), compares every graph's counts per label and per type with
+the manifest, prints each mismatch, and removes the container. Exit 0 means every count
+matched. For a manifest with `"consistent": false`, a count passes if it lies between the
+before and after values.
+
+```bash
+B=gs://graphhacks-brain-8490-falkordb-backups/falkordb/2026/10/19/brain-falkordb-20261019T213512Z
+mkdir -p /tmp/brain-restore && gcloud storage cp "$B.rdb" "$B.json" /tmp/brain-restore/ --configuration=graphhacks
+deploy/backup/falkordb-backup.py verify /tmp/brain-restore/brain-falkordb-20261019T213512Z.{rdb,json}
+```
+
+`--keep` leaves the container running for a look around (`docker exec -it <name> redis-cli`);
+remove it with `docker rm -f -v <name>` afterwards.
+
+### Restoring production from a backup
+
+Only after `verify` passes on the chosen RDB. This replaces everything in FalkorDB, including
+anything written since the backup.
+
+```bash
+gcloud compute scp /tmp/brain-restore/brain-falkordb-<stamp>.rdb brain-vm:/tmp/restore.rdb \
+  --zone asia-south1-c --tunnel-through-iap --configuration=graphhacks
+# On the VM
+cd /opt/brain
+sudo docker compose stop backend falkordb-browser falkordb
+V=$(sudo docker volume inspect brain_falkordb-data --format '{{.Mountpoint}}')
+sudo mv "$V" "$V.before-restore.$(date -u +%Y%m%dT%H%M%SZ)" && sudo install -d -m 0755 "$V/appendonlydir"
+# With appendonly on, FalkorDB ignores a bare dump.rdb and starts empty. Hand it the RDB as
+# the base of a new append-only file instead (tested on falkordb-server v4.22.1).
+sudo install -m 0644 /tmp/restore.rdb "$V/appendonlydir/appendonly.aof.1.base.rdb" && rm /tmp/restore.rdb
+sudo install -m 0644 /dev/null "$V/appendonlydir/appendonly.aof.1.incr.aof"
+printf 'file appendonly.aof.1.base.rdb seq 1 type b\nfile appendonly.aof.1.incr.aof seq 1 type i\n' |
+  sudo tee "$V/appendonlydir/appendonly.aof.manifest" >/dev/null
+sudo docker compose up -d
+sudo docker compose exec falkordb redis-cli GRAPH.LIST
+```
+
+Delete the `.before-restore` directory once the restore is confirmed.
+
+### One-time setup (human, with the graphhacks configuration)
+
+```bash
+C=--configuration=graphhacks
+BUCKET=gs://graphhacks-brain-8490-falkordb-backups
+VM_SA=brain-vm-sa@graphhacks-brain-8490.iam.gserviceaccount.com
+
+# 1. The bucket: same region as the VM, no public access, versioned, 30-day lifecycle
+gcloud storage buckets create $BUCKET --project=graphhacks-brain-8490 --location=asia-south1 \
+  --default-storage-class=STANDARD --uniform-bucket-level-access --public-access-prevention $C
+gcloud storage buckets update $BUCKET --versioning --lifecycle-file=deploy/backup/lifecycle.json $C
+
+# 2. The VM may add objects to it, and nothing else
+gcloud storage buckets add-iam-policy-binding $BUCKET \
+  --member=serviceAccount:$VM_SA --role=roles/storage.objectCreator $C
+
+# 3. The VM's access scopes must allow writing to GCS: either cloud-platform or devstorage.read_write
+gcloud compute instances describe brain-vm --zone asia-south1-c \
+  --format='value(serviceAccounts[0].email,serviceAccounts[0].scopes)' $C
+```
+
+If step 3 shows neither `https://www.googleapis.com/auth/cloud-platform` nor
+`.../devstorage.read_write`, the upload fails with HTTP 403 (insufficient scopes). Changing
+scopes needs the VM stopped, so plan a short outage:
+
+```bash
+gcloud compute instances stop brain-vm --zone asia-south1-c $C
+gcloud compute instances set-service-account brain-vm --zone asia-south1-c \
+  --service-account=$VM_SA --scopes=cloud-platform $C
+gcloud compute instances start brain-vm --zone asia-south1-c $C
+```
+
+Then deploy (any push to `main`) so the timer is installed, and run one backup by hand on
+the VM (`sudo systemctl start brain-falkordb-backup`) and one `verify` of it from your machine.
+
 ## Costs (approximate, per month)
 
 | Item | ≈ USD |
@@ -268,6 +387,7 @@ container with `docker compose up -d falkordb` to pick up the same values.
 | 30 GB pd-balanced boot disk | 3.5 |
 | Static external IPv4 in use | 3.7 |
 | Snapshots (7 daily, incremental) | 1 |
+| FalkorDB backups (about 30 nightly RDBs in GCS) | < 0.1 |
 | Artifact Registry, Secret Manager, logging, egress | < 1 |
 | **Total** | **≈ 37** |
 
@@ -315,7 +435,7 @@ dev app uses a tunnel.
 ## Teardown
 
 Everything lives in one project, so deleting it removes the VM, disk, snapshots, IP,
-registry, secrets, service accounts and the workload identity pool:
+backup bucket, registry, secrets, service accounts and the workload identity pool:
 
 ```bash
 gcloud projects delete graphhacks-brain-8490 --configuration=graphhacks
@@ -345,6 +465,7 @@ Piece by piece, if the project should stay:
 C=--configuration=graphhacks
 gcloud compute instances delete brain-vm --zone asia-south1-c $C
 gcloud compute resource-policies delete brain-daily-snapshots --region asia-south1 $C
+gcloud storage rm --recursive --all-versions gs://graphhacks-brain-8490-falkordb-backups $C
 gcloud compute addresses delete brain-ip --region asia-south1 $C
 gcloud compute firewall-rules delete brain-allow-web brain-allow-ssh-iap $C
 gcloud compute networks subnets delete brain-subnet --region asia-south1 $C

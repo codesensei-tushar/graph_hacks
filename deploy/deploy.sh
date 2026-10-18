@@ -11,6 +11,7 @@
 # /opt/brain/last_good_sha and exits non-zero; on success it records <sha> there.
 #
 # It never touches certificates: bootstrap-tls.sh issues them, the systemd timer renews.
+# It installs the nightly FalkorDB backup (backup/falkordb-backup.py and its timer) the same way.
 set -euo pipefail
 umask 077
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
@@ -62,7 +63,7 @@ install_units() {
     fi
   done
   if [ "$changed" = 1 ]; then systemctl daemon-reload; fi
-  systemctl enable --now brain-certbot-renew.timer 2>/dev/null
+  systemctl enable --now brain-certbot-renew.timer brain-falkordb-backup.timer 2>/dev/null
 }
 
 activate() {
@@ -75,6 +76,7 @@ activate() {
   install -d -m 0755 "$BRAIN/nginx"
   install -m 0644 "$rel"/nginx/*.conf "$BRAIN/nginx/"
   install -m 0755 "$rel/bootstrap-tls.sh" "$BRAIN/bootstrap-tls.sh"
+  install -m 0755 "$rel/backup/falkordb-backup.py" "$BRAIN/falkordb-backup.py"
   if [ ! -e "$BRAIN/nginx/active.conf" ]; then ln -s http.conf "$BRAIN/nginx/active.conf"; fi
   install_units "$rel/systemd"
 }
