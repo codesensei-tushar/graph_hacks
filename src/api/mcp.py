@@ -1,13 +1,20 @@
-"""The tool catalogue over MCP: mount, token check, and the session manager's lifespan.
+"""The tool catalogue over MCP: mount, the caller gate, and the session manager's lifespan.
 
 The MCP server itself is the SDK's low-level ``Server`` with explicit handlers, so each
 tool's input schema is the catalogue's ``args_schema`` verbatim rather than one derived
 from a Python signature. What a tool does lives in ``src/domain/knowledge/mcp_tools.py``;
 this module only moves bytes: it answers ``tools/list`` and ``tools/call`` over
-streamable HTTP at ``/mcp`` (stateless, JSON responses), checks the ``MCP_TOKEN`` bearer
-header first (503 until the token is set, 401 without a bearer header, 403 when it is
-wrong, like the other token-gated routes), and runs the SDK's session manager inside
-the app's lifespan.
+streamable HTTP at ``/mcp`` (stateless, JSON responses), gates each request, and runs the
+SDK's session manager inside the app's lifespan.
+
+``/mcp`` is public, like the ask page: the tools are read-only and read ``org_shared``.
+The gate, per request:
+
+- no bearer token: counted against the address's ask-page budget (``ask_api.admit``);
+  over it, 429 with ``Retry-After``;
+- a bearer token while ``MCP_TOKEN`` is unset: the same as no token;
+- ``MCP_TOKEN`` itself: passes and is never counted;
+- any other token while ``MCP_TOKEN`` is set: 403.
 """
 
 import json
@@ -24,7 +31,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.api.ops import GIT_SHA
 from src.core.config import settings
-from src.domain.knowledge import mcp_tools
+from src.domain.knowledge import ask_api, mcp_tools
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +64,7 @@ async def _call_tool(_ctx, params: types.CallToolRequestParams) -> types.CallToo
 server = Server(SERVER_NAME, version=GIT_SHA, instructions=INSTRUCTIONS, on_list_tools=_list_tools, on_call_tool=_call_tool)
 
 
-# --- the token check --------------------------------------------------------------------------
+# --- the caller gate --------------------------------------------------------------------------
 
 
 async def _reply(send: Send, status: int, body: dict, headers: list[tuple[bytes, bytes]] | None = None) -> None:
@@ -72,8 +79,8 @@ async def _reply(send: Send, status: int, body: dict, headers: list[tuple[bytes,
     await send({"type": "http.response.body", "body": payload})
 
 
-class BearerToken:
-    """Pure ASGI: every MCP request carries ``Authorization: Bearer <MCP_TOKEN>``."""
+class CallerGate:
+    """Pure ASGI: the right token passes uncounted, a wrong one is 403, anyone else is rate-limited."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -82,17 +89,26 @@ class BearerToken:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        expected = settings.mcp_token
-        if not expected:
-            await _reply(send, 503, {"error": "MCP is disabled: set MCP_TOKEN"})
-            return
-        header = dict(scope.get("headers") or []).get(b"authorization", b"").decode("latin-1")
+        headers = dict(scope.get("headers") or [])
+        header = headers.get(b"authorization", b"").decode("latin-1")
         presented = header[7:] if header.lower().startswith("bearer ") else ""
-        if not presented:
-            await _reply(send, 401, {"error": "unauthorized: send Authorization: Bearer <MCP_TOKEN>"}, [(b"www-authenticate", b"Bearer")])
+        expected = settings.mcp_token
+        if presented and expected:
+            if not secrets.compare_digest(presented, expected):
+                await _reply(send, 403, {"error": "forbidden"})
+                return
+            await self.app(scope, receive, send)
             return
-        if not secrets.compare_digest(presented, expected):
-            await _reply(send, 403, {"error": "forbidden"})
+        # nginx sets X-Real-IP; a direct caller is known by its socket.
+        client = headers.get(b"x-real-ip", b"").decode("latin-1") or (scope.get("client") or (None,))[0]
+        decision = ask_api.admit(client)
+        if not decision.allowed:
+            await _reply(
+                send,
+                429,
+                {"error": f"too many calls from this address; try again in {decision.retry_after} seconds"},
+                [(b"retry-after", str(decision.retry_after).encode())],
+            )
             return
         await self.app(scope, receive, send)
 
@@ -115,15 +131,15 @@ class BareMountPath:
 
 
 def build_app() -> ASGIApp:
-    """The streamable-HTTP app at the mount root, behind the token check. Host checks are
-    off because nginx fronts the public name and the token is the gate."""
+    """The streamable-HTTP app at the mount root, behind the caller gate. Host checks are
+    off because nginx fronts the public name and the gate does the rest."""
     inner = server.streamable_http_app(
         streamable_http_path="/",
         stateless_http=True,
         json_response=True,
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
-    return BearerToken(inner)
+    return CallerGate(inner)
 
 
 def install(app: FastAPI) -> None:

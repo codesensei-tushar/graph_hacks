@@ -486,7 +486,7 @@ From the track briefs on the hackathon page. The same build enters all three; th
 | --- | --- | --- |
 | Multi-hop reasoning | `blast_radius` at a chosen depth, `path_between` over `algo.SPpaths` | "Depth is a parameter; the route comes back with the answer." |
 | Graph queries and algorithms as agent tools | The catalogue, PageRank for load-bearing services, `algo.SPpaths` for routes, label propagation for working groups | "Ranking and routing are a `CALL`, not code." |
-| Tool selection through MCP | Live: every read-only tool at `/mcp` behind `MCP_TOKEN` (fourteen on 18 Oct, `who_should_know` and `if_person_leaves` included: production's `/api/ask/tools` lists them at `45f6b00`, and a local `/mcp` serves the same fourteen), same schemas, same cited results | "The same catalogue over MCP, read-only, `org_shared`." |
+| Tool selection through MCP | Live: every read-only tool at `/mcp`, public and rate-limited; a token lifts the limit (fourteen on 18 Oct, `who_should_know` and `if_person_leaves` included: production's `/api/ask/tools` lists them at `45f6b00`, and a local `/mcp` serves the same fourteen), same schemas, same cited results | "The same catalogue over MCP, read-only, `org_shared`." |
 | Actions based on what the graph shows | Tickets filed after approval, routed to the people the graph ranks | "It acts, after a human clicks Approve on a card that names the target." |
 | Explainable results | Path lines, the picked-by footer, the proof route | "Explanation is the traversal." |
 

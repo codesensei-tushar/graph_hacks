@@ -2,7 +2,8 @@
 
 Serves the app with uvicorn in a thread on a free port, then uses
 ``mcp.client.streamable_http`` to initialise, list tools and call ``who_owns``. Also
-checks the token gate and that the bare ``/mcp`` path is served, not redirected.
+checks the caller gate (open without a token, rate-limited, a wrong token refused) and
+that the bare ``/mcp`` path is served, not redirected.
 Needs FalkorDB on localhost:6379 (``docker compose up -d``).
 """
 
@@ -28,7 +29,7 @@ from mcp.client.streamable_http import create_mcp_http_client, streamable_http_c
 from src.api import mcp as mcp_api  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import mcp_tools  # noqa: E402
+from src.domain.knowledge import ask_api, mcp_tools  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
 
 GRAPH = f"company_mcp_test{tests.TEST_GRAPH_SUFFIX}"
@@ -82,8 +83,13 @@ class McpServerTest(unittest.TestCase):
 
     # --- through the SDK client --------------------------------------------------------------
 
-    async def _with_session(self, work):
-        async with create_mcp_http_client(headers={"Authorization": f"Bearer {TOKEN}"}) as http:
+    def setUp(self):
+        # Every call without the token is counted against 127.0.0.1's ask-page budget.
+        ask_api.LIMITER.reset()
+
+    async def _with_session(self, work, token: str | None = TOKEN):
+        headers = {"Authorization": f"Bearer {token}"} if token is not None else None
+        async with create_mcp_http_client(headers=headers) as http:
             async with streamable_http_client(self.url, http_client=http) as streams:
                 async with ClientSession(streams[0], streams[1]) as session:
                     await session.initialize()
@@ -142,7 +148,7 @@ class McpServerTest(unittest.TestCase):
 
     # --- the gate ----------------------------------------------------------------------------------
 
-    def _post(self, path: str, token: str | None) -> int:
+    def _post(self, path: str, token: str | None) -> tuple[int, dict[str, str]]:
         request = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=b"{}", method="POST")
         request.add_header("Content-Type", "application/json")
         request.add_header("Accept", "application/json, text/event-stream")
@@ -150,17 +156,42 @@ class McpServerTest(unittest.TestCase):
             request.add_header("Authorization", f"Bearer {token}")
         try:
             with urllib.request.urlopen(request, timeout=10) as response:
-                return response.status
+                return response.status, dict(response.headers)
         except urllib.error.HTTPError as error:
-            return error.code
+            return error.code, dict(error.headers)
 
-    def test_token_gate_and_bare_path(self):
-        self.assertEqual(self._post("/mcp", None), 401)
-        self.assertEqual(self._post("/mcp/", "wrong"), 403)
-        # The bare path is served by the MCP app (an empty body is a bad request there), not redirected.
-        self.assertNotIn(self._post("/mcp", TOKEN), (307, 401, 403, 404))
+    def test_without_mcp_token_set_anyone_gets_the_catalogue(self):
+        async def work(session):
+            return await session.list_tools(), await session.call_tool("who_owns", {"name": "billing"})
+
         with mock.patch.object(mcp_api, "settings", dataclasses.replace(settings, mcp_token="")):
-            self.assertEqual(self._post("/mcp/", TOKEN), 503)
+            listed, result = asyncio.run(self._with_session(work, token=None))
+            self.assertNotEqual(self._post("/mcp/", "any-token")[0], 403)
+        self.assertEqual(sorted(tool.name for tool in listed.tools), sorted(mcp_tools.tool_names()))
+        self.assertFalse(result.is_error, result)
+        self.assertIn({"from": "Arjun Mehta", "rel": "OWNS", "to": "Billing Service"}, result.structured_content["path"])
+
+    def test_with_mcp_token_set_no_header_works_a_wrong_token_is_403_and_the_right_one_works(self):
+        async def work(session):
+            return await session.list_tools()
+
+        self.assertEqual(sorted(tool.name for tool in asyncio.run(self._with_session(work, token=None)).tools), sorted(mcp_tools.tool_names()))
+        self.assertEqual(self._post("/mcp/", "wrong")[0], 403)
+        self.assertEqual(sorted(tool.name for tool in asyncio.run(self._with_session(work)).tools), sorted(mcp_tools.tool_names()))
+
+    def test_calls_without_the_token_share_the_ask_page_limit_and_the_token_lifts_it(self):
+        with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(3, 60.0)):
+            statuses = [self._post("/mcp/", None)[0] for _ in range(3)]
+            self.assertNotIn(429, statuses)
+            status, headers = self._post("/mcp/", None)
+            self.assertEqual(status, 429)
+            self.assertGreaterEqual(int(headers["retry-after"]), 1)
+            self.assertNotEqual(self._post("/mcp/", TOKEN)[0], 429)
+
+    def test_the_bare_path_is_served_not_redirected(self):
+        # Served by the MCP app (an empty body is a bad request there), with or without the token.
+        self.assertNotIn(self._post("/mcp", TOKEN)[0], (307, 401, 403, 404))
+        self.assertNotIn(self._post("/mcp", None)[0], (307, 401, 403, 404))
 
 
 if __name__ == "__main__":

@@ -34,14 +34,13 @@ Engineering was first; any team joins the same graph from one TOML file. A `Serv
 
 Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, its open tickets, and the edges behind every line. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
 
-**Over MCP.** The same read-only tools, with the same cited results, from any MCP client. The token is in the private submission notes.
+**Over MCP.** The same read-only tools, with the same cited results, from any MCP client. No token needed: read-only, the company-wide scope, 30 calls a minute per address, shared with the ask page. A token, where one was issued, lifts the limit.
 
 ```bash
-claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp \
-  --header "Authorization: Bearer <MCP_TOKEN>"
+claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp
 ```
 
-Any other client: streamable HTTP at `https://brain.noobsurd.space/mcp` with that bearer header. A Python client is under [The same tools over MCP](#the-same-tools-over-mcp).
+Any other client: streamable HTTP at `https://brain.noobsurd.space/mcp`. A Python client is under [The same tools over MCP](#the-same-tools-over-mcp).
 
 **Locally, no Slack and no model key.** With FalkorDB running (`docker compose up -d`) and `pip install -r requirements.txt` done:
 
@@ -500,13 +499,18 @@ Every read-only tool in the catalogue is also an MCP tool, served at `/mcp` over
 
 MCP callers read the company-wide `org_shared` scope only. There is no Slack identity to widen it from, so private channels and private repos stay out of reach, under the same permission model the Slack agent uses.
 
-Set `MCP_TOKEN` and send it as a bearer header; until it is set `/mcp` answers 503, without the header 401, with a wrong token 403.
+`/mcp` is public, like the ask page. Each request is gated four ways:
+
+- No bearer token: allowed, and counted against the address's 30 calls a minute, the same budget as the ask page. Over it, 429 with `Retry-After`.
+- A bearer token while `MCP_TOKEN` is unset: treated as no token.
+- `MCP_TOKEN` as the bearer token: allowed, never counted.
+- Any other bearer token while `MCP_TOKEN` is set: 403.
 
 ```python
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
-async with create_mcp_http_client(headers={"Authorization": f"Bearer {token}"}) as http:
+async with create_mcp_http_client() as http:
     async with streamable_http_client("https://brain.noobsurd.space/mcp", http_client=http) as streams:
         async with ClientSession(streams[0], streams[1]) as session:
             await session.initialize()
@@ -515,7 +519,7 @@ async with create_mcp_http_client(headers={"Authorization": f"Bearer {token}"}) 
             print(result.structured_content["path"])
 ```
 
-The mapping is `src/domain/knowledge/mcp_tools.py`; the mount, token check and session lifespan are `src/api/mcp.py`. `tests/integration/test_mcp_server.py` runs this exact exchange against a local server.
+The mapping is `src/domain/knowledge/mcp_tools.py`; the mount, caller gate and session lifespan are `src/api/mcp.py`. `tests/integration/test_mcp_server.py` runs this exact exchange against a local server.
 
 ## License
 

@@ -76,7 +76,7 @@ async def lifespan(_app: FastAPI):
     else:
         log.warning("Slack is not configured: set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET, or the OAuth app credentials")
     if not settings.mcp_token:
-        log.warning("MCP is disabled: set MCP_TOKEN to serve the tool catalogue at /mcp")
+        log.info("MCP is public and rate-limited; MCP_TOKEN lifts the limit")
     async with mcp_api.session_lifespan():
         yield
 

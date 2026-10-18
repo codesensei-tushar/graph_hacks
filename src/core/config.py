@@ -43,7 +43,8 @@ class Settings:
     token_encryption_key: str = field(default_factory=lambda: os.getenv("TOKEN_ENCRYPTION_KEY", ""))
     # Bearer token for the install/status/disconnect routes; there is no web login.
     brain_admin_token: str = field(default_factory=lambda: os.getenv("BRAIN_ADMIN_TOKEN", ""))
-    # Bearer token MCP clients present at /mcp. Separate from the admin token, which is never shared.
+    # Bearer token that lifts /mcp's per-address rate limit; /mcp is public without it.
+    # Separate from the admin token, which is never shared.
     mcp_token: str = field(default_factory=lambda: os.getenv("MCP_TOKEN", ""))
 
     # Anthropic API key and model for every model profile (src/integrations/llm/model.py).
