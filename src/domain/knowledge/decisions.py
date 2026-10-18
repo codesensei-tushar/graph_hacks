@@ -149,8 +149,8 @@ def _describe(graph, decision: DecisionRow, scopes: list[str], result: ToolResul
         {"id": decision.id},
     ).result_set
     about = graph.ro_query(
-        "MATCH (:Decision {id: $id})-[:ABOUT]->(service:Service) RETURN service.id, service.name ORDER BY service.name",
-        {"id": decision.id},
+        f"MATCH (:Decision {{id: $id}})-[:ABOUT]->(service:Service) WHERE {SCOPED.format(var='service')} RETURN service.id, service.name ORDER BY service.name",
+        {"id": decision.id, "scopes": scopes},
     ).result_set
     sources = graph.ro_query(
         f"""
@@ -394,8 +394,8 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
     if current.id != named.id:
         parts.append(f"*{named.name}* is no longer current.")
     about = graph.ro_query(
-        "MATCH (:Decision {id: $id})-[:ABOUT]->(service:Service) RETURN service.id, service.name ORDER BY service.name",
-        {"id": current.id},
+        f"MATCH (:Decision {{id: $id}})-[:ABOUT]->(service:Service) WHERE {SCOPED.format(var='service')} RETURN service.id, service.name ORDER BY service.name",
+        {"id": current.id, "scopes": scopes},
     ).result_set
     for service_id, service in about:
         result.add(PathStep(current.name, "ABOUT", service, from_id=current.id, to_id=service_id, from_label="Decision", to_label="Service"))

@@ -83,8 +83,8 @@ def _run_path_between(args: dict, scopes: list[str]) -> ToolResult:
     return algorithms.path_between(args["source"], args.get("target") or "", scopes)
 
 
-def _run_load_bearing(args: dict, _scopes: list[str]) -> ToolResult:
-    return algorithms.load_bearing(args.get("limit", algorithms.DEFAULT_LOAD_BEARING))
+def _run_load_bearing(args: dict, scopes: list[str]) -> ToolResult:
+    return algorithms.load_bearing(args.get("limit", algorithms.DEFAULT_LOAD_BEARING), scopes)
 
 
 def _run_related_memories(args: dict, scopes: list[str]) -> ToolResult:
