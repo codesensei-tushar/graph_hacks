@@ -1,5 +1,6 @@
 """The real app boots with the env deploy/deploy.sh writes before the Slack and model
-secrets exist, against a real FalkorDB (throwaway graph ``company_startup_test``).
+secrets exist, against a real FalkorDB (throwaway graph ``company_startup_test`` plus
+``TEST_GRAPH_SUFFIX``).
 
 Until the real values land in Secret Manager, deploy.sh writes an empty bot token and
 model key, and a random signing secret. The app must start, report FalkorDB healthy on
@@ -18,7 +19,7 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from src.db.falkordb_client import client  # noqa: E402
 
-GRAPH = "company_startup_test"
+GRAPH = f"company_startup_test{tests.TEST_GRAPH_SUFFIX}"
 
 PROBE = """
 import json

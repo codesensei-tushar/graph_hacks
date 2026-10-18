@@ -68,7 +68,8 @@ def _event(repo, pr: RepoPullRequest, action: str = "opened", **changes) -> dict
 def _clear_keys() -> None:
     for pr in (*NEW_PULL_REQUESTS, PRIVATE_REFUNDS):
         kv().delete(alerts.dedupe_key(NOTEBOOK.id, pr.number), alerts.dedupe_key(BILLING_INTERNAL.id, pr.number))
-    scheduler.cancel_matching(alerts.RETRY_JOB)
+    # The job queue is shared by every checkout on this FalkorDB: cancel only this run's repos' retries.
+    scheduler.cancel_matching(alerts.RETRY_JOB, lambda payload: payload["repo"]["id"] in (NOTEBOOK.id, BILLING_INTERNAL.id))
 
 
 class CoordinationAlertTest(unittest.TestCase):
