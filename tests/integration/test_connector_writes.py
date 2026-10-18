@@ -150,6 +150,41 @@ class ConnectorWritesTest(unittest.TestCase):
         self.assertEqual(graph.changed_at_ms("1788256800000"), 1_788_256_800_000)
         self.assertIsNone(graph.changed_at_ms("yesterday"))
 
+    def test_a_new_ticket_arrives_with_its_reporter_and_assignee_in_one_query(self):
+        with _Counted() as first:
+            graph.write_page(INSTALL, self._page(3))
+        item_queries = [query for query in first.writes if "MERGE (n:Ticket" in query]
+        self.assertEqual(len(item_queries), 1)
+        self.assertFalse([query for query in first.writes if query.startswith("UNWIND $rows AS row MATCH (a:ExternalUser") and "ASSIGNED" in query])
+        self.assertEqual(self._one("MATCH (:ExternalUser)-[r:ASSIGNED|OPENED]->(:Ticket) WHERE r.item IS NOT NULL RETURN count(r)")[0][0], 6)
+
+    def test_a_full_resync_repairs_edges_lost_outside_the_sync(self):
+        from src.connectors import sync
+
+        graph.write_page(INSTALL, self._page(2))
+        # A re-seed deletes and re-creates the Service (same id): its ABOUT edges are gone, the tickets unchanged.
+        self.g.query("MATCH (s:Service {id: 'billing-service'}) DETACH DELETE s")
+        self.g.query("CREATE (:Service {id: 'billing-service', name: 'Billing Service', scope: 'org_shared'})")
+        self.assertEqual(graph.write_page(INSTALL, self._page(2))["unchanged"], 2)  # an ordinary poll cannot tell
+        with mock.patch.object(sync, "resolve", return_value=(None, INSTALL)), mock.patch.object(sync, "schedule"):
+            sync.sync_now("jira", full=True)
+        self.assertEqual(graph.write_page(INSTALL, self._page(2))["items"], 2)
+        self.assertEqual(self._one("MATCH (:Ticket)-[r:ABOUT]->(:Service {id: 'billing-service'}) RETURN count(r)")[0][0], 2)
+
+    def test_restricted_read_access_comes_only_from_an_email_link(self):
+        restricted = Container(INSTALL.container_id("99"), "Secret", "99", kind="project", restricted=True)
+        graph.write_containers(INSTALL, [PROJECT, restricted])
+        reader, admin_linked = _user(1), _user(9, email="hidden@vendor.example.com")
+        graph.write_readers(INSTALL, restricted.id, [reader, admin_linked])
+        self.g.query("CREATE (:SlackUser {id: 'U1'})-[:IS]->(:Person {id: 'p-u1'})")
+        self.g.query("MATCH (p:Person {id: 'p1'}), (s:SlackUser {id: 'U1'}) MATCH (s)-[r:IS]->() DELETE r MERGE (s)-[:IS]->(p)")
+        self.assertEqual(len(graph.readable_container_scopes_for_slack_user("U1")), 1)  # acc1's email is p1's
+        # An admin links the hidden-email reader to themselves (p3): attribution, never read access.
+        self.g.query("CREATE (:SlackUser {id: 'U3'})")
+        self.g.query("MATCH (s:SlackUser {id: 'U3'}), (p:Person {id: 'p3'}) MERGE (s)-[:IS]->(p)")
+        self.g.query("MATCH (u:ExternalUser {id: $id}), (p:Person {id: 'p3'}) MERGE (u)-[r:IS]->(p) SET r.via = 'admin'", {"id": admin_linked.id})
+        self.assertEqual(graph.readable_container_scopes_for_slack_user("U3"), [])
+
     # --- accounts and their people --------------------------------------------------------------
 
     def test_accounts_link_on_the_lower_cased_email_and_carry_where_it_came_from(self):

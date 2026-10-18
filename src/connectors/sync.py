@@ -343,6 +343,8 @@ def sync_now(source: str, full: bool = False, install_id: str | None = None) -> 
         return False
     with tenancy.org_context(install.org):
         _containers.pop(_cache_key(install), None)
+        if full:
+            graph.clear_hashes(install)  # every item is written again, whatever it hashed to
         for state in graph.list_states(install):
             if state.get("id") == install.key:
                 continue

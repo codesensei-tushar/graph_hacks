@@ -53,8 +53,10 @@ _PROP_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _REFERENCE_PROPS = {"REFERENCES": "ticket_references", "CLOSES": "ticket_closes"}
 # Part of every content hash: raise one when what is written for an item or an account changes, so
 # the next sync writes everything once more instead of skipping it as unchanged.
-ITEM_HASH_VERSION = 1
+ITEM_HASH_VERSION = 2
 USER_HASH_VERSION = 1
+# Edges an account starts (from the ExternalUser itself, before any Person link): written with their item.
+USER_RELS = ("ASSIGNED", "OPENED", "OWNS", "WORKED_ON")
 # "+0000" at the end of a Jira timestamp, which ``datetime.fromisoformat`` reads only as "+00:00".
 _TZ_NO_COLON = re.compile(r"([+-])(\d{2})(\d{2})$")
 
@@ -423,13 +425,23 @@ def _write_page(install: Install, page: Page, max_items_per_container: int | Non
     rows_by_label: dict[str, list[dict]] = {}
     written: list[Item] = []
     keep: dict[str, list[str]] = {}
+    folded: set[tuple[str, str, str]] = set()
+    page_users = {user.id for user in page.users}
+    services_print = _services_print(services)
     for item in kept:
-        about = _about(item, services)
         edges = [(edge, *_start(install, edge, linked_to)) for edge in owned.get(item.id, [])]
-        row = _item_row(install, item, scopes[item.container], about, edges)
+        row = _item_row(install, item, scopes[item.container], services_print, edges)
         if stored.get(item.id) == row["hash"]:
             report["unchanged"] += 1
             continue
+        about = row["about"] = _about(item, services)
+        # Edges from this page's accounts go in the item's own query: a reader never sees a new ticket
+        # without its reporter and assignee. (Those accounts were written above, so they exist.)
+        row["user_edges"] = {rel: [] for rel in USER_RELS}
+        for edge, start_label, start in edges:
+            if start_label == "ExternalUser" and start in page_users and edge.rel in USER_RELS:
+                row["user_edges"][edge.rel].append({"from": start, "via": edge.from_id, "props": _props(edge.props, RESERVED_EDGE_PROPS)})
+                folded.add((edge.rel, edge.from_id, edge.to_id))
         rows_by_label.setdefault(item.label, []).append(row)
         keep[item.id] = [f"ABOUT|{item.id}|{service}" for service in about] + [f"{edge.rel}|{start}|{edge.to_id}" for edge, _label, start in edges]
         written.append(item)
@@ -440,8 +452,11 @@ def _write_page(install: Install, page: Page, max_items_per_container: int | Non
     # The edges of written items, and edges whose item is not in this page (those are only added).
     written_ids = {item.id for item in written}
     page_ids = {item.id for item in page.items}
-    to_write = [edge for edge in page.edges if (owner := _owner(install, edge)) in written_ids or owner not in page_ids]
-    report["edges"] = _write_edges(graph, install, to_write, linked_to, {item.id: item.label for item in kept})
+    to_write = [
+        edge for edge in page.edges
+        if ((owner := _owner(install, edge)) in written_ids or owner not in page_ids) and (edge.rel, edge.from_id, edge.to_id) not in folded
+    ]
+    report["edges"] = len(folded) + _write_edges(graph, install, to_write, linked_to, {item.id: item.label for item in kept})
     for label in sorted({item.label for item in written}):
         _drop_stale_edges(graph, label, [{"id": item.id, "keep": keep[item.id]} for item in written if item.label == label])
 
@@ -539,24 +554,34 @@ def changed_at_ms(updated_at: str | None) -> int | None:
     return int(stamp.timestamp() * 1000)
 
 
-def _item_row(install: Install, item: Item, scope: str, about: list[str], edges: list) -> dict:
+def _item_row(install: Install, item: Item, scope: str, services_print: str, edges: list) -> dict:
+    """The item's row, and its hash: its fields, its ABOUT hints with ``services_print`` (what they
+    resolve against, so the hints need resolving only for an item that changed), and its edges."""
     row = {
         "id": item.id, "name": item.name, "title": item.title or item.name, "summary": _clip(item.summary), "url": item.url,
         "state": item.state, "status": item.status, "updated": item.updated_at, "external_id": str(item.external_id),
-        "scope": scope, "container": item.container, "props": _props(item.props), "about": about,
+        "scope": scope, "container": item.container, "props": _props(item.props),
         "kind": kinds.normalize_kind(item.kind) if item.label == "Service" else None,
         "changed_at_ms": changed_at_ms(item.updated_at),
     }
     owned = sorted(
         [edge.rel, start_label, start, edge.to_id, sorted(_props(edge.props, RESERVED_EDGE_PROPS).items())] for edge, start_label, start in edges
     )
-    row["hash"] = _hash(ITEM_HASH_VERSION, install.key, item.label, row, owned)
+    hints = [hint for hint in item.about if hint and hint.strip()]
+    row["hash"] = _hash(ITEM_HASH_VERSION, install.key, item.label, row, owned, hints, services_print if hints else "")
     return row
 
 
+def _services_print(services: list) -> str:
+    """A fingerprint of the Services hints resolve against: a Service added, renamed, deleted or re-created
+    changes it, so every item with hints is written (and resolved) again; otherwise none is."""
+    return _hash(sorted((row.id, row.name, row.aliases, row.title, row.kind) for row in services)) if services else ""
+
+
 def _upsert_items(graph, install: Install, label: str, rows: list[dict]) -> None:
-    """Every row of one label in one query: the node, its container, its ABOUT edges. One query is one
-    transaction, so a reader sees each item before or after, never half written."""
+    """Every row of one label in one query: the node, its container, its edges from this page's accounts
+    (``row.user_edges``) and its ABOUT edges. One query is one transaction, so a reader sees each item
+    before or after, never half written."""
     kind = "SET n.kind = coalesce(row.kind, n.kind)" if label == "Service" else ""
     graph.query(
         f"""
@@ -575,6 +600,26 @@ def _upsert_items(graph, install: Install, label: str, rows: list[dict]) -> None
         WITH DISTINCT n, row
         MATCH (c:Container {{id: row.container}})
         MERGE (n)-[:IN_CONTAINER]->(c)
+        FOREACH (e IN coalesce(row.user_edges.ASSIGNED, []) |
+            MERGE (a:ExternalUser {{id: e.from}})
+            MERGE (a)-[r:ASSIGNED]->(n)
+            SET r.item = row.id, r.source = $source, r.install = $install, r.via = e.via
+            SET r += e.props)
+        FOREACH (e IN coalesce(row.user_edges.OPENED, []) |
+            MERGE (a:ExternalUser {{id: e.from}})
+            MERGE (a)-[r:OPENED]->(n)
+            SET r.item = row.id, r.source = $source, r.install = $install, r.via = e.via
+            SET r += e.props)
+        FOREACH (e IN coalesce(row.user_edges.OWNS, []) |
+            MERGE (a:ExternalUser {{id: e.from}})
+            MERGE (a)-[r:OWNS]->(n)
+            SET r.item = row.id, r.source = $source, r.install = $install, r.via = e.via
+            SET r += e.props)
+        FOREACH (e IN coalesce(row.user_edges.WORKED_ON, []) |
+            MERGE (a:ExternalUser {{id: e.from}})
+            MERGE (a)-[r:WORKED_ON]->(n)
+            SET r.item = row.id, r.source = $source, r.install = $install, r.via = e.via
+            SET r += e.props)
         WITH n, row
         UNWIND row.about AS service_id
         MATCH (s:Service {{id: service_id}})
@@ -674,6 +719,16 @@ def _names_it(text: str, name: str) -> bool:
     return bool(distinctive) and all(any(resolve.same_word(word, other) for other in said) for word in distinctive)
 
 
+def clear_hashes(install: Install) -> int:
+    """Forget the install's content hashes, so its next pages write every item and account again: a full
+    resync repairs edges lost to something outside the sync (a Service or Person deleted and re-created)."""
+    _, graph = connect()
+    cleared = 0
+    for label in (*sorted(ITEM_LABELS), "ExternalUser"):
+        cleared += graph.query(f"MATCH (n:{label}) WHERE n.install = $install AND n.content_hash IS NOT NULL REMOVE n.content_hash", {"install": install.key}).properties_removed
+    return int(cleared)
+
+
 def delete_items(install: Install, ids: list[str]) -> int:
     ids = [_check(install, node_id) for node_id in ids or []]
     if not ids:
@@ -703,15 +758,20 @@ def write_readers(install: Install, container_id: str, users: list[ExternalUser]
 
 
 def readable_container_scopes_for_slack_user(slack_user_id: str | None) -> list[str]:
-    """Restricted container scopes this Slack user may read: linked account x reader. Fails closed."""
+    """Restricted container scopes this Slack user may read: linked account x reader. Fails closed.
+
+    Only an account linked by its email (``IS {via: 'email'}``: the vendor says that address is
+    theirs) carries the vendor's read access. An admin's link (``via: 'admin'``, the People screen)
+    says who did the work, never who may read: otherwise an admin could link a restricted
+    project's reader to themselves and read that project in their DMs."""
     if not (slack_user_id or "").strip():
         return []
     try:
         _, graph = connect()
         rows = graph.query(
             f"""
-            MATCH (:SlackUser {{id: $user}})-[:IS]->(:Person)<-[:IS]-(:ExternalUser)-[:CAN_READ]->(c:Container)
-            WHERE c.restricted = true AND c.scope STARTS WITH '{CONNECTOR_SCOPE_PREFIX}'
+            MATCH (:SlackUser {{id: $user}})-[:IS]->(:Person)<-[link:IS]-(:ExternalUser)-[:CAN_READ]->(c:Container)
+            WHERE link.via = 'email' AND c.restricted = true AND c.scope STARTS WITH '{CONNECTOR_SCOPE_PREFIX}'
             RETURN DISTINCT c.scope
             """,
             {"user": slack_user_id},
