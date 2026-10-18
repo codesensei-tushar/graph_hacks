@@ -120,8 +120,9 @@ _LEAVES = re.compile(
 )
 # Who the asker is: "who am I", "what team am I on", "what do I own". Slack swaps in the asker's person.
 _ME = re.compile(
-    r"\bwho am i\b|\bwhat teams? am i (?:on|in|part of)\b|\bwhich teams? am i (?:on|in)\b|\bwhat do i (?:own|hold|know|work on)\b"
-    r"|\bwhat am i working on\b|\bmy profile\b",
+    # The whole question is about the asker: "what do I know about the invoice worker" is not.
+    r"^\s*(?:who am i|what teams? am i (?:on|in|part of)|which teams? am i (?:on|in)|what do i (?:own|hold|know|work on)"
+    r"|what am i working on|(?:show )?my profile)\s*[?.!]*\s*$",
     re.IGNORECASE,
 )
 # Joining a team, or asking what a team is. "what should I know about billing" names no team and
@@ -207,7 +208,10 @@ _FIND = re.compile(
     # The CRM, only as a whole list question (_CRM_LIST below): "show me our customers", "open opportunities".
     rf"|{_CRM_LIST}"
     # The asker's own lists: "my open tickets", "tickets assigned to me", "which of my accounts". Slack swaps in the asker.
-    rf"|\bmy (?:open |closed )?{_LISTED}\b|^\s*(?:which|what) of my {_LISTED}\b|\b(?:assigned to|owned by) me\b",
+    # Whole list questions only: "what breaks if my services go down" or "who knows my services" are not lists.
+    rf"|^\s*(?:(?:show|list|give)(?: me)?\s+|(?:what|which) are\s+)?(?:all )?my (?:open |closed )?{_LISTED}(?: (?:are|is) (?:open|closed))?\s*[?.!]*\s*$"
+    rf"|^\s*(?:which|what) of my {_LISTED} (?:are|is) (?:open|closed)\s*[?.!]*\s*$"
+    rf"|^\s*(?:(?:show|list)(?: me)?\s+|(?:what|which)\s+)?(?:open |closed )?{_LISTED} (?:are )?(?:assigned to|owned by) me\s*[?.!]*\s*$",
     re.IGNORECASE,
 )
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:

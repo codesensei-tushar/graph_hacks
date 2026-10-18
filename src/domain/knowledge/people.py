@@ -32,6 +32,8 @@ MIN_FIRST_NAME = 2
 # anywhere else nobody knows who asks, and the refusal says where to ask instead.
 FIRST_PERSON = re.compile(r"\b(?:i|me|my|mine|myself|i'm|im|i am)\b", re.IGNORECASE)
 SELF = "self"
+# How the Slack turn names the asker to a person tool: by Person id, so a namesake is never taken for them.
+PERSON_REF = "person:"
 
 
 def tool_name(source: str | None) -> str:
@@ -77,6 +79,8 @@ class _User:
     email: str
     person_id: str | None
     person_name: str | None
+    # The email is the tool's own report, not one an admin asserted: only such an email merges identities.
+    verified: bool = True
 
 
 def _users(graph, scopes: list[str], ids: list[str] | None = None) -> list[_User]:
@@ -87,27 +91,75 @@ def _users(graph, scopes: list[str], ids: list[str] | None = None) -> list[_User
         WHERE {SCOPED.format(var="a")} AND ($ids IS NULL OR a.id IN $ids)
         OPTIONAL MATCH (a)-[:IS]->(p:Person)
         WHERE {SCOPED.format(var="p")}
-        RETURN a.id, coalesce(a.name, ''), coalesce(a.source, ''), toLower(coalesce(a.email, '')), p.id, p.name
+        RETURN a.id, coalesce(a.name, ''), coalesce(a.source, ''), toLower(coalesce(a.email, '')), p.id, p.name,
+               toString(coalesce(a.external_id, '')), coalesce(a.email_from, '')
         """,
         {"scopes": list(scopes), "ids": ids},
     ).result_set
-    return [_User(*row) for row in rows]
+    asserted = _admin_asserted()
+    return [_User(*row[:6], verified=row[7] != "admin" and (row[2], row[6]) not in asserted) for row in rows]
+
+
+def _admin_asserted() -> set[tuple[str, str]]:
+    """(source, external id) of every user whose email an admin asserted (``CONNECTOR_*_PEOPLE``): that
+    email links them to a person, but is not one the tool reported, so it never merges identities."""
+    try:
+        from src.connectors import registry  # the installs hold the mapping; read late, the registry imports the connectors
+
+        installs = [install for _connector, install in registry.all_installs()]
+    except Exception:
+        return set()
+    found: set[tuple[str, str]] = set()
+    for install in installs:
+        try:
+            pairs = install.get_list("people")
+        except Exception:
+            continue
+        for pair in pairs:
+            external_id, _, email = str(pair).partition("=")
+            if email.strip():
+                found.add((install.source, external_id.strip()))
+    return found
 
 
 def _key(user: _User) -> str:
-    """One identity per verified email; a user without an email is its own identity."""
-    return f"email:{user.email}" if user.email and "@" in user.email else f"id:{user.id}"
+    """One identity per email the tool itself reported; any other user is its own identity."""
+    return f"email:{user.email}" if user.verified and user.email and "@" in user.email else f"id:{user.id}"
 
 
 def _identity(graph, account_id: str, scopes: list[str]) -> list[_User]:
-    """The readable users that are the same identity as this one: the same email, in any tool."""
+    """The readable users that are the same identity as this one: the same tool-reported email, one
+    user in each other tool. When two users of one tool share the email, nobody is merged."""
     users = _users(graph, scopes)
     mine = next((user for user in users if user.id == account_id), None)
     if mine is None:
         return []
-    key = _key(mine)
+    same = [user for user in users if _key(user) == _key(mine)]
+    sources = [user.source for user in same]
+    if len(sources) != len(set(sources)):
+        return [mine]
     order = list(SOURCE_NAMES)
-    return sorted([user for user in users if _key(user) == key], key=lambda user: (order.index(user.source) if user.source in order else len(order), user.source, user.id))
+    return sorted(same, key=lambda user: (order.index(user.source) if user.source in order else len(order), user.source, user.id))
+
+
+def email_conflict(graph, entity: Entity, scopes: list[str]) -> str:
+    """" Mallory Evil (HubSpot) has the same email in HubSpot, so the two are not taken for one person."
+    when another user of the same tool shares this user's email; "" otherwise."""
+    if entity.label != ACCOUNT:
+        return ""
+    users = _users(graph, scopes)
+    mine = next((user for user in users if user.id == entity.id), None)
+    if mine is None or not (mine.email and "@" in mine.email):
+        return ""
+    same = [user for user in users if user.email == mine.email]
+    by_source: dict[str, list[_User]] = {}
+    for user in same:
+        by_source.setdefault(user.source, []).append(user)
+    clashes = {source: group for source, group in by_source.items() if len(group) > 1}
+    if not clashes:
+        return ""
+    parts = [f"{len(group)} {tool_name(source)} users share this email ({', '.join(account_label(user.name, user.source) for user in group)})" for source, group in clashes.items()]
+    return f" {'; '.join(parts)}, so no users are taken for one person by that email."
 
 
 def shown(graph, account: Entity, scopes: list[str]) -> Entity:
@@ -134,6 +186,14 @@ def identity_ids(graph, entity: Entity, scopes: list[str]) -> list[str]:
 def resolve_person(text: str, scopes: list[str], graph) -> Resolution:
     """A ``Person`` the text names, else a connector user it names (in full, or by a unique first
     name), shown as its person or its identity, else the misses of both."""
+    if (text or "").startswith(PERSON_REF):
+        # The asker, named by id by the Slack turn (``slack/agent_turn.for_the_asker``): never by name.
+        rows = graph.ro_query(
+            f"MATCH (p:Person {{id: $id}}) WHERE {SCOPED.format(var='p')} RETURN p.id, p.name", {"id": text[len(PERSON_REF) :], "scopes": list(scopes)}
+        ).result_set
+        if rows:
+            return Resolution(query=text, entity=Entity(rows[0][0], rows[0][1], "Person"))
+        return Resolution(query=text, reason=SELF)
     person = resolve.resolve_name(text, ("Person",), scopes, graph=graph)
     if person.found:
         return person

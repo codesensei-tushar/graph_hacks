@@ -227,7 +227,7 @@ def account_profile(graph, account: Entity, scopes: list[str]) -> ToolResult:
         parts.append(f"{'1 thing rests' if alone == 1 else f'{alone} things rest'} on them alone." if alone else "Nothing rests on them alone.")
     else:
         parts.append("Nothing else is linked to it yet.")
-    parts.append(people.unlinked_hint(account))
+    parts.append(people.unlinked_hint(account) + people.email_conflict(graph, account, scopes))
     result.answer = " ".join(parts)
     return result
 

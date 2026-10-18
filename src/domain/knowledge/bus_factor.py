@@ -57,7 +57,7 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
         return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "person"), found=False, candidates=resolution.candidate_names())
     person = resolution.entity
     items, linked = _gather(graph, person, scopes)
-    hint = f" {people.unlinked_hint(person)}" if people.is_account(person) else ""
+    hint = f" {people.unlinked_hint(person)}{people.email_conflict(graph, person, scopes)}" if people.is_account(person) else ""
 
     result = ToolResult(tool=TOOL, answer="", candidates=resolution.candidate_names())
     if not items:

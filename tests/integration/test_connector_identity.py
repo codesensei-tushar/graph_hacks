@@ -84,6 +84,28 @@ class ConnectorIdentityTest(unittest.TestCase):
         path = algorithms.path_between("how is Yash Patil connected to Billing Service", "", SLACK)
         self.assertTrue(path.answer.startswith("Yash Patil (Jira, HubSpot) reaches Billing Service in 2 hops"), path.answer)
 
+    def test_a_same_tool_email_clash_or_an_admin_email_never_merges(self):
+        from src.connectors.base import Edge as E
+
+        crm = HUBSPOT.container_id("crm")
+        mallory = ExternalUser(id=HUBSPOT.user_id("m1"), source="hubspot", external_id="m1", name="Mallory Evil", email="yash@partner.example")
+        evil = Item(label="Service", kind="account", id=HUBSPOT.item_id("company:9"), external_id="company:9", container=crm, name="Evil Corp")
+        graph.write_page(HUBSPOT, Page(items=[evil], users=[mallory], edges=[E("OWNS", mallory.id, evil.id)]))
+        try:
+            profile = _ask("who is Mallory Evil")
+            self.assertTrue(profile.answer.startswith("Mallory Evil (HubSpot) is a HubSpot user."), profile.answer)
+            self.assertNotIn("PAY-21", profile.answer)
+            self.assertIn("2 HubSpot users share this email", profile.answer)
+            jira_side = _ask("what if Yash Patil leaves")
+            self.assertNotIn("Evil Corp", jira_side.answer)
+            self.assertIn("share this email", jira_side.answer)
+        finally:
+            falkordb_client.connect()[1].query("MATCH (n) WHERE n.id IN $ids DETACH DELETE n", {"ids": [mallory.id, evil.id]})
+        # An email an admin asserted links a user to a person, but never merges identities.
+        install = Install(source="hubspot", config={"people": "h1=yash@partner.example"})
+        with mock.patch("src.connectors.registry.all_installs", return_value=[(None, install)]):
+            self.assertTrue(_ask("who is Yash Patil").answer.startswith("Yash Patil (Jira) is a Jira user.") or _ask("who is Yash Patil").answer.startswith("Yash Patil (HubSpot) is a HubSpot user."))
+
     # --- first names ---------------------------------------------------------------------------
 
     def test_a_unique_first_name_resolves_a_connector_user(self):
@@ -109,7 +131,7 @@ class ConnectorIdentityTest(unittest.TestCase):
 
     def test_in_slack_i_and_me_are_the_asker(self):
         request = types.SimpleNamespace(asker_slack_user_id="UARJUN", read_tags=SLACK)
-        with mock.patch.object(agent_turn, "asker_person", return_value="Arjun Mehta"):
+        with mock.patch.object(agent_turn, "asker_person_ref", return_value="person:arjun"):
             for question, tool in (("what team am I on", "person_profile"), ("what if I leave", "if_person_leaves"), ("my open tickets", "find")):
                 with self.subTest(question=question):
                     choice = agent_turn.for_the_asker(agent.choose_with_keywords(question), question, request)
@@ -120,6 +142,35 @@ class ConnectorIdentityTest(unittest.TestCase):
             # Someone else named in the question stays the subject.
             choice = agent_turn.for_the_asker(agent.choose_with_keywords("what if Lena leaves, should I worry"), "what if Lena leaves, should I worry", request)
             self.assertIn("Lena", choice.args["name"])
+
+    def test_me_is_the_asker_by_id_never_a_namesake(self):
+        _, g = falkordb_client.connect()
+        g.query("CREATE (:Person {id: 'p-dup', name: 'Arjun Mehta'})<-[:IS]-(:SlackUser {id: 'UDUP', name: 'arjun2'})")
+        try:
+            request = types.SimpleNamespace(asker_slack_user_id="UDUP", read_tags=SLACK)
+            choice = agent_turn.for_the_asker(agent.choose_with_keywords("what if I leave"), "what if I leave", request)
+            self.assertEqual(choice.args["name"], "person:p-dup")
+            result, _choice = agent.run_choice(choice, "what if I leave", SLACK)
+            # The namesake asking holds nothing; the seeded Arjun's billing is not theirs.
+            self.assertEqual(result.answer, "Arjun Mehta is in the graph, and nothing is linked to them yet.")
+        finally:
+            g.query("MATCH (n) WHERE n.id IN ['p-dup', 'UDUP'] DETACH DELETE n")
+
+    def test_first_person_rules_never_take_other_questions(self):
+        cases = {
+            "what breaks if my services go down": "blast_radius",
+            "what depends on my services": "blast_radius",
+            "who knows my services": "who_knows",
+            "why did we close my tickets": "decision_trace",
+            "who should review my pull requests": "who_should_know",
+            "what do I know about the invoice worker": "who_knows",
+        }
+        for question, tool in cases.items():
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+        for question, tool in (("my open tickets", "find"), ("show my accounts", "find"), ("tickets assigned to me", "find"), ("what do I own", "person_profile")):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
 
 
 if __name__ == "__main__":

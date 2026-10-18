@@ -12,7 +12,7 @@ the arguments the model filled in.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import catalogue, resolve
+from src.domain.knowledge import catalogue, people, resolve
 from src.domain.knowledge.agent import ToolChoice, choose_tool, run_choice
 from src.domain.knowledge.dto import MemoryLine, ToolResult, ToolSpec, day_from
 from src.domain.knowledge.memories import attached
@@ -66,7 +66,7 @@ def for_the_asker(choice: ToolChoice, question: str, request: TurnRequest) -> To
     if choice.tool != "find" and resolve.resolve_name(str(choice.args["name"]), ("Person",), request.read_tags).found:
         # "what if Arjun leaves, should I worry": someone else is named; the question is about them.
         return choice
-    person = asker_person(request.asker_slack_user_id)
+    person = asker_person_ref(request.asker_slack_user_id)
     return ToolChoice(choice.tool, {**choice.args, **{key: person for key in keys}}, choice.via) if person else choice
 
 
@@ -77,6 +77,16 @@ def asker_person(slack_user_id: str | None) -> str | None:
     _, graph = connect()
     rows = graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.name LIMIT 1", {"id": slack_user_id}).result_set
     return rows[0][0] if rows else None
+
+
+def asker_person_ref(slack_user_id: str | None) -> str | None:
+    """The asker's Person as a reference the person tools resolve by id (``people.PERSON_REF``), never
+    by name: two people may share a name, and "me" must be the one asking."""
+    if not slack_user_id:
+        return None
+    _, graph = connect()
+    rows = graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.id LIMIT 1", {"id": slack_user_id}).result_set
+    return people.PERSON_REF + rows[0][0] if rows else None
 
 
 def suspend_for_approval(request: TurnRequest, spec: ToolSpec, choice: ToolChoice) -> TurnOutcome:
