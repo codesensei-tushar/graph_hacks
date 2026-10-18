@@ -94,6 +94,17 @@ class JiraConnectorTest(unittest.TestCase):
         self.assertEqual((page.items, page.has_more), ([], False))
         self.assertEqual(json.loads(page.next_cursor), {"since": "2026-10-18T05:59:00.000Z"})
 
+    def test_a_caught_up_poll_moves_the_cursor_so_a_quiet_project_is_not_read_again(self):
+        # Three hours since the cursor: PAY-1 (03:30) changed, nothing after it.
+        first = self.connector.fetch(self.install, self.pay, json.dumps({"since": "2026-10-18T03:00:00.000Z"}))
+        self.assertEqual([item.name for item in first.items], ["PAY-1"])
+        # The poll began at 06:00, so the cursor is 05:55, not PAY-1's 03:30.
+        self.assertEqual(json.loads(first.next_cursor), {"since": "2026-10-18T05:55:00.000Z"})
+        second = self.connector.fetch(self.install, self.pay, first.next_cursor)
+        self.assertIn("updated >= -10m ORDER BY updated ASC", self.fake.queries[-1][0])
+        self.assertEqual(second.items, [])
+        self.assertEqual(json.loads(second.next_cursor), {"since": "2026-10-18T05:55:00.000Z"})
+
     def test_a_page_of_one_minute_follows_the_token_instead_of_looping(self):
         same = "2026-10-18T05:58:00.000+0000"
         self.fake.issues = [_edited(load("issues.json"), key, same) for key in ("PAY-1", "PAY-2", "PAY-3")]

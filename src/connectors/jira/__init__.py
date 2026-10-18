@@ -11,8 +11,10 @@ project's issues updated in the last ``BACKFILL_DAYS`` days, newest first, up to
 ``MAX_ISSUES_PER_PROJECT``, a page at a time; the cursor then holds the newest ``updated``
 it saw. Each poll asks for issues updated since then, oldest first, so the cursor only
 moves forward. The window is written relative to now (``updated >= -42m``) because JQL
-reads absolute times in the token owner's time zone. A few minutes of overlap make every
-poll read some issues again; writing one twice changes nothing.
+reads absolute times in the token owner's time zone. A few minutes of overlap make a poll
+read some issues again; writing one twice changes nothing. A poll that catches up moves the
+cursor to when it began, less the overlap, so a quiet project does not re-read its last
+updates forever.
 
 Issues with a security level are never written, and are deleted if an earlier poll wrote
 them. Deleted issues are not detected in v1. See docs/JIRA.md.
@@ -21,7 +23,7 @@ them. Deleted issues are not detected in v1. See docs/JIRA.md.
 import json
 import logging
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from src.connectors import registry
 from src.connectors.base import Connector, ConnectorError, Container, Edge, Install, InstallInfo, Page
@@ -111,9 +113,10 @@ class JiraConnector(Connector):
     def _poll(self, install: Install, client, container: Container, state: dict) -> Page:
         since = state["since"]
         jql = state.get("jql")
+        polled_at = self.now()
         if not jql:
-            started = mapper.parse_time(since) or self.now()
-            minutes = max(1, math.ceil((self.now() - started).total_seconds() / 60)) + OVERLAP_MINUTES
+            started = mapper.parse_time(since) or polled_at
+            minutes = max(1, math.ceil((polled_at - started).total_seconds() / 60)) + OVERLAP_MINUTES
             jql = f"project = {container.external_id} AND updated >= -{minutes}m ORDER BY updated ASC"
         result = client.search_page(jql, state.get("token"), PAGE_SIZE)
         page, newest = self._page(install, container, result.get("issues") or [])
@@ -124,8 +127,15 @@ class JiraConnector(Connector):
             # Oldest first, so everything not read yet was updated at or after ``newest``: start again
             # from there. When a whole page shares one minute, follow the token instead.
             page.next_cursor = json.dumps({"since": newest} if newest > since else {"since": since, "jql": jql, "token": token})
-        else:
+        elif state.get("token"):
+            # The end of a token-paged poll: its window was fixed when the first page was read.
             page.next_cursor = json.dumps({"since": newest})
+        else:
+            # Caught up: everything updated before this poll began has been read, so the cursor moves to
+            # then, less the overlap, even when nothing changed. Otherwise a quiet project would re-read
+            # its last burst of updates on every poll.
+            checked = mapper.format_time(polled_at - timedelta(minutes=OVERLAP_MINUTES))
+            page.next_cursor = json.dumps({"since": max(newest, checked)})
         if page.items or page.deleted_ids:
             log.info("[jira] poll project=%s written=%d deleted=%d more=%s", container.name, len(page.items), len(page.deleted_ids), page.has_more)
         return page
