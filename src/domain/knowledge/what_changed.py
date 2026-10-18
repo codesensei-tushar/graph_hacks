@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, decisions, kinds, reading_list, resolve
+from src.domain.knowledge import algorithms, coverage, decisions, kinds, people, reading_list, resolve
 from src.domain.knowledge.dto import MemoryLine, PathStep, ToolResult
 from src.domain.knowledge.memories import LIVE
 from src.domain.knowledge.resolve import SCOPED, Entity, join_names
@@ -162,7 +162,8 @@ def what_changed(question: str, scopes: list[str], days=None, only=None, person=
     parts = [f"{lead}. By thing: {digest}. Newest first: {' '.join(lines)}" if digest else f"{lead}, newest first: {' '.join(lines)}"]
     if scope.mode == "service":
         parts.append(_owners_line(graph, result, scope, recent, scopes))
-    result.answer = " ".join(part for part in parts if part)
+    # A capped project only holds its newest items: said, so "nothing changed" is never read as everything.
+    result.answer = " ".join(part for part in parts if part) + coverage.note_for(graph, scopes, result.path)
     return result
 
 
@@ -196,7 +197,9 @@ def _scope(graph, text: str, scopes: list[str], person: str | None = None) -> Sc
 
 def _person_scope(graph, person: str | None, scopes: list[str]) -> Scope:
     """What a person owns, works on or knows; the whole company when they hold nothing or are not in the graph."""
-    found = resolve.resolve_name(person, ("Person",), scopes, graph=graph) if person else None
+    # A name, or the asker by id from a Slack turn ("person:<id>"), never a namesake.
+    found = people.resolve_person(person, scopes, graph) if person else None
+    found = found if found is None or found.entity is None or found.entity.label == "Person" else None
     if found is None or not found.found:
         return Scope("company")
     rows = graph.ro_query(

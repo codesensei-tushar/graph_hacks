@@ -100,7 +100,7 @@ class RefusalTest(unittest.TestCase):
         self.assertEqual(find.find("Team", {"kind": "process"}, ["org_shared"]).answer, "Teams take no filters; not by kind.")
         self.assertEqual(
             find.find("Ticket", {"owner": "maya"}, ["org_shared"]).answer,
-            "Tickets can be filtered by state, about, team, person and blocked; not by owner.",
+            "Tickets can be filtered by state, about, team, person, blocked and project; not by owner.",
         )
         self.assertEqual(
             find.find("Service", {"kind": "spaceship"}, ["org_shared"]).answer,
@@ -118,7 +118,7 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(set(schema["properties"]) - {"label"}, set(find.FILTER_NAMES))
         self.assertEqual(schema["properties"]["kind"]["enum"], list(SERVICE_KINDS))
         self.assertEqual(schema["properties"]["standing"]["type"], "boolean")
-        self.assertIn("Ticket: state, about, team, person, blocked", schema["properties"]["label"]["description"])
+        self.assertIn("Ticket: state, about, team, person, blocked, project", schema["properties"]["label"]["description"])
 
     def test_neighbors_and_explore_take_bounded_arguments(self):
         neighbors = catalogue.get_tool("neighbors").args_schema["properties"]

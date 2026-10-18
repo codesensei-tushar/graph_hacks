@@ -204,7 +204,15 @@ def resolve_node(graph, text: str, scopes: list[str]) -> Resolution:
         team = resolve.resolve_name(text, ("Team",), scopes, graph=graph)
         if team.found:
             return team
-    return resolve.resolve_name(text, EXPLORABLE, scopes, graph=graph)
+    resolution = resolve.resolve_name(text, EXPLORABLE, scopes, graph=graph)
+    if not resolution.found:
+        # A synced project by its key or name ("explore PLAT"): what it holds.
+        from src.domain.knowledge import coverage  # coverage reads the connectors' cap; imported when needed
+
+        project = coverage.resolve_container(graph, text, scopes)
+        if project is not None:
+            return Resolution(query=text, entity=project)
+    return resolution
 
 
 def _miss(tool: str, resolution: Resolution) -> ToolResult:
