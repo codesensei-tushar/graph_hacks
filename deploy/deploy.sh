@@ -24,6 +24,9 @@ PLACEHOLDER=REPLACE_ME
 NGINX_GID=101
 # Written to .env only when the secret exists. See docs/DEPLOY.md.
 OPTIONAL_SECRETS="SLACK_OWNER_ID SLACK_ADMIN_IDS SLACK_CLIENT_ID SLACK_CLIENT_SECRET BRAIN_ADMIN_TOKEN MCP_TOKEN TOKEN_ENCRYPTION_KEY LLM_MODEL GITHUB_APP_ID GITHUB_WEBHOOK_SECRET GITHUB_PRIVATE_KEY GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET"
+# The org console (docs/CONSOLE.md). Never named CONNECTOR_*: registry.load would read those as
+# connector install fields.
+OPTIONAL_SECRETS="$OPTIONAL_SECRETS CONSOLE_ENABLED TOKEN_ENCRYPTION_KEYS JIRA_OAUTH_CLIENT_ID JIRA_OAUTH_CLIENT_SECRET HUBSPOT_OAUTH_CLIENT_ID HUBSPOT_OAUTH_CLIENT_SECRET"
 # Connector settings (docs/CONNECTORS.md): every secret named CONNECTOR_<SOURCE>_<FIELD>. These
 # names are tried on every deploy; any other CONNECTOR_ secret is found too once the VM may list
 # secrets (roles/secretmanager.viewer). Like the optional ones, a missing secret is skipped.

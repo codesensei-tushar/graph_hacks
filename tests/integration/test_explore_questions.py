@@ -2,7 +2,7 @@
 
 The page offers questions in three places: "Ask next" after an answer, "Try instead" after a
 refusal, and a click on a node of a drawing (the hero's sample and every answer's path). Each is
-BrainGraph.questionsFor (graph.js, QUESTIONS) of a node the page drew, or an app.js NEXT step,
+BrainGraph.questionsFor (graph.js, QUESTIONS) of a node the page drew, or an answer.js NEXT step,
 which tests/unit/test_explore.py holds to those same questions. So asking every question
 QUESTIONS gives for every node of every example chip's answer, and of the hero's sample, asks
 everything a judge can click; so does each team page's link for a person, a thing, a decision
