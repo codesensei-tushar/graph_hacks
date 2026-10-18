@@ -267,25 +267,39 @@
         edgeEls[i].setAttribute("x2", x2.toFixed(1));
         edgeEls[i].setAttribute("y2", y2.toFixed(1));
       });
+      // A label goes right of its node, or left; it is held back when both sides would cover
+      // another label or another node's shape. Nodes with a label are painted last, on top.
       const taken = [];
+      const shapes = nodes.map((node) => {
+        const [x, y] = pos.get(node.id);
+        const r = radius(node.id) + 2;
+        return { id: node.id, x0: x - r, x1: x + r, y0: y - r, y1: y + r };
+      });
+      const hits = (rect, id) => taken.some((o) => rect.x0 < o.x1 && rect.x1 > o.x0 && rect.y0 < o.y1 && rect.y1 > o.y0)
+        || shapes.some((o) => o.id !== id && rect.x0 < o.x1 && rect.x1 > o.x0 && rect.y0 < o.y1 && rect.y1 > o.y0);
       const ranked = [...nodes].sort((a, b) => degree.get(b.id) - degree.get(a.id) || (a.id < b.id ? -1 : 1));
       const budget = w < 480 ? 5 : 9;
+      const labelled = [];
       ranked.forEach((node, rank) => {
         const { group, label } = nodeEls.get(node.id);
         const [x, y] = pos.get(node.id);
         group.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
         const r = radius(node.id) + 5;
-        const text = label.textContent;
-        const width = text.length * 6.1;
-        const left = x + r + width > w - 6;
-        label.setAttribute("x", (left ? -r : r).toFixed(1));
-        label.setAttribute("text-anchor", left ? "end" : "start");
-        const rect = { x0: left ? x - r - width : x + r, x1: left ? x - r : x + r + width, y0: y - 9, y1: y + 7 };
-        const clear = !taken.some((o) => rect.x0 < o.x1 && rect.x1 > o.x0 && rect.y0 < o.y1 && rect.y1 > o.y0);
-        const shown = rank < budget && clear;
-        if (shown) taken.push(rect);
+        const width = label.textContent.length * 6.1;
+        const sides = x + r + width > w - 6 ? [true] : x - r - width < 6 ? [false] : [false, true];
+        let side = sides[0];
+        let rect = null;
+        for (const left of sides) {
+          const candidate = { x0: left ? x - r - width : x + r, x1: left ? x - r : x + r + width, y0: y - 9, y1: y + 7 };
+          if (!hits(candidate, node.id)) { side = left; rect = candidate; break; }
+        }
+        label.setAttribute("x", (side ? -r : r).toFixed(1));
+        label.setAttribute("text-anchor", side ? "end" : "start");
+        const shown = rank < budget && rect !== null;
+        if (shown) { taken.push(rect); labelled.push(group); }
         label.classList.toggle("quiet", !shown);
       });
+      for (const group of labelled) nodeLayer.append(group);
       if (walk) redrawWalk();
     }
 
@@ -301,6 +315,7 @@
       const node = nodes[index.get(id)];
       svg.classList.add("focus");
       nodeEls.get(id).group.classList.add("on");
+      nodeLayer.append(nodeEls.get(id).group);
       for (const other of near.get(id)) nodeEls.get(other).group.classList.add("near");
       edges.forEach((edge, i) => edgeEls[i].classList.toggle("near", edge.source === id || edge.target === id));
       const kind = node.kind && node.kind !== "service" ? ` · ${node.kind}` : "";

@@ -30,7 +30,7 @@
   function legend(nodes) {
     const seen = new Set(nodes.map((node) => familyOf(node.label)));
     const list = el("ul", { class: "legend" });
-    const names = { person: "People", service: "Services", knowledge: "Documents, tickets, decisions, pull requests, chat", other: "Teams, repos, channels" };
+    const names = { person: "People", service: "What teams run", knowledge: "Documents, tickets, decisions, pull requests, chat", other: "Teams, repos, channels" };
     for (const family of ["person", "service", "knowledge", "other"]) {
       if (!seen.has(family)) continue;
       const item = el("li");
@@ -109,9 +109,29 @@
     return { columns, column: (id) => layer.get(id), row: (id) => row.get(id), ins, outs };
   }
 
+  // The walk: edges draw in the order the tool returned them, each growing from its source to
+  // its target; a node fades in as it is first reached. CSS runs it from --d on each element,
+  // so reduced motion (no animations) shows the finished drawing at once.
+  const WALK_STAGGER = 90;
+  const WALK_DRAW = 250;
+  let drawings = 0;
+
+  function walkTimes(edges) {
+    const reached = new Map();
+    const reach = (id, at) => { if (!reached.has(id) || reached.get(id) > at) reached.set(id, at); };
+    const starts = edges.map((edge, i) => {
+      const start = i * WALK_STAGGER;
+      reach(edge.source, start);
+      reach(edge.target, start + WALK_DRAW);
+      return start;
+    });
+    return { starts, reached };
+  }
+
   function drawPath(nodes, edges) {
     const byId = new Map(nodes.map((node) => [node.id, node]));
     const { columns, column, row, ins, outs } = layout(nodes, edges);
+    const { starts, reached } = walkTimes(edges);
     const width = (id) => Math.min(200, Math.max(96, Math.round(byId.get(id).name.length * 7.4 + 26)));
     const colWidth = columns.map((ids) => Math.max(...ids.map(width)));
     const colX = [];
@@ -130,19 +150,20 @@
     };
 
     // Scales down to fit the column on a wide screen; on a phone it keeps a readable size and scrolls.
+    drawings += 1;
+    const titleId = `path-title-${drawings}`;
+    const descId = `path-desc-${drawings}`;
     const svg = svgEl("svg", {
       viewBox: `0 0 ${totalWidth} ${totalHeight}`,
-      role: "img",
+      role: "group",
+      "aria-labelledby": `${titleId} ${descId}`,
       style: `width:100%;height:auto;max-width:${totalWidth}px;min-width:${Math.min(totalWidth, 560)}px`,
     });
-    const caption = svgEl("title");
-    caption.textContent = `The path: ${edges.length} edges over ${nodes.length} nodes`;
-    svg.append(caption);
-    const defs = svgEl("defs");
-    const marker = svgEl("marker", { id: "arrow", viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "9", markerHeight: "9", markerUnits: "userSpaceOnUse", orient: "auto-start-reverse" });
-    marker.append(svgEl("path", { d: "M0,0 L10,5 L0,10 z", class: "arrow" }));
-    defs.append(marker);
-    svg.append(defs);
+    const caption = svgEl("title", { id: titleId });
+    caption.textContent = `The path: ${edges.length} edge${edges.length === 1 ? "" : "s"} over ${nodes.length} nodes`;
+    const desc = svgEl("desc", { id: descId });
+    desc.textContent = "Each box is a node, named with its label; each arrow is an edge in its true direction. The list of edges after the drawing reads the same path as text.";
+    svg.append(caption, desc);
 
     const edgeLayer = svgEl("g");
     const nodeLayer = svgEl("g");
@@ -150,7 +171,7 @@
 
     const edgeEls = [];
     const labels = [];
-    for (const edge of edges) {
+    edges.forEach((edge, index) => {
       const a = box(edge.source);
       const b = box(edge.target);
       const from = column(edge.source);
@@ -180,7 +201,12 @@
         labelX = null;
       }
       const group = svgEl("g", { class: "edge" });
-      group.append(svgEl("path", { d: `M${p0} C${p1} ${p2} ${p3}`, "marker-end": "url(#arrow)" }));
+      group.style.setProperty("--d", `${starts[index]}ms`);
+      // pathLength="1" lets the walk grow the line with a dash of length 1, whatever its real length.
+      group.append(svgEl("path", { class: "line", d: `M${p0} C${p1} ${p2} ${p3}`, pathLength: "1" }));
+      // The arrowhead sits on the curve's end tangent, so it always shows the edge's true direction.
+      const angle = (Math.atan2(p3[1] - p2[1], p3[0] - p2[0]) * 180) / Math.PI;
+      group.append(svgEl("path", { class: "arrow", d: "M-9,-4.5 L0,0 L-9,4.5 z", transform: `translate(${p3}) rotate(${angle.toFixed(1)})` }));
       const t = labelX === null ? 0.5 : tAtX(p0, p1, p2, p3, labelX);
       const point = bezierAt(p0, p1, p2, p3, t);
       const label = svgEl("text", { "text-anchor": "middle" });
@@ -189,30 +215,33 @@
       labels.push({ label, x: point[0], y: point[1] - 4 });
       edgeLayer.append(group);
       edgeEls.push(group);
-    }
+    });
     spreadLabels(labels);
 
     const nodeEls = new Map();
     for (const node of nodes) {
       const b = box(node.id);
       const color = FAMILY_COLOR[familyOf(node.label)];
-      const group = svgEl("g", { class: "node", transform: `translate(${b.x},${b.y})` });
-      group.append(svgEl("rect", { width: b.w, height: b.h, rx: 8, ry: 8, fill: `color-mix(in oklab, ${color} 16%, var(--surface))`, stroke: color }));
+      const kind = node.label ? kindOf(node.label) : "";
+      const group = svgEl("g", { class: "node", transform: `translate(${b.x},${b.y})`, tabindex: "0", "aria-label": kind ? `${node.name}, ${kind}` : node.name });
+      const body = svgEl("g", { class: "body" });
+      body.style.setProperty("--d", `${reached.get(node.id) || 0}ms`);
+      body.append(svgEl("rect", { width: b.w, height: b.h, rx: 8, ry: 8, fill: `color-mix(in oklab, ${color} 16%, var(--surface))`, stroke: color }));
       const name = svgEl("text", { class: "name", x: b.w / 2, y: node.label ? 17 : 24, "text-anchor": "middle" });
       name.textContent = clip(node.name, Math.floor((b.w - 16) / 7.4));
-      group.append(name);
+      body.append(name);
       if (node.label) {
-        const kind = svgEl("text", { class: "kind", x: b.w / 2, y: 31, "text-anchor": "middle" });
-        kind.textContent = kindOf(node.label);
-        group.append(kind);
+        const kindText = svgEl("text", { class: "kind", x: b.w / 2, y: 31, "text-anchor": "middle" });
+        kindText.textContent = kind;
+        body.append(kindText);
       }
       const tip = svgEl("title");
-      tip.textContent = node.label ? `${node.name} (${kindOf(node.label)})` : node.name;
-      group.append(tip);
+      tip.textContent = kind ? `${node.name} (${kind})` : node.name;
+      group.append(body, tip);
       nodeLayer.append(group);
       nodeEls.set(node.id, group);
     }
-    return { svg, edgeEls, nodeEls };
+    return { svg, edgeEls, nodeEls, starts };
   }
 
   // Labels that share a column gap are nudged apart vertically so none sits on another.
@@ -251,10 +280,12 @@
   };
   const clip = (text, max) => (text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}…`);
 
-  // The heading, drawing, legend and the `A -[REL]-> B` lines, with each line and its edge
-  // highlighted together on hover. ``meta`` names the tool and depth when there is one.
+  // The heading, drawing, legend and the `A -[REL]-> B` lines. The walk runs once on arrival
+  // and again from the Replay button; hovering or focusing a node, an edge or a line lights
+  // that part of the drawing and its lines together. ``meta`` names the tool and depth.
   function renderPath(container, nodes, edges, meta = {}) {
     if (!edges.length) return;
+    const head = el("div", { class: "path-head" });
     const heading = el("h3", {}, `${meta.title || "Path"} `);
     const info = el("span", { class: "meta" });
     info.append("(");
@@ -262,31 +293,54 @@
     if (meta.depth !== null && meta.depth !== undefined) info.append(`depth ${meta.depth}, `);
     info.append(`${edges.length} edge${edges.length === 1 ? "" : "s"})`);
     heading.append(info);
-    container.append(heading);
+    const replay = el("button", { type: "button", class: "replay" }, "Replay the walk");
+    head.append(heading, replay);
+    container.append(head);
 
-    const canvas = el("div", { class: "canvas" });
-    const { svg, edgeEls, nodeEls } = drawPath(nodes, edges);
+    const canvas = el("div", { class: "canvas go" });
+    const { svg, edgeEls, nodeEls, starts } = drawPath(nodes, edges);
     canvas.append(svg);
     container.append(canvas);
     container.append(legend(nodes));
 
     const names = new Map(nodes.map((node) => [node.id, node.name]));
-    const list = el("ul", { class: "steps" });
-    edges.forEach((edge, index) => {
+    const list = el("ul", { class: "steps go" });
+    const items = edges.map((edge, index) => {
       const item = el("li", {}, `${names.get(edge.source)} -[${edge.rel}]-> ${names.get(edge.target)}`);
-      const hot = (on) => {
-        item.classList.toggle("hot", on);
-        edgeEls[index].classList.toggle("hot", on);
-        nodeEls.get(edge.source).classList.toggle("hot", on);
-        nodeEls.get(edge.target).classList.toggle("hot", on);
-      };
-      item.addEventListener("mouseenter", () => hot(true));
-      item.addEventListener("mouseleave", () => hot(false));
-      edgeEls[index].addEventListener("mouseenter", () => hot(true));
-      edgeEls[index].addEventListener("mouseleave", () => hot(false));
+      item.style.setProperty("--d", `${starts[index]}ms`);
       list.append(item);
+      return item;
     });
     container.append(list);
+
+    const light = (indexes, on, nodeId) => {
+      for (const index of indexes) {
+        items[index].classList.toggle("hot", on);
+        edgeEls[index].classList.toggle("hot", on);
+        nodeEls.get(edges[index].source).classList.toggle("hot", on);
+        nodeEls.get(edges[index].target).classList.toggle("hot", on);
+      }
+      if (nodeId) nodeEls.get(nodeId).classList.toggle("hot", on);
+    };
+    edges.forEach((edge, index) => {
+      for (const target of [items[index], edgeEls[index]]) {
+        target.addEventListener("mouseenter", () => light([index], true));
+        target.addEventListener("mouseleave", () => light([index], false));
+      }
+    });
+    for (const [id, group] of nodeEls) {
+      const touching = edges.map((edge, index) => (edge.source === id || edge.target === id ? index : -1)).filter((index) => index >= 0);
+      for (const [on, off] of [["mouseenter", "mouseleave"], ["focus", "blur"]]) {
+        group.addEventListener(on, () => light(touching, true, id));
+        group.addEventListener(off, () => light(touching, false, id));
+      }
+    }
+
+    replay.addEventListener("click", () => {
+      for (const part of [canvas, list]) part.classList.remove("go");
+      void canvas.offsetWidth; // restart the CSS animations
+      for (const part of [canvas, list]) part.classList.add("go");
+    });
   }
 
   window.BrainGraph = { el, svgEl, renderPath, familyOf, kindOf, FAMILY_COLOR, SCOPE_LABEL };
