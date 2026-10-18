@@ -190,7 +190,8 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
 
     from src.db import schema
 
-    schema.ensure(real_graph)
+    # Indexes only: the next start's ensure() runs the migrations.
+    schema.ensure(real_graph, migrate=False)
 
     report.nodes = int(real_graph.query("MATCH (n) RETURN count(n)").result_set[0][0])
     return report

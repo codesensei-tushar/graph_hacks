@@ -96,7 +96,7 @@ LATEST = MIGRATIONS[-1][0]
 
 def indexes(graph) -> dict[str, dict[str, set[str]]]:
     """The graph's indexes: label -> property -> kinds ("RANGE", "FULLTEXT", ...)."""
-    rows = graph.ro_query("CALL db.indexes() YIELD label, types RETURN label, types").result_set
+    rows = _read(graph, "CALL db.indexes() YIELD label, types RETURN label, types")
     out: dict[str, dict[str, set[str]]] = {}
     for label, types in rows:
         for prop, kinds in (types or {}).items():
@@ -104,13 +104,26 @@ def indexes(graph) -> dict[str, dict[str, set[str]]]:
     return out
 
 
+def _read(graph, query: str, params: dict | None = None) -> list:
+    """A read that finds nothing in a graph not created yet (a new org's, before its first write)."""
+    try:
+        return graph.ro_query(query, params).result_set
+    except Exception as error:
+        if "empty key" in str(error).lower():
+            return []
+        raise
+
+
 def version(graph) -> int:
-    rows = graph.ro_query("MATCH (v:SchemaVersion {id: $id}) RETURN v.version", {"id": VERSION_ID}).result_set
+    rows = _read(graph, "MATCH (v:SchemaVersion {id: $id}) RETURN v.version", {"id": VERSION_ID})
     return int(rows[0][0] or 0) if rows else 0
 
 
-def ensure(graph=None) -> int:
-    """Bring ``graph`` (the org in context's when None) to the latest schema; returns its version."""
+def ensure(graph=None, migrate: bool = True) -> int:
+    """Bring ``graph`` (the org in context's when None) to the latest schema; returns its version.
+
+    ``migrate=False`` (a seed) builds the indexes only: a seed writes data as it is, and the next
+    start migrates it."""
     if graph is None:
         _, graph = connect()
     if isinstance(graph, DarkGraph):
@@ -118,6 +131,8 @@ def ensure(graph=None) -> int:
     _range_indexes(graph)
     _fulltext_indexes(graph)
     current = version(graph)
+    if not migrate:
+        return current
     for number, what, step in MIGRATIONS:
         if number <= current:
             continue

@@ -160,7 +160,7 @@ class EnsureIndexesTest(unittest.TestCase):
         with self.assertLogs("src.domain.knowledge.search", level="ERROR"):
             self.assertEqual(search.ensure_search_indexes(_Graph(list_fails=True)), [])
 
-    def test_startup_creates_them_after_the_memory_indexes(self):
+    def test_startup_builds_every_index_through_the_schema(self):
         from dataclasses import replace
 
         from src import main
@@ -168,8 +168,8 @@ class EnsureIndexesTest(unittest.TestCase):
         calls = []
         with (
             mock.patch.object(main, "settings", replace(main.settings, seed_on_startup=False)),
-            mock.patch.object(main, "ensure_indexes", side_effect=lambda: calls.append("memory")),
-            mock.patch.object(main, "ensure_search_indexes", side_effect=lambda: calls.append("topics")),
+            mock.patch.object(main.schema, "ensure", side_effect=lambda *args, **kwargs: calls.append("schema")),
+            mock.patch.object(main, "_other_orgs", return_value=[]),
         ):
             main._seed_if_empty()
-        self.assertEqual(calls, ["memory", "topics"])
+        self.assertEqual(calls, ["schema"])
