@@ -425,26 +425,7 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
         result.answer = " ".join(parts)
         return result
 
-    tickets = graph.ro_query(
-        f"""
-        MATCH (ticket:Ticket)-[:ABOUT]->(service:Service)
-        WHERE service.id IN $services AND {SCOPED.format(var="ticket")}
-          AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(ticket)
-        RETURN ticket.id, ticket.name, service.id, service.name
-        ORDER BY ticket.name
-        """,
-        {"services": service_ids, "scopes": scopes, "id": current.id},
-    ).result_set
-    pull_requests = graph.ro_query(
-        f"""
-        MATCH (pr:PullRequest)-[:TOUCHES]->(service:Service)
-        WHERE service.id IN $services AND {SCOPED.format(var="pr")}
-          AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(pr)
-        RETURN pr.id, pr.name, service.id, service.name
-        ORDER BY pr.name
-        """,
-        {"services": service_ids, "scopes": scopes, "id": current.id},
-    ).result_set
+    tickets, pull_requests = uncited_work(graph, current.id, service_ids, scopes)
     for ticket_id, ticket, service_id, service in tickets:
         result.add(PathStep(ticket, "ABOUT", service, from_id=ticket_id, to_id=service_id, from_label="Ticket", to_label="Service"))
     for pr_id, pr, service_id, service in pull_requests:
@@ -456,6 +437,33 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
         parts.append(f"Nothing else about {service_names} has landed that it does not cite.")
     result.answer = " ".join(parts)
     return result
+
+
+def uncited_work(graph, decision_id: str, service_ids: list[str], scopes: list[str]) -> tuple[list, list]:
+    """Tickets ``ABOUT`` and pull requests that ``TOUCHES`` these services which the decision does
+    not ``BASED_ON`` or ``CITES``: rows of (id, name, service id, service name), by name. What
+    ``decision_pressure`` tells for one decision and ``decision_health`` checks for every one."""
+    tickets = graph.ro_query(
+        f"""
+        MATCH (ticket:Ticket)-[:ABOUT]->(service:Service)
+        WHERE service.id IN $services AND {SCOPED.format(var="ticket")}
+          AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(ticket)
+        RETURN ticket.id, ticket.name, service.id, service.name
+        ORDER BY ticket.name
+        """,
+        {"services": service_ids, "scopes": scopes, "id": decision_id},
+    ).result_set
+    pull_requests = graph.ro_query(
+        f"""
+        MATCH (pr:PullRequest)-[:TOUCHES]->(service:Service)
+        WHERE service.id IN $services AND {SCOPED.format(var="pr")}
+          AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(pr)
+        RETURN pr.id, pr.name, service.id, service.name
+        ORDER BY pr.name
+        """,
+        {"services": service_ids, "scopes": scopes, "id": decision_id},
+    ).result_set
+    return tickets, pull_requests
 
 
 # --- record --------------------------------------------------------------------------------

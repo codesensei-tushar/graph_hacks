@@ -171,6 +171,37 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("who actually works together")[0], "working_groups")
         self.assertEqual(ask_service.route("who owns billing")[0], "who_owns")
 
+    def test_teams_depending_on_teams_and_the_health_of_decisions(self):
+        for question, direction in (
+            ("which teams depend on platform", "dependents"),
+            ("which team relies on payments", "dependents"),
+            ("who depends on the platform team", "dependents"),
+            ("what does payments need from other teams", "dependencies"),
+            ("what does the sales team use from other teams", "dependencies"),
+            ("what does the data team depend on", "dependencies"),
+            ("cross-team dependencies", "dependents"),
+            ("dependencies between teams", "dependents"),
+            ("show me team dependencies", "dependents"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("team_dependencies", {"name": question, "direction": direction}))
+        for question in (
+            "which decisions are stale",
+            "are any decisions in conflict",
+            "conflicting decisions",
+            "decisions that lack evidence",
+            "which decisions need attention",
+            "decision health",
+            "health of our decisions",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("decision_health", {"name": question}))
+        # One decision, one service: the tools that already answer them.
+        self.assertEqual(ask_service.route("is the billing retries decision still the last word")[0], "decision_pressure")
+        self.assertEqual(ask_service.route("what decisions have we made about billing")[0], "decision_trace")
+        self.assertEqual(ask_service.route("what does the invoice worker depend on"), ("blast_radius", {"name": "what does the invoice worker depend on", "direction": algorithms.DEPENDENCIES}))
+        self.assertEqual(ask_service.route("what breaks if auth goes down")[0], "blast_radius")
+
     def test_who_signed_off_is_a_decision_and_summarising_a_team_is_its_brief(self):
         for question in ("who approved moving the memory layer", "who proposed the billing retries", "who signed off on the graph store", "who decided to leave postgres"):
             with self.subTest(question=question):

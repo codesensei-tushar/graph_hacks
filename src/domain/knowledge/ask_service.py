@@ -62,6 +62,30 @@ _RISK = re.compile(
     r"|\b(?:no|missing|without) (?:a )?(?:runbooks?|docs?|documentation)\b|\bone person (?:away )?from an outage\b",
     re.IGNORECASE,
 )
+# Teams depending on teams, not one service's dependents: "which teams depend on platform",
+# "what does payments need from other teams", "cross-team dependencies". Before blast radius,
+# which shares "depend on"; "what does the invoice worker depend on" names no team and stays there.
+_TEAM_DEPS = re.compile(
+    r"\bwhich teams? (?:depends?|rel(?:y|ies)) on\b|\bwho depends on (?:the )?\w+ team\b"
+    r"|\bwhat does (?:the )?\w+(?: team)? (?:need|use|depend on|rely on) from (?:other|another) teams?\b"
+    r"|\bwhat (?:do|does) (?:the )?\w+ team (?:depend|rely) on\b|\b(?:cross[- ]team|team[- ]level|inter[- ]team) dependenc(?:y|ies)\b"
+    r"|\bdependenc(?:y|ies) between teams\b|\bteams? dependenc(?:y|ies)\b",
+    re.IGNORECASE,
+)
+# The team is the subject: what it needs from others, rather than who needs it.
+_TEAM_NEEDS = re.compile(
+    r"\bwhat does (?:the )?\w+(?: team)? (?:need|use|depend on|rely on) from (?:other|another) teams?\b"
+    r"|\bwhat (?:do|does) (?:the )?\w+ team (?:depend|rely) on\b",
+    re.IGNORECASE,
+)
+# Every standing decision audited, not one decision traced: "which decisions are stale", "are any
+# decisions in conflict". "is the billing retries decision still the last word" stays decision_pressure.
+_DECISION_HEALTH = re.compile(
+    r"\b(?:stale|conflicting|contradictory|contradicting|outdated|orphaned|unsupported) decisions?\b"
+    r"|\bdecisions? (?:that )?(?:conflict|contradict|clash|are stale|are outdated|lack evidence|need(?:s)? (?:attention|review))\b"
+    r"|\bdecision health\b|\b(?:any|which) decisions (?:in conflict|conflict|are stale|are outdated|need)\b|\bhealth of (?:our )?decisions\b",
+    re.IGNORECASE,
+)
 # A person leaving, not a service failing. "who is the only one who knows billing" names a
 # service and stays on who_knows; "what is Arjun the only one who knows" names a person, and so
 # does "the bus factor on arjun"; "the bus factor for billing" names a service and stays on who_knows.
@@ -153,6 +177,10 @@ def route(question: str) -> tuple[str, dict]:
         return "working_groups", {}
     if _RISK.search(text):
         return "risk_map", {}
+    if _TEAM_DEPS.search(text):
+        return "team_dependencies", {"name": text, "direction": "dependencies" if _TEAM_NEEDS.search(text) else "dependents"}
+    if _DECISION_HEALTH.search(text):
+        return "decision_health", {"name": text}
     if _CHANGED.search(text):
         from src.domain.knowledge.what_changed import only_in
 
@@ -508,6 +536,20 @@ def risk_map(scopes: list[str]) -> ToolResult:
     return risk.risk_map(scopes)
 
 
+def team_dependencies(name: str | None, scopes: list[str], direction: str | None = None) -> ToolResult:
+    """Lives in ``org_health.py``, which audits decisions too. Kept here for the keyword router."""
+    from src.domain.knowledge import org_health
+
+    return org_health.team_dependencies(name, scopes, direction)
+
+
+def decision_health(name: str | None, scopes: list[str]) -> ToolResult:
+    """Lives in ``org_health.py``, which reads decisions (and so the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import org_health
+
+    return org_health.decision_health(name, scopes)
+
+
 def person_profile(question: str, scopes: list[str]) -> ToolResult:
     """Lives in ``person_profile.py``, which reads decisions and the bus factor. Kept here for the keyword router."""
     from src.domain.knowledge import person_profile as profile
@@ -559,6 +601,8 @@ _ROUTED = {
     "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
     "risk_map": lambda args, scopes: risk_map(scopes),
     "person_profile": lambda args, scopes: person_profile(args["name"], scopes),
+    "team_dependencies": lambda args, scopes: team_dependencies(args.get("name"), scopes, args.get("direction")),
+    "decision_health": lambda args, scopes: decision_health(args.get("name"), scopes),
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "reading_list": lambda args, scopes: reading_list(args["name"], scopes),

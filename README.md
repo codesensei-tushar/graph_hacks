@@ -179,7 +179,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a small schema: `tool`, an enum of the catalogue's names, and `args`, the chosen tool's arguments as JSON text (each tool's argument names, types and bounds are in the prompt, because the structured-output API rejects integer bounds and refuses the union of every tool's arguments as too complex). The choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
 
-**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (119 of them on 18 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; the edge clause `explore` and `neighbors` share, `($rel IS NULL OR type(r) = $rel)` with the direction test on `$dir`, a code constant whose type and direction arrive as parameters after an allowlist check in Python; fixed field lists for `RETURN`, including `find`'s fixed lists of cited edges; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; the risk map's optional id filter, the fixed text `AND s.id IN $ids` with the ids passed as a parameter; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (124 of them on 18 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; the edge clause `explore` and `neighbors` share, `($rel IS NULL OR type(r) = $rel)` with the direction test on `$dir`, a code constant whose type and direction arrive as parameters after an allowlist check in Python; fixed field lists for `RETURN`, including `find`'s fixed lists of cited edges; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; the risk map's optional id filter, the fixed text `AND s.id IN $ids` with the ids passed as a parameter; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |
@@ -200,6 +200,8 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `if_person_leaves` | What rests on one person alone if they leave, ranked by what depends on it, and who is next in line for each | no |
 | `risk_map` | Where risk concentrates across the company: every owned thing ranked by what depends on it times its gaps (one person, no document, owner on another team), with PageRank shown beside it, plus the full ranking as a table | no |
 | `person_profile` | Who a person is and what they hold: role and team, what they own, work on or know with what depends on each, documents, pull requests, open tickets, their decisions and whether each stands, who they work with most, and what rests on them alone | no |
+| `team_dependencies` | Which teams depend on which through what they run: for one team, who depends on it (or what it needs from others) with the links and the teams reached only through others; for the company, every pair of teams and the mutual ones | no |
+| `decision_health` | An audit of the decisions that stand: no evidence, no approver, two standing decisions about the same thing, work about it that it does not cite, age, and what replaced what | no |
 | `reading_list` | What to read before touching a service: the documents on it and everything it depends on, nearest first, the standing decisions and their sources, and what nothing documents, with who to ask | no |
 | `what_changed` | What changed lately around a service and what it depends on, a team, or the whole company: decisions, pull requests, tickets and what was said, dated, grouped by thing, newest first | no |
 | `decision_pressure` | Tickets and pull requests about a decision's service that the standing decision does not cite | no |
@@ -440,6 +442,41 @@ RETURN pr.id, pr.name, pr.state, type(rel)
 MATCH (:Person {id: $id})-[:OWNS|WORKED_ON|KNOWS]->(s:Service)<-[theirs:OWNS|WORKED_ON|KNOWS]-(other:Person)
 WHERE coalesce(s.scope, 'org_shared') IN $scopes AND other.id <> $id
 RETURN other.id, other.name, s.id, s.name, collect(DISTINCT type(theirs))
+```
+
+**team_dependencies** (which teams depend on which: "which teams depend on platform", "what does payments need from other teams", "cross-team dependencies"). `DEPENDS_ON` is aggregated across team boundaries through what each team `RUNS`, with accounts left out as in `blast_radius`. For a named team, it tells the teams whose things depend on its own, each with the links that tie them ("Billing Service → Auth Service"), the teams that reach it only through two or more hops (one cited route each), and any team it depends on in return, so the two depend on each other. Asked the other way, it tells what the team needs from each other team. With no team named, it gives the company view: every pair of teams, the busiest first, and the mutual pairs. The path cites each `RUNS` and `DEPENDS_ON` it counted, and the `grid` (teams, pairs with their links, mutual pairs) is ready for a matrix. A name that is not a team goes through the shared fallback before the refusal.
+
+```cypher
+MATCH (t1:Team)-[:RUNS]->(a:Service)-[:DEPENDS_ON]->(b:Service)<-[:RUNS]-(t2:Team)
+WHERE t1.id <> t2.id AND coalesce(t1.scope, 'org_shared') IN $scopes AND coalesce(a.scope, 'org_shared') IN $scopes
+  AND coalesce(b.scope, 'org_shared') IN $scopes AND coalesce(t2.scope, 'org_shared') IN $scopes
+  AND NOT coalesce(a.kind, 'service') IN $excluded AND NOT coalesce(b.kind, 'service') IN $excluded
+RETURN DISTINCT t1.id, t1.name, a.id, a.name, b.id, b.name, t2.id, t2.name
+```
+
+**decision_health** (an audit of every decision that stands: "which decisions are stale", "are any decisions in conflict"). A decision stands when no decision the reader can see supersedes it, so a private replacement never hides a standing decision from someone who cannot read it. Each standing decision is checked against its own edges:
+- **no evidence:** no `BASED_ON` or `CITES`;
+- **no approver:** no `APPROVED`;
+- **conflict:** a second standing decision is `ABOUT` the same thing;
+- **may be stale:** tickets `ABOUT` or pull requests that `TOUCHES` what it is about, which it does not cite. This is the same query `decision_pressure` runs for one decision, now shared as `decisions.uncited_work`.
+- **old:** decided more than 180 days ago.
+
+The reply names what needs attention and tells the history: each replaced chain, oldest first, with dates. A service or team in the question narrows the audit to it. The path cites what each check read, including the `SUPERSEDES` edges of the history, and the `grid` has one row per decision with its flags.
+
+```cypher
+MATCH (d:Decision)
+WHERE coalesce(d.scope, 'org_shared') IN $scopes
+OPTIONAL MATCH (newer:Decision)-[:SUPERSEDES]->(d)
+WHERE coalesce(newer.scope, 'org_shared') IN $scopes
+WITH d, count(newer) AS replaced
+OPTIONAL MATCH (d)-[:ABOUT]->(s:Service)
+WHERE coalesce(s.scope, 'org_shared') IN $scopes
+WITH d, replaced, collect(DISTINCT [s.id, s.name]) AS about
+OPTIONAL MATCH (d)-[cited:BASED_ON|CITES]->(source)
+WHERE coalesce(source.scope, 'org_shared') IN $scopes
+WITH d, replaced, about, collect(DISTINCT [source.id, source.name, labels(source)[0], type(cited)]) AS sources
+OPTIONAL MATCH (person:Person)-[role:PROPOSED|APPROVED]->(d)
+RETURN d.id, d.name, d.decided_at, replaced, about, sources, collect(DISTINCT [person.id, person.name, type(role)])
 ```
 
 **reading_list** (what to read before touching a service). The service, of any kind, is resolved first. Then it walks what it depends on, nearest first, keeping one shortest route to each thing (ties broken by the names along it), and lists the documents that `DESCRIBES` any of them, with their authors. Each decision `ABOUT` them is followed forward through `SUPERSEDES` to the one this reader can see standing, so a private replacement never hides the public one from a public reader, and its `BASED_ON` sources come with it; a document a decision rests on joins the list. Whatever nothing documents is named with its owner, as who to ask. Over MCP it is the context a coding agent pulls before it edits a service.
