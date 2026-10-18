@@ -266,6 +266,30 @@ Type these exactly, in this order, in the dev Slack workspace connected to produ
 
 Ticket numbers (`TKT-106`, `graph_hacks#N`) depend on the day's graph; read whatever the reply shows. The ticket in step 5 is new each take; delete it between takes with `MATCH (t:Ticket {title: 'scheduler jobs run twice after a restart'}) DETACH DELETE t` in the Browser, or use a new title.
 
+## Recording script, Quillfern on production (draft)
+
+**Draft, pending the user's decision.** On 18 Oct at 12:50 IST production, deployed at `45f6b00` (#86), still serves Quillfern, not the self-seed: `/api/ask/tools` reports company `quillfern`, and the teams are Data, Payments and Platform. If that stays, this script replaces the one above, which is kept until the user decides. It follows the Quillfern replay, whose replies `tests/integration/test_demo_replay.py` pins. Steps 1 and 6 and the bus-factor reply were checked on production read-only that morning; step 2 answers there too, but without dates or the decision it replaced until the refresh.
+
+**Before the first take, in this order**
+
+1. `BRAIN_ADMIN_TOKEN` and `MCP_TOKEN` in Secret Manager, then redeploy. On 17 Oct `/api/proof` and `/mcp` answered 503. Not rechecked on 18 Oct, since both sit behind a token; the round 3 `curl` check applies (401 means the secret is set).
+2. **Confirm production's `SEED_COMPANY` is `quillfern` before any seed refresh.** `POST /ops/seed` merges whatever `SEED_COMPANY` names, and it defaults to `company_brain`. If it is unset, the refresh merges the self-seed into Quillfern and mixes the two companies.
+3. Refresh the seed: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed`. The response must say `"company": "quillfern"`. Production's Quillfern predates the current seed: its one decision cites through `CITES`, with no date and no `SUPERSEDES`, and the billing retries decision that step 3 replaces is missing. The refresh adds both missing decisions, the dates, `BASED_ON` and `SUPERSEDES`. It also leaves the old `CITES` edges, so step 2 then lists the RFC and TKT-101 twice, in "Based on:" and in the path. Remove them in the Browser: `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c`. All of this was checked on a scratch graph trimmed to look like production's (the refresh reported 2 nodes and 12 edges created). The ask page caches each answer for a minute, so wait a minute before checking there.
+4. Optional, so the whole video stays on production: import Sales with `curl -X POST https://brain.noobsurd.space/ops/import -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" --data-binary @examples/teams/quillfern-sales.toml`, as the recording's Sales beat (13 nodes, 32 edges on a fresh Quillfern), then `/team/sales`, S2 and `what if priya shah leaves` as in round 6. Otherwise the Sales beat stays on the local replay.
+
+| Step | Type in the dev Slack workspace | Tool | Read aloud |
+| --- | --- | --- | --- |
+| 1 | `@Company Brain who owns billing, and who else has worked on it` | `who_knows` | "Billing Service is owned by Arjun Mehta." Then the ranked people and their path lines. "The answer is the path." |
+| 2 | `@Company Brain why did we move the memory layer off Postgres` | `decision_trace` | "Proposed by Kofi Mensah", "Approved by Tomas Reyes", the RFC and TKT-101 it rests on, and after the refresh "This replaced *Keep notebook links in Postgres join tables* (decided 1 Jun 2026)" |
+| 3 | Post `we're moving billing retries to the invoice worker, decided in today's sync`, then `@Company Brain decision: move billing retries to the invoice worker`. Approve, then ask `why did we move billing retries to the invoice worker` | `record_decision`, then `decision_trace` | The card says what it replaces: *Retry renewal webhooks inside the billing service* (decided 20 Sep 2026). The trace quotes your message: "Decided in #<channel> on <date> by <you>: “we're moving billing retries ...”" |
+| 4 | `@Company Brain what breaks if auth goes down, one hop`, then in the thread `and two hops out` | `blast_radius` | One hop: "... API Gateway, Billing Service, Notification Service and Search Service (1 hop). 1 more breaks further out (Invoice Worker at depth 2) ...". Two hops: "... Invoice Worker (2 hops). Depth 2 reached 5 services; nothing new past depth 2. Among them, Billing Service and Notification Service are the main connectors: 1 of the 5 reaches Auth Service through each." |
+| 5 | `@Company Brain ticket: billing exports time out`, Approve, then in the thread `who should look at it` | `ingest_ticket`, then `who_knows` | The card names *Billing Service*; then "Filed *TKT-N* about Billing Service" and the ranked people |
+| 6 | `@Company Brain who knows the payments gateway` | refusal | "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." |
+| 7 | Not live: real Slack users are not Quillfern's people, and its private repo is scripted. Show the local replay's two DM replies in the terminal instead | `who_knows` | Kofi's DM has no `billing-internal` line (footer "public channels, your DMs, #engineering"); Arjun's adds `billing-internal#7` and its footer ends "the quillfern/billing-internal repo". "The permission check is a graph query too." |
+| 8 | Terminal: `curl -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "https://brain.noobsurd.space/api/proof?format=text"` | proof | "5 of 6 capabilities collapse without FalkorDB", and the refusal row "refused both ways". `tests/integration/test_knowledge_proof.py` pins this on the current seed; production's old seed was not checked, so run it once after the refresh |
+
+Between takes, delete the two writes in the Browser: `MATCH (d:Decision {name: 'Move billing retries to the invoice worker'}) DETACH DELETE d` and `MATCH (t:Ticket {title: 'billing exports time out'}) DETACH DELETE t`. With the new decision gone, the old one stands again.
+
 ## Round 4: 17 Oct, late morning
 
 ### Rules and schedule
@@ -400,8 +424,10 @@ A fallback if the local segment cannot be recorded, or a bonus in step 7's slot 
 
 | Step | Type | Answers with | Read aloud |
 | --- | --- | --- | --- |
-| L1 | `@Company Brain onboard team: launch \| members: @Tushar \| owns: Hackathon submission (process), Demo video (product), Blog post (product), Recording script (playbook)` (syntax is a target) | approval card | The card's preview of what it will create. Click Approve. "Onboarding is a write, so it waits for a human too." |
-| L2 | `@Company Brain who runs the hackathon submission` | `who_owns` | "The Hackathon submission process is run by Tushar for the Launch team." Checked on the production seed after #66, with these nodes added by hand |
+| L1 | `@Company Brain onboard team: launch \| members: @Tushar \| owns: Hackathon submission (process), Demo video (product), Blog post (product), Recording script (playbook)`. Pick `@Tushar` from Slack's autocomplete, so it arrives as a real mention; typed as plain text, it is refused | approval card | "Onboard *Launch*: 1 person (<name>), 1 process (Hackathon submission), 2 products (Demo video and Blog post), 1 playbook (Recording script). <name> owns all of them. Visible to public channels." Click Approve. "Onboarding is a write, so it waits for a human too." |
+| L2 | `@Company Brain who runs the hackathon submission` | `who_owns` | "The Hackathon submission process is run by <name> for the Launch team." |
+
+`<name>` is the Person name Slack provisioning gave the recorder on production. The card text comes from coder B's tests (#81). This beat writes real nodes into whichever graph production holds; if production stays Quillfern, it adds this project's launch team to the demo company, so skip it unless the user wants that.
 
 Add only the teammates who actually work on the launch. The kinds are honest: the recording script in this file is literally a playbook. The nodes stay in production's graph after the video, which is fine because they are true.
 
@@ -449,7 +475,7 @@ From the track briefs on the hackathon page. The same build enters all three; th
 | --- | --- | --- |
 | Multi-hop reasoning | `blast_radius` at a chosen depth, `path_between` over `algo.SPpaths` | "Depth is a parameter; the route comes back with the answer." |
 | Graph queries and algorithms as agent tools | The catalogue, PageRank for load-bearing services, `algo.SPpaths` for routes, label propagation for working groups | "Ranking and routing are a `CALL`, not code." |
-| Tool selection through MCP | Live: every read-only tool at `/mcp` behind `MCP_TOKEN` (eleven on 17 Oct, `if_person_leaves` included), same schemas, same cited results | "The same catalogue over MCP, read-only, `org_shared`." |
+| Tool selection through MCP | Live: every read-only tool at `/mcp` behind `MCP_TOKEN` (fourteen on 18 Oct, `who_should_know` and `if_person_leaves` included: production's `/api/ask/tools` lists them at `45f6b00`, and a local `/mcp` serves the same fourteen), same schemas, same cited results | "The same catalogue over MCP, read-only, `org_shared`." |
 | Actions based on what the graph shows | Tickets filed after approval, routed to the people the graph ranks | "It acts, after a human clicks Approve on a card that names the target." |
 | Explainable results | Path lines, the picked-by footer, the proof route | "Explanation is the traversal." |
 

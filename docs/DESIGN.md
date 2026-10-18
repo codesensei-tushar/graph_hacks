@@ -39,7 +39,7 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 ### 2.2 Live proof: ask the graph
 
 - Eyebrow: `Live`. Heading: **Ask the graph behind this project.**
-- Body: "This page reads the production graph: Company Brain's own services, decisions, pull requests and public chat. Pick a question or write your own. The answer comes back with its path, drawn in the order it was walked."
+- Body: "This page reads the live graph of {company_name}, a synthetic company built for the demo: its people, services, decisions, tickets, pull requests and chat. Pick a question or write your own. The answer comes back with its path, drawn in the order it was walked." `{company_name}` comes from `/api/ask/tools`; today the live site serves Quillfern. If production is switched back to the Company Brain self-seed, the sentence becomes "the live graph behind this project: its own services, decisions, pull requests and public chat".
 - The answer to whatever was asked in the hero's box (max 300 characters, the server's cap), the drawing, then the `A -[REL]-> B` lines. On a deep link (`/?q=...`, which works today) the page asks once on load.
 - Footer under each answer, from the response: "Tool `{tool}` · picked by keywords · read from public channels".
 - Small print: "Public and read-only: public channels only, no model, answers cached for a minute."
@@ -57,7 +57,7 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 - Body: "A `Service` node has a kind: a service, a system, a process, a product, an account, a policy or a playbook. A team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as a billing service, in their own words: a process stalls, a playbook no longer applies."
 - Team cards from `/api/teams`: the name, `{members}` people, `{owns}` things, and a chip per kind. Each card links to `/team/{id}`.
 - Onboarding, beside or under the cards: "**One file, written for people who do not write code.** Import it and the team is in the graph. The import only merges and deletes nothing, and people Slack already knows are matched by email, never duplicated." Show 10 to 12 real lines from `docs/templates/team.example.toml` as a code panel, with a link to `docs/ONBOARDING-TEAMS.md`.
-- The bus-factor beat, labelled as coming from the demo company because production has no Sales team: "**Ask what rests on one person.** On the demo company, Quillfern, *what if priya shah leaves* answers: 'Pricing playbook: Priya Shah is its only owner; next in line: Noor Haddad, then Tomas Reyes.' Tomas is on Platform. The next in line comes from another team, by the same edges *who knows* ranks."
+- The bus-factor beat: "**Ask what rests on one person.**" with a chip for `what if arjun mehta leaves`, which answers live today: "If Arjun Mehta leaves, 1 thing rests on them alone. Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes; 2 others depend on it." Once the Sales team is imported, *what if priya shah leaves* shows the cross-team case: the next in line for the pricing playbook, Tomas Reyes, is on Platform.
 
 ### 2.5 How it works
 
