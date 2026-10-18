@@ -175,7 +175,8 @@ class CoordinationAlertTest(unittest.TestCase):
         # GitHub vouching for them as a collaborator is enough, linked to a person or not.
         self._send(NOTEBOOK, COLLABORATOR, user=STRANGER, author_association="COLLABORATOR")
         (text,) = self._new()
-        self.assertIn("has never worked with @drive-by", text)
+        # An account linked to no person can only be compared by pull request.
+        self.assertIn("and the graph shows no pull request shared with @drive-by: introduce them before this merges.", text)
 
     def test_a_change_nobody_else_needs_to_hear_about_posts_nothing_and_stays_open_for_later(self):
         # Lena owns the Invoice Worker and nothing depends on it.

@@ -11,9 +11,12 @@ dependent who were not in the loop.
 Each one is tagged by whether they have worked with the author (for a service, its owner)
 before: pull requests both wrote or reviewed under any GitHub account linked to them,
 tickets both worked on, decisions both proposed or approved, counted only where the asker
-may read them. Someone who owns a dependent and has never worked with the author is the
+may read them. Someone who owns a dependent and shares no work with the author is the
 gap Cataldo & Herbsleb measured: coordination the dependencies call for that nobody does
-(IEEE TSE 2013).
+(IEEE TSE 2013). Missing data is not proof of that gap, so a reply only names the kinds of
+work the graph could compare for the pair: pull requests when both have a linked GitHub
+account, tickets and decisions when the author is a known person. It says what the graph
+shows, not that the two have never met.
 
 A pull request is looked up by its number and repo, never matched loosely: ``docs#1234``
 is not ``docs#12345``. A document or ticket is not a change and is refused as one. Hops and
@@ -142,7 +145,7 @@ class Change:
     anchors: list[Who]
     # The edges that say what changed: TOUCHES from a pull request, or OWNS of the service.
     lead: list[PathStep]
-    # What to do about someone who has never worked with the author, given where the change stands.
+    # What to do about someone the graph shows no shared work for, given where the change stands.
     introduce: str
 
     @property
@@ -353,8 +356,11 @@ def _pull_request(graph, pr: Entity, scopes: list[str]) -> Change:
         introduce = "introduce them if it is reopened"
     else:
         introduce = "introduce them before this merges"
-    lead = [PathStep(pr.name, "TOUCHES", thing.name, from_id=pr.id, to_id=thing.id, from_label="PullRequest", to_label="Service") for thing in changed]
-    return Change(pr, changed, in_loop, [who for who in in_loop if who.rel == "AUTHORED"], lead, introduce)
+    authors = [who for who in in_loop if who.rel == "AUTHORED"]
+    # The author is named in the reply, so their edge to the pull request opens the path.
+    lead = [PathStep(who.name, who.rel, pr.name, from_id=who.node[0], to_id=pr.id, from_label=who.node[1], to_label="PullRequest") for who in authors]
+    lead += [PathStep(pr.name, "TOUCHES", thing.name, from_id=pr.id, to_id=thing.id, from_label="PullRequest", to_label="Service") for thing in changed]
+    return Change(pr, changed, in_loop, authors, lead, introduce)
 
 
 def _service(graph, service: Entity, scopes: list[str]) -> Change:
@@ -531,7 +537,10 @@ def _sentence(owner: Owner, change: Change) -> str:
     sentence = f"{owner.name} {', '.join(clauses)}"
     if not owner.shared:
         anchors = _either([who.name for who in change.anchors])
-        return f"{sentence} and has never worked with {anchors} on a pull request, ticket or decision: {change.introduce}."
+        checked = _checked(owner, change.anchors)
+        if not checked:
+            return f"{sentence}, and the graph cannot tell whether {owner.name} and {anchors} have worked together: {change.introduce}."
+        return f"{sentence}, and the graph shows no {_either(checked)} shared with {anchors}: {change.introduce}."
     shown = owner.shared[:MAX_EXAMPLES]
     by_anchor: dict[str, list[str]] = {}
     for shared in shown:
@@ -539,6 +548,20 @@ def _sentence(owner: Owner, change: Change) -> str:
     together = " and with ".join(f"{anchor} on {join_names(works)}" for anchor, works in by_anchor.items())
     total = f", {len(owner.shared)} times in all" if len(owner.shared) > len(shown) else ""
     return f"{sentence} and worked with {together}{total}, so a quick ping is enough."
+
+
+def _checked(owner: Owner, anchors: list[Who]) -> list[str]:
+    """The kinds of past work ``_shared_work`` could compare between an owner and every anchor.
+
+    Pull requests are matched by GitHub account, tickets and decisions by Person, so a kind is
+    named only when both sides have what it is matched on: no linked account is no evidence.
+    """
+    checked = []
+    if owner.github_ids and all(who.github_ids for who in anchors):
+        checked.append("pull request")
+    if all(who.person_id for who in anchors):
+        checked += ["ticket", "decision"]
+    return checked
 
 
 def _with_unowned(text: str, unowned: list[Dependent]) -> str:
