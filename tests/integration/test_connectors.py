@@ -388,7 +388,7 @@ class ConnectorFrameworkTest(unittest.TestCase):
         inside = who.run({"name": "OPS-1"}, slack_tags)
         self.assertTrue(inside.found)
         self.assertIn("Arjun Mehta -[ASSIGNED]-> OPS-1", [step.cite() for step in inside.path])
-        self.assertIn("Zed Contractor -[OPENED]-> OPS-1", [step.cite() for step in inside.path])
+        self.assertIn("Zed Contractor (Fake) -[OPENED]-> OPS-1", [step.cite() for step in inside.path])
         self.assertTrue(who.run({"name": "who owns the Acme Corp account"}, slack_tags).found)
 
         self.assertFalse(ask_api.answer_question("who knows OPS-1").found)
