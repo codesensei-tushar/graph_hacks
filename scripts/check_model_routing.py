@@ -132,6 +132,15 @@ QUESTIONS = [
     ("crm 1", "show me our customers", "find", None),
     ("crm 2", "open opportunities", "find", None),
     ("crm 3", "deals in contract sent", "find", None),
+    ("crm 4", "which deals are closed won", "find", None),
+    # A CRM word inside another question keeps that question's tool.
+    ("crm not 1", "what pipeline runs the nightly export", "who_owns", None),
+    ("crm not 2", "which customers depend on billing", DEPENDENTS, None),
+    ("crm not 3", "what customers are affected if billing goes down", DEPENDENTS, None),
+    ("crm not 4", "why did we drop deals in the free tier", "decision_trace", None),
+    ("crm not 5", "who handles deals at enterprise scale", "who_owns", None),
+    ("crm not 6", "customers complained about refunds", "who_knows", None),
+    ("crm not 7", "accounts payable process", "who_knows", None),
 ]
 
 

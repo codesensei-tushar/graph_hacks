@@ -169,6 +169,18 @@ EXPLORE = re.compile(
     re.IGNORECASE,
 )
 _LISTED = r"(?:tickets|issues|accounts|services|systems|processes|documents|docs|pull requests|prs)"
+# CRM lists, matched as the whole question so a word inside another question never takes it over:
+# "which customers depend on billing", "pipeline failures", "accounts payable process", "who handles
+# deals at enterprise scale" stay where they were. A pipeline is a sales or deal pipeline, never a
+# bare "pipeline" (a data pipeline). "my accounts" is not matched: the router does not know who asks.
+_CRM_NOUN = r"(?:customers|opportunities|accounts|deals|(?:sales|deal) pipeline)"
+_CRM_LIST = (
+    r"(?:^\s*(?:(?:show|list|give)(?: me)?\s+|(?:who|what|which) are\s+)?(?:all |the |our )?(?:open |closed |current )?"
+    rf"{_CRM_NOUN}(?: (?:are|is) (?:open|closed))?\s*[?.!]*\s*$"
+    rf"|^\s*(?:which|what) {_CRM_NOUN} are (?:open|closed)\s*[?.!]*\s*$"
+    r"|^\s*(?:(?:show|list)(?: me)?\s+|(?:which|what)\s+)?(?:all |the |our )?deals? (?:(?:that )?are (?:in |at )?|in |at )"
+    r"(?:the )?(?:stage )?(?!.*\b(?:depend|depends|if|why|who|how|risk|scale|tier|because)\b)[a-z][a-z ]*?(?: stage)?\s*[?.!]*\s*$)"
+)
 # A list by filter: "which tickets are open", "list the services in payments", "what decisions have we
 # made". Before decisions, which shares "decisions"; "what decisions have we made about billing" names
 # one thing and stays on decision_trace, as does any "list ... about X".
@@ -182,10 +194,8 @@ _FIND = re.compile(
     # Whose list: "what tickets are assigned to Om Sherikar", "which accounts does Yash Patil own".
     rf"|^\s*(?:what|which|list|show(?: me)?) (?:all |the )?(?:open |closed )?{_LISTED} (?:are |is )?(?:assigned to|worked on by|owned by|opened by)\b"
     rf"|^\s*(?:what|which) {_LISTED} (?:does|do) .+ (?:own|have|hold|handle|work on)\b"
-    # The CRM: "show me our customers", "open opportunities", "deals in contract sent", "the pipeline".
-    r"|^\s*(?:(?:show|list|give)(?: me)?|who are|what are|which are|which|what)?\s*(?:all |the |our |my )?(?:open |closed |current )?"
-    r"(?:customers|opportunities|accounts|deals|(?:sales )?pipeline)\b"
-    r"|\bdeals? (?:are )?(?:in|at) (?:the )?\w",
+    # The CRM, only as a whole list question (_CRM_LIST below): "show me our customers", "open opportunities".
+    rf"|{_CRM_LIST}",
     re.IGNORECASE,
 )
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:

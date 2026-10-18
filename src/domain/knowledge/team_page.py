@@ -438,22 +438,30 @@ def _synced_accounts(graph, params: dict, skip: set[str]) -> tuple[list[OwnedThi
     ).result_set
     if not systems:
         return [], 0, [], []
-    rows = graph.ro_query(
-        f"""
+    match = f"""
         MATCH (s:Service)
         WHERE s.source IN $sources AND {kinds.KIND_OF.format(var="s")} = 'account' AND {SCOPED.format(var="s")}
           AND NOT s.id IN $skip AND NOT (:Team {{id: $id}})-[:RUNS]->(s)
+    """
+    query_params = {**params, "sources": sorted({source for _name, source in systems}), "skip": sorted(skip)}
+    total = graph.ro_query(f"{match} RETURN count(s)", query_params).result_set
+    if not total or not total[0][0]:
+        return [], 0, [], []
+    rows = graph.ro_query(
+        f"""
+        {match}
+        WITH s ORDER BY s.name LIMIT {ACCOUNT_LIMIT}
         OPTIONAL MATCH (o)-[:OWNS]->(s)
         WHERE labels(o)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="o")}
         RETURN s.id, s.name, coalesce(s.summary, ''), collect(DISTINCT [o.id, o.name, labels(o)[0], o.source])
         ORDER BY s.name
         """,
-        {**params, "sources": sorted({source for _name, source in systems}), "skip": sorted(skip)},
+        query_params,
     ).result_set
     things: list[OwnedThing] = []
     path: list[PathStep] = []
 
-    for account_id, name, summary, owners in rows[:ACCOUNT_LIMIT]:
+    for account_id, name, summary, owners in rows:
         named = []
         for owner_id, owner, label, source in owners:
             if owner_id is None:
@@ -462,7 +470,7 @@ def _synced_accounts(graph, params: dict, skip: set[str]) -> tuple[list[OwnedThi
             named.append(shown)
             path.append(PathStep(shown, "OWNS", name, from_id=owner_id, to_id=account_id, from_label=label, to_label="Service"))
         things.append(OwnedThing(account_id, name, "account", summary, sorted(named)))
-    return things, len(rows), list(dict.fromkeys(name for name, _source in systems)), path
+    return things, int(total[0][0]), list(dict.fromkeys(name for name, _source in systems)), path
 
 
 def team_questions(page: TeamPage) -> list[str]:
