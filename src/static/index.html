@@ -11,7 +11,7 @@
 <link rel="preload" href="/static/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <script>try { var t = localStorage.getItem("brain-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
-<link rel="stylesheet" href="/static/style.css?v=12">
+<link rel="stylesheet" href="/static/style.css?v=13">
 <link rel="stylesheet" href="/static/riskmap.css?v=3">
 <link rel="stylesheet" href="/static/explore.css?v=1">
 </head>
@@ -134,6 +134,7 @@
           </tbody>
         </table>
       </div>
+      <p class="note proof-more">Each row runs one of the read-only tools in <a href="#tools">the catalogue</a>, the same ones MCP clients call.</p>
     </div>
   </section>
 
@@ -183,7 +184,63 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
 
     <!-- 2.5 How it works. Static: it renders without JavaScript. -->
     <section class="block" id="how" aria-labelledby="how-title">
+      <p class="eyebrow">How it works</p>
       <h2 id="how-title">How an answer is made.</h2>
+      <p class="sub">Three ways in, one fixed catalogue of tools, one graph. Every answer comes back with the path it walked.</p>
+
+      <figure class="arch" id="arch" data-route="all">
+        <div class="arch-routes" id="arch-routes" role="group" aria-label="Show one way in" hidden>
+          <button type="button" aria-pressed="true" data-route="all">All</button>
+          <button type="button" aria-pressed="false" data-route="slack">Slack</button>
+          <button type="button" aria-pressed="false" data-route="page">This page</button>
+          <button type="button" aria-pressed="false" data-route="mcp">MCP</button>
+        </div>
+        <div class="arch-frame" tabindex="0" aria-label="The architecture diagram; scrolls sideways on a narrow screen">
+          <svg viewBox="0 0 1160 470" role="img" aria-labelledby="arch-title arch-desc">
+            <title id="arch-title">How a question becomes an answer with its path</title>
+            <desc id="arch-desc">Three ways in: Slack, this page and MCP clients. In Slack one model call picks a tool from the catalogue and fills in its arguments, with the keyword router as the fallback; on this page the keyword router picks it; an MCP client names the tool itself. Every tool is hand-written, parameterised Cypher that resolves any name against the graph first and reads only what the asker may read, from one FalkorDB graph. A tool that writes is offered only in Slack and runs only after someone approves a card. The answer goes back the same way with the path it walked, its edges as A -[REL]-> B lines, whether it was found, and the nearest names on a miss.</desc>
+            <defs>
+              <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-head"/></marker>
+              <marker id="arch-arrow-path" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-head-path"/></marker>
+            </defs>
+            <g class="arch-cols">
+              <text x="125" y="34">Ask</text><text x="415" y="34">Pick a tool</text><text x="715" y="34">Run</text><text x="1025" y="34">Read</text>
+            </g>
+            <g class="arch-links">
+              <path data-routes="slack" d="M230 97 H310"/>
+              <path data-routes="page" d="M230 187 H310"/>
+              <path data-routes="mcp" d="M230 277 H310"/>
+              <path data-routes="slack" d="M520 97 C 560 97, 560 150, 600 150"/>
+              <path data-routes="page" d="M520 187 H600"/>
+              <path data-routes="mcp" d="M520 277 C 560 277, 560 224, 600 224"/>
+              <path data-routes="slack page mcp" d="M830 187 H910"/>
+              <path class="dashed" data-routes="slack" d="M415 134 V372 H600"/>
+              <path class="dashed" data-routes="slack" d="M830 372 H870 C 890 372, 890 330, 910 330"/>
+              <text data-routes="slack" x="428" y="364">asks to write</text>
+              <text class="mid" data-routes="slack" x="870" y="318">approved</text>
+              <text data-routes="slack page mcp" x="870" y="178">walk</text>
+            </g>
+            <g class="arch-nodes">
+              <g class="entry" data-routes="slack"><rect x="20" y="60" width="210" height="74" rx="12"/><text class="t" x="36" y="86">Slack</text><text class="s" x="36" y="106">@mention, DM or thread</text><text class="m" x="36" y="124">replies with every edge</text></g>
+              <g class="entry" data-routes="page"><rect x="20" y="150" width="210" height="74" rx="12"/><text class="t" x="36" y="176">This page</text><text class="s" x="36" y="196">GET /api/ask</text><text class="m" x="36" y="214">draws the walk</text></g>
+              <g class="entry" data-routes="mcp"><rect x="20" y="240" width="210" height="74" rx="12"/><text class="t" x="36" y="266">MCP clients</text><text class="s" x="36" y="286">/mcp, streamable HTTP</text><text class="m" x="36" y="304">structured content</text></g>
+              <g class="pick" data-routes="slack"><rect x="310" y="60" width="210" height="74" rx="12"/><text class="t" x="326" y="86">One model call</text><text class="s" x="326" y="106">picks a tool, fills its arguments</text><text class="m" x="326" y="124">keywords if no model</text></g>
+              <g class="pick" data-routes="page"><rect x="310" y="150" width="210" height="74" rx="12"/><text class="t" x="326" y="176">Keyword router</text><text class="s" x="326" y="196">the question's words</text><text class="m" x="326" y="214">public channels only</text></g>
+              <g class="pick" data-routes="mcp"><rect x="310" y="240" width="210" height="74" rx="12"/><text class="t" x="326" y="266">Named by the caller</text><text class="s" x="326" y="286">tools/call with arguments</text><text class="m" x="326" y="304">public channels only</text></g>
+              <g class="catalogue" data-routes="slack page mcp"><rect x="600" y="60" width="230" height="254" rx="14"/><text class="t" x="616" y="88">Tool catalogue</text><text class="s" x="616" y="112" id="arch-reads">read-only tools</text><text class="b" x="616" y="148">hand-written,</text><text class="b" x="616" y="168">parameterised Cypher</text><text class="b" x="616" y="200">resolves any name first:</text><text class="b" x="616" y="220">no match, no guess</text><text class="b" x="616" y="252">filtered to what the</text><text class="b" x="616" y="272">asker may read</text></g>
+              <g class="writes" data-routes="slack"><rect x="600" y="338" width="230" height="68" rx="12"/><text class="t" x="616" y="364" id="arch-writes">Write tools</text><text class="s" x="616" y="384">wait for an Approve card</text><text class="m" x="616" y="400">Slack only, never over MCP</text></g>
+              <g class="graph" data-routes="slack page mcp"><rect x="910" y="60" width="230" height="346" rx="14"/><text class="t" x="926" y="88">FalkorDB</text><text class="s" x="926" y="112">one graph</text><text class="b" x="926" y="148">people and teams</text><text class="b" x="926" y="168">what they run</text><text class="b" x="926" y="188">documents, tickets,</text><text class="b" x="926" y="208">decisions, chat</text><text class="b" x="926" y="240">read-only queries,</text><text class="b" x="926" y="260">filtered by scope</text></g>
+            </g>
+            <g class="arch-back" data-routes="slack page mcp">
+              <path d="M1025 406 V446 H8 V97 H18" marker-end="url(#arch-arrow-path)"/>
+              <path d="M8 187 H18" marker-end="url(#arch-arrow-path)"/>
+              <path d="M8 277 H18" marker-end="url(#arch-arrow-path)"/>
+              <text x="520" y="438">the answer and the path it walked: A -[REL]-&gt; B, found, and the nearest names on a miss</text>
+            </g>
+          </svg>
+        </div>
+        <figcaption>From <code>src/api</code> (Slack events, <code>/api/ask</code>, <code>/mcp</code>) to <code>src/domain/knowledge</code> (the agent, the keyword router, the catalogue) and one FalkorDB graph. The forward links are grey; the way back, with the path, is the walk's colour.</figcaption>
+      </figure>
       <ol class="flow">
         <li><span class="n" aria-hidden="true">01</span><b>Resolve.</b><p>Names in the question are matched against the graph first. No match, no guess: it says what it does not know and names the nearest things it does.</p></li>
         <li><span class="n" aria-hidden="true">02</span><b>Pick a tool.</b><p>A fixed catalogue of hand-written, parameterised Cypher. In Slack a model picks the tool and fills in the arguments; it never writes a query.</p></li>
@@ -280,41 +337,69 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
       </figure>
     </section>
 
-    <!-- 2.6 For builders: the same tools over MCP. -->
-    <section class="block" id="builders" aria-labelledby="builders-title">
+  </div>
+
+  <!-- 2.6 For builders: the same tools over MCP. A dark band: a quick start with copy buttons, and the live catalogue. -->
+  <section class="block band-dark" id="builders" aria-labelledby="builders-title">
+    <div class="wrap">
+      <p class="eyebrow">For builders</p>
       <h2 id="builders-title">The same tools, over MCP.</h2>
       <p class="sub">Every read-only tool in the catalogue is served at <code>/mcp</code> over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, no token needed: 30 calls a minute per address.</p>
-      <div class="builders">
-        <div class="panel tool-panel">
-          <p class="tool-count" id="tool-count"><span class="sk-line short" aria-hidden="true"></span></p>
-          <ul class="tool-list" id="tool-list">
-            <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
-            <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
-          </ul>
-          <noscript><p class="note">The tool list needs JavaScript.</p></noscript>
+
+      <div class="quickstart" id="quickstart">
+        <div class="qs-tabs" role="tablist" aria-label="Connect" hidden>
+          <button type="button" role="tab" id="qs-tab-claude" aria-controls="qs-claude" aria-selected="true">Claude Code</button>
+          <button type="button" role="tab" id="qs-tab-any" aria-controls="qs-any" aria-selected="false" tabindex="-1">Any MCP client</button>
+          <button type="button" role="tab" id="qs-tab-python" aria-controls="qs-python" aria-selected="false" tabindex="-1">Python</button>
+          <button type="button" role="tab" id="qs-tab-http" aria-controls="qs-http" aria-selected="false" tabindex="-1">The ask API</button>
         </div>
-        <div class="builders-side">
-          <figure class="code mcp-code">
-            <figcaption>an MCP client, from the README</figcaption>
-<pre tabindex="0"><code><span class="c-kw">from</span> mcp.client.session <span class="c-kw">import</span> ClientSession
+        <div class="qs-pane" id="qs-claude" role="tabpanel" aria-labelledby="qs-tab-claude">
+          <p class="qs-say">Add it to Claude Code, then ask in plain words; Claude picks the tool.</p>
+          <div class="snippet"><pre tabindex="0"><code>claude mcp add --transport http company-brain <span class="origin">https://brain.noobsurd.space</span>/mcp</code></pre><button class="copy" type="button">Copy</button></div>
+        </div>
+        <div class="qs-pane" id="qs-any" role="tabpanel" aria-labelledby="qs-tab-any">
+          <p class="qs-say">Streamable HTTP, stateless, JSON responses. No token; a token, where one was issued, lifts the limit.</p>
+          <div class="snippet"><pre tabindex="0"><code><span class="origin">https://brain.noobsurd.space</span>/mcp</code></pre><button class="copy" type="button">Copy</button></div>
+        </div>
+        <div class="qs-pane" id="qs-python" role="tabpanel" aria-labelledby="qs-tab-python">
+          <p class="qs-say">The client from the README: list the tools, call one, print the path it walked.</p>
+          <div class="snippet"><pre tabindex="0"><code><span class="c-kw">from</span> mcp.client.session <span class="c-kw">import</span> ClientSession
 <span class="c-kw">from</span> mcp.client.streamable_http <span class="c-kw">import</span> create_mcp_http_client, streamable_http_client
 
 <span class="c-kw">async with</span> create_mcp_http_client() <span class="c-kw">as</span> http:
-    <span class="c-kw">async with</span> streamable_http_client(<span class="c-str">"https://brain.noobsurd.space/mcp"</span>, http_client=http) <span class="c-kw">as</span> streams:
+    <span class="c-kw">async with</span> streamable_http_client(<span class="c-str">"<span class="origin">https://brain.noobsurd.space</span>/mcp"</span>, http_client=http) <span class="c-kw">as</span> streams:
         <span class="c-kw">async with</span> ClientSession(streams[0], streams[1]) <span class="c-kw">as</span> session:
             <span class="c-kw">await</span> session.initialize()
             tools = <span class="c-kw">await</span> session.list_tools()
             result = <span class="c-kw">await</span> session.call_tool(<span class="c-str">"who_owns"</span>, {<span class="c-str">"name"</span>: <span class="c-str">"billing"</span>})
-            print(result.structured_content[<span class="c-str">"path"</span>])</code></pre>
-          </figure>
-          <ul class="links">
-            <li><a href="https://github.com/codesensei-tushar/graph_hacks#graph-data-model">The data model and the query list</a><span>in the README</span></li>
-            <li><a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/SETUP.md">Local setup</a><span><code>docker compose up -d</code>, then two commands</span></li>
-          </ul>
+            print(result.structured_content[<span class="c-str">"path"</span>])</code></pre><button class="copy" type="button">Copy</button></div>
+        </div>
+        <div class="qs-pane" id="qs-http" role="tabpanel" aria-labelledby="qs-tab-http">
+          <p class="qs-say">The same answers as plain JSON, the way this page asks: the answer, the tool, the nodes and edges it walked.</p>
+          <div class="snippet"><pre tabindex="0"><code>curl -s '<span class="origin">https://brain.noobsurd.space</span>/api/ask?q=who+owns+billing'</code></pre><button class="copy" type="button">Copy</button></div>
         </div>
       </div>
-    </section>
-  </div>
+
+      <div class="catalogue-panel" id="tools">
+        <div class="tool-head">
+          <p class="tool-count" id="tool-count"><span class="sk-line short" aria-hidden="true"></span></p>
+          <label class="tool-filter"><span class="sr">Filter the tools</span><input type="search" id="tool-filter" placeholder="Filter: owner, depends, leaves…" autocomplete="off" disabled></label>
+        </div>
+        <ul class="tool-grid" id="tool-list" aria-live="polite">
+          <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
+          <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
+        </ul>
+        <p class="note tool-empty" id="tool-empty" hidden>No tool matches that. Try a word from what it does: owner, depends, leaves, decision.</p>
+        <p class="note tool-writes" id="tool-writes" hidden></p>
+        <noscript><p class="note">The tool list needs JavaScript.</p></noscript>
+      </div>
+
+      <ul class="links">
+        <li><a href="https://github.com/codesensei-tushar/graph_hacks#graph-data-model">The data model and the query list</a><span>in the README</span></li>
+        <li><a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/SETUP.md">Local setup</a><span><code>docker compose up -d</code>, then two commands</span></li>
+      </ul>
+    </div>
+  </section>
 </main>
 
 <!-- 2.7 Footer. -->
@@ -330,6 +415,6 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
 <script src="/static/graph.js?v=7"></script>
 <script src="/static/hero.js?v=5"></script>
 <script src="/static/riskmap.js?v=2"></script>
-<script src="/static/app.js?v=12"></script>
+<script src="/static/app.js?v=13"></script>
 </body>
 </html>

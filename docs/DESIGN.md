@@ -95,7 +95,8 @@ A full-width dark band in both themes, entered and left through blurred indigo w
 
 ### 2.5 How it works
 
-- Heading: **How an answer is made.**
+- Eyebrow: `How it works`. Heading: **How an answer is made.** Sub: "Three ways in, one fixed catalogue of tools, one graph. Every answer comes back with the path it walked."
+- The architecture as one inline SVG, accurate to the code: three ways in (Slack: `@mention`, DM or thread; this page: `GET /api/ask`; MCP clients: `/mcp`, streamable HTTP), how each picks a tool (one model call with the keyword router as fallback; the keyword router; named by the caller), the tool catalogue (its read-only count filled from `/api/ask/tools`, never typed), the write tools that wait for an Approve card in Slack and are never served over MCP, and FalkorDB. Forward links are grey; the way back, carrying the answer and its path, is the walk's colour. Buttons (All, Slack, This page, MCP) fade everything off one route.
 - Four steps in a row (a column on mobile):
   1. **Resolve.** "Names in the question are matched against the graph first. No match, no guess: it says what it does not know and names the nearest things it does."
   2. **Pick a tool.** "A fixed catalogue of hand-written, parameterised Cypher. In Slack a model picks the tool and fills in the arguments; it never writes a query."
@@ -111,11 +112,13 @@ A full-width dark band in both themes, entered and left through blurred indigo w
 
 ### 2.6 For builders
 
-- Heading: **The same tools, over MCP.**
-- Body: "Every read-only tool in the catalogue is served at `/mcp` over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, no token needed: 30 calls a minute per address." The count comes from `/api/ask/tools`: "**{n}** read-only tools".
-- The tool list, rendered from `/api/ask/tools`: name and description, one line each.
-- The client snippet from the README's MCP section, as a code panel.
-- Links: the README's data model and query list, local setup ("`docker compose up -d`, then two commands"), and the repository once it is public.
+A full-width dark band, like the proof.
+
+- Eyebrow: `For builders`. Heading: **The same tools, over MCP.**
+- Body: "Every read-only tool in the catalogue is served at `/mcp` over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, no token needed: 30 calls a minute per address."
+- A quick start in tabs, each with a copy button and this server's own address: Claude Code (`claude mcp add --transport http company-brain <origin>/mcp`, the README's command), any MCP client (the endpoint), Python (the README's client), and the ask API (`curl`). Without JavaScript all four show, stacked.
+- The catalogue as a grid read live from `/api/ask/tools`: one card per read-only tool with its first sentence and its arguments, a filter box, and a line naming the tools that write (Slack only, after an Approve card; never over MCP). The proof's tool names link to their cards.
+- Links: the README's data model and query list, local setup ("`docker compose up -d`, then two commands").
 
 ### 2.7 Footer
 
@@ -217,7 +220,7 @@ Default to the operating system's setting, with a toggle in the header that reme
 4. **Nothing calls the model from the public page.** It uses the keyword router, as now.
 5. **No fabricated numbers, logos, testimonials or replies.** Every count comes from an API response. A quoted reply is either live or copied from a test that pins it, and labelled with where it comes from. No reference-project names anywhere.
 6. **Copy matches main.** If a sentence in section 2 stops being true, change the sentence, not the facts.
-7. **Performance.** No layout shift: reserve space for every async section with a skeleton of the final size. Page weight under about 300 KB before API JSON, own JS under about 80 KB unminified, at most two font files, no images over 150 KB. Aim for Lighthouse 90 or better on performance and accessibility, mobile profile.
+7. **Performance.** No layout shift: reserve space for every async section with a skeleton of the final size. Page weight under about 320 KB before API JSON (300 KB until the risk grid, the explore affordances and the builders section), own JS under about 96 KB unminified, at most two font files, no images over 150 KB. Aim for Lighthouse 90 or better on performance and accessibility, mobile profile.
 8. **Works without JavaScript** for everything that is not live: the hero copy, how it works, for builders and the footer render as static HTML. Live sections say "This part needs JavaScript".
 9. **Tests.** The existing page tests stay green, including the guard in `tests/unit/test_static_page.py`. New tests: every section in section 2 is present with its heading; no number in the HTML is hard-coded where section 2 says it comes from the API; the page makes no request outside the routes in point 2 and the vendored files; `/team/{id}` still renders.
 10. **The team page** (`/team/{id}`) adopts the same tokens, type and drawing in the same PR or the next one, so the two pages read as one site.
