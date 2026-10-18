@@ -61,7 +61,9 @@ LEASE_SECONDS = 300
 RENEW_SECONDS = 60
 # Due jobs one claim reads per round trip inside the script, and the most it looks through in all.
 CLAIM_SCAN = 200
-CLAIM_MAX_SCAN = 5_000
+# A claim looks at most this many due ids: past it, a backlog of one blocked group costs Redis a
+# measurable stall per claim (6,000 blocked ids took 14-18 ms). A per-(org, group) due set is the next step if backlogs grow.
+CLAIM_MAX_SCAN = 1_000
 
 # Jobs the fast lane takes: an approval card left unanswered must expire on time, whatever else runs.
 FAST = frozenset({"runApprovalExpiry"})
