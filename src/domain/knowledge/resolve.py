@@ -41,6 +41,9 @@ STOPWORDS = frozenset(
         "i", "m", "im", "am", "joined", "join", "brief", "briefing", "onboard", "onboarding", "team", "teams", "get", "up", "speed",
         "connects", "bridges", "bridge", "links", "rest", "other", "others", "company", "everyone", "anyone",
         "your", "their",
+        # Depth and reporting words, so a refusal quotes what was named: "and two hops out" names
+        # nothing, and "what did anyone say about billing" names billing.
+        "two", "three", "four", "five", "six", "out", "say", "says", "said",
     }
 )
 # Words that open a noun phrase. The words between one and a match describe the thing named.

@@ -32,10 +32,10 @@ _OWNS = re.compile(r"\b(?:owns?|owner|owned|responsible|runs|handles|in charge o
 _POLICY = re.compile(r"\b(?:policy|policies|playbook|rules?) (?:on|for|about)\b", re.IGNORECASE)
 _WIDER_THAN_OWNER = re.compile(r"\b(?:else|also|worked|works|knows?|reviewed|touched)\b", re.IGNORECASE)
 _LOAD_BEARING = re.compile(
-    r"\b(?:load[- ]bearing|most (?:critical|depended|important|central)|single point of failure|pagerank|central services?)\b", re.IGNORECASE
+    r"\b(?:load[- ]bearing|most (?:critical|depended|important|central)|single point of failure|pagerank|central services?|matters? (?:the )?most)\b", re.IGNORECASE
 )
 _PATH = re.compile(
-    r"\b(?:connected|connection|path between|related to|linked to|link between|how does .+ reach|route (?:from|between)|what connects)\b", re.IGNORECASE
+    r"\b(?:connected|connection|path between|related to|linked to|link between|how does .+ reach|route (?:from|between)|path from|what connects|how (?:is|are) .+ (?:related|linked))\b", re.IGNORECASE
 )
 _RELATED_MEMORIES = re.compile(
     r"\b(?:memories|notes|chats?|conversations?|discussions?) (?:about|on|mentioning|around)\b|\bwhat (?:have|has) (?:we|people|anyone) said about\b",
@@ -46,8 +46,12 @@ _BLAST = re.compile(
     r"\b(?:breaks?|goes down|outage|depends?|dependents?|blast|stops? if|stalls?|is down|happens if|affected if)\b", re.IGNORECASE
 )
 _DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
-_PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
-_GROUPS = re.compile(r"\b(?:working groups?|de facto teams?|who (?:actually )?works together|work clusters?)\b", re.IGNORECASE)
+_PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|still valid|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
+_GROUPS = re.compile(
+    r"\b(?:working groups?|de facto teams?|who (?:actually )?works together|work clusters?"
+    r"|who works with (?:who|whom)|(?:people|who) (?:actually )?work together|collaborates? with (?:who|whom)|who collaborates)\b",
+    re.IGNORECASE,
+)
 # A person leaving, not a service failing. "who is the only one who knows billing" names a
 # service and stays on who_knows; "what is Arjun the only one who knows" names a person, and so
 # does "the bus factor on arjun"; "the bus factor for billing" names a service and stays on who_knows.
@@ -63,7 +67,7 @@ _LEAVES = re.compile(
 _BRIEF = re.compile(
     r"\b(?:just joined|i(?:'m| am) new (?:to|on)|new (?:to|on) the|brief me|onboard me|onboarding brief|up to speed)\b"
     r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b"
-    r"|\bwhat (?:does|do) (?:the )?\w+(?: \w+)? team (?:own|run|do|work on|handle)\b"
+    r"|\bwhat (?:does|do) (?:the )?\w+(?: \w+)? team (?:own|run|do|work on|handle)\b|\bwhat (?:does|do) (?:the )?\w+ own\b"
     r"|\bwho(?:'s| is| are)? (?:on|in) (?:the )?\w+(?: \w+)? team\b|\bmembers of (?:the )?\w+(?: \w+)? team\b",
     re.IGNORECASE,
 )

@@ -18,7 +18,9 @@ class KindsTest(unittest.TestCase):
         self.assertEqual(kinds.subject("Billing Service", None), "Billing Service")
         self.assertEqual(kinds.subject("Renewals", "process"), "the Renewals process")
         self.assertEqual(kinds.subject("Pricing playbook", "playbook"), "the Pricing playbook")
-        self.assertEqual(kinds.subject("Enterprise accounts", "account"), "the Enterprise accounts")
+        # A plural name takes no article: "Enterprise accounts is owned by", not "The Enterprise accounts is".
+        self.assertEqual(kinds.subject("Enterprise accounts", "account"), "Enterprise accounts")
+        self.assertEqual(kinds.subject("Key account", "account"), "the Key account")
         self.assertEqual(kinds.listed("HubSpot", "system"), "HubSpot system")
         self.assertEqual(kinds.listed("Auth Service", "service"), "Auth Service")
         self.assertEqual(
