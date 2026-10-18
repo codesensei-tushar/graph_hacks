@@ -93,15 +93,15 @@
   }
 
   // The graph line names only what the live graph holds, in the brief's order: a plain seed
-  // has no pull requests or chat until GitHub and Slack add them.
-  const DEMO_KINDS = [["Person", "people"], ["Service", "services"], ["Decision", "decisions"], ["Ticket", "tickets"], ["PullRequest", "pull requests"], ["Memory", "chat"]];
-  const OWN_KINDS = [["Service", "services"], ["Decision", "decisions"], ["PullRequest", "pull requests"], ["Memory", "public chat"]];
+  // has no pull requests until GitHub adds them. Chat is a seeded Chat thread or a memory.
+  const DEMO_KINDS = [[["Person"], "people"], [["Service"], "services"], [["Decision"], "decisions"], [["Ticket"], "tickets"], [["PullRequest"], "pull requests"], [["Memory", "Chat"], "chat"]];
+  const OWN_KINDS = [[["Service"], "services"], [["Decision"], "decisions"], [["PullRequest"], "pull requests"], [["Memory", "Chat"], "public chat"]];
   const listed = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
 
   function renderGraphLine() {
     if (!catalogue || counted === null) return;
     const own = catalogue.company === "company-brain";
-    const words = (own ? OWN_KINDS : DEMO_KINDS).filter(([label]) => counted[label] > 0).map(([, word]) => word);
+    const words = (own ? OWN_KINDS : DEMO_KINDS).filter(([labels]) => labels.some((label) => counted[label] > 0)).map(([, word]) => word);
     const what = words.length ? `: its ${own ? "own " : ""}${listed(words)}` : "";
     const line = $("#graph-line");
     if (own) line.textContent = `This page reads the live graph behind this project${what}.`;
