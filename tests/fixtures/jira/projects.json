@@ -1,0 +1,39 @@
+{
+  "self": "https://quillfern.atlassian.net/rest/api/3/project/search?maxResults=50&startAt=0",
+  "maxResults": 50,
+  "startAt": 0,
+  "total": 3,
+  "isLast": true,
+  "values": [
+    {
+      "self": "https://quillfern.atlassian.net/rest/api/3/project/10000",
+      "id": "10000",
+      "key": "PAY",
+      "name": "Quillfern Payments",
+      "projectTypeKey": "software",
+      "simplified": false,
+      "style": "classic",
+      "isPrivate": false
+    },
+    {
+      "self": "https://quillfern.atlassian.net/rest/api/3/project/10001",
+      "id": "10001",
+      "key": "PLAT",
+      "name": "Quillfern Platform",
+      "projectTypeKey": "software",
+      "simplified": false,
+      "style": "classic",
+      "isPrivate": false
+    },
+    {
+      "self": "https://quillfern.atlassian.net/rest/api/3/project/10002",
+      "id": "10002",
+      "key": "HR",
+      "name": "People team",
+      "projectTypeKey": "business",
+      "simplified": false,
+      "style": "classic",
+      "isPrivate": false
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+/* Company Brain: the graph explorer at /explore, on the tokens in style.css. Only the explorer's
+   own classes live here; the drawing, chips, buttons, depth toggle and edge lines are the site's. */
+
+.explorer-main { min-height: calc(100vh - var(--header)); }
+/* The site's display rules (.chips, .depths, flex rows) would otherwise show what the script hides. */
+.explorer-main [hidden] { display: none !important; }
+.explorer-head { padding-bottom: 0; }
+.explorer-head .eyebrow { margin: 0 0 14px; }
+.explorer-head .lede code, .explorer-sub code { font: 500 0.92em var(--mono); color: var(--ink); }
+
+.explorer-search { display: flex; gap: 10px; max-width: 640px; margin: 24px 0 0; }
+.explorer-search input {
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 16px; border-radius: 999px;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink);
+  font: var(--fs-md)/1.2 var(--font);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.explorer-search input::placeholder { color: var(--ink-3); }
+.explorer-search input:focus { outline: none; border-color: var(--path); box-shadow: 0 0 0 4px var(--glow); }
+
+.explorer-label { font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.explorer-start { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 16px 0 0; }
+.explorer-start .chips { margin: 0; }
+
+/* The breadcrumb: every step of the walk, the current one in ink, the rest links back. */
+.walk { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 28px 0 0; }
+.walk ol { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; margin: 0; padding: 0; list-style: none; font: 500 var(--fs-sm)/1.4 var(--mono); }
+.walk li { display: inline-flex; align-items: center; }
+.walk li + li::before { content: "→"; content: "→" / ""; margin: 0 8px; color: var(--ink-3); }
+.walk a { color: var(--ink-2); text-decoration: none; border-radius: 6px; padding: 4px 6px; min-height: 32px; display: inline-flex; align-items: center; }
+.walk a:hover { color: var(--ink); background: var(--surface-2); }
+.walk [aria-current="step"] { color: var(--path-ink); padding: 4px 6px; }
+
+.explorer-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; margin: 20px 0 0; }
+
+.explorer-stage { min-height: 420px; }
+.explorer-stage.loading .explorer-graph { opacity: 0.45; transition: opacity var(--fast) var(--ease); }
+.stage-bar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; }
+.stage-title { min-width: 0; flex: 1; }
+.stage-title h2 { margin: 0; font-size: var(--fs-xl); line-height: 1.2; letter-spacing: -0.02em; font-weight: 600; overflow-wrap: anywhere; }
+.focus-kind { margin: 4px 0 0; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-3); }
+.stage-bar .depths { margin-left: 0; }
+.explorer-answer { margin: 16px 0 0; font-size: var(--fs-md); line-height: 1.6; color: var(--ink-2); max-width: 62em; }
+.explorer-answer.refused { padding-left: 12px; border-left: 2px solid var(--line-2); }
+.explorer-graph { margin-top: 18px; }
+.explorer-graph .path-head h3 { font-size: var(--fs-md); margin: 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.explorer-graph .path-head .meta { color: var(--ink-3); font: 400 var(--fs-sm) var(--mono); }
+.explorer-hint { margin: 12px 0 0; font-size: var(--fs-sm); color: var(--ink-3); }
+
+/* Nodes a click steps to, and the node in focus, drawn in the walked-path colour. */
+.explorer-graph .canvas .node.steppable { cursor: pointer; }
+.explorer-graph .canvas .node.steppable:hover rect { stroke-width: 2.4; }
+.explorer-graph .canvas .node.focus rect { stroke: var(--path); stroke-width: 2.6; }
+.explorer-graph .canvas .node:focus-visible rect { stroke: var(--path); stroke-width: 2.6; }
+
+.explorer-panel { display: grid; gap: 12px; position: sticky; top: calc(var(--header) + 16px); }
+.explorer-panel .panel { padding: 18px; }
+.explorer-panel .chips { margin: 0; }
+.explorer-sub { margin: 0 0 12px; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink-3); }
+.explorer-edges .steps { margin: 0; max-height: 340px; overflow: auto; }
+.explorer-said .memories, #explorer-said .memories { font-size: var(--fs-sm); color: var(--ink-2); }
+.said-day { font: var(--fs-xs) var(--mono); color: var(--ink-3); }
+
+/* One button per relationship type at the focus: its words, the edge type with its direction, and how many it reaches. */
+.follows { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.follow {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; width: 100%;
+  min-height: 40px; padding: 6px 12px; border-radius: var(--radius-sm); cursor: pointer; text-align: left;
+  border: 1px solid var(--line); background: transparent; color: var(--ink-2); font: var(--fs-sm)/1.3 var(--font);
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.follow:hover { color: var(--ink); border-color: var(--line-2); background: color-mix(in oklab, var(--horizon) 8%, transparent); }
+.follow code { font: 500 var(--fs-xs) var(--mono); color: var(--ink-3); }
+.follow-count { min-width: 1.6em; text-align: right; font: 600 var(--fs-xs) var(--mono); color: var(--ink); }
+
+@media (max-width: 960px) {
+  .explorer-grid { grid-template-columns: minmax(0, 1fr); }
+  .explorer-panel { position: static; }
+}
+
+@media (max-width: 760px) {
+  .explorer-head { padding-top: 32px; }
+  .explorer-stage { min-height: 0; }
+  .stage-title { flex: 1 1 100%; }
+  .follow { grid-template-columns: minmax(0, 1fr) auto; }
+  .follow code { grid-row: 2; grid-column: 1 / -1; }
+}
+
+@media (max-width: 420px) {
+  .explorer-search { flex-direction: column; }
+  .explorer-search .btn { width: 100%; }
+  .walk a { min-height: 44px; }
+  .follow { min-height: 44px; }
+}

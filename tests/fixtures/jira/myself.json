@@ -1,0 +1,10 @@
+{
+  "self": "https://quillfern.atlassian.net/rest/api/3/user?accountId=712020:0b1c-maya",
+  "accountId": "712020:0b1c-maya",
+  "accountType": "atlassian",
+  "emailAddress": "maya@quillfern.example.com",
+  "displayName": "Maya Ortiz",
+  "active": true,
+  "timeZone": "Asia/Kolkata",
+  "locale": "en_US"
+}

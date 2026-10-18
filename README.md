@@ -21,8 +21,9 @@ Graph Hacks 2026: track 03, Company Brain, also entered in tracks 01 and 02.
 | 3 | Ask [`who knows the payments gateway`](https://brain.noobsurd.space/?q=who%20knows%20the%20payments%20gateway) | A refusal that names the nearest things the graph does hold. It never guesses |
 | 4 | Scroll to [Take FalkorDB out](https://brain.noobsurd.space/#proof) on the page | The same questions run twice: five of six capabilities collapse without the graph, and the refusal stays a refusal |
 | 5 | Open a team: [/team/payments](https://brain.noobsurd.space/team/payments) | Its people, what it runs, what it depends on in other teams and who depends on it, where its risk sits, and the edges behind every line |
-| 6 | `claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp` | The same read-only tools over MCP, with no token, each result with the path it walked |
-| 7 | `python scripts/replay_workspace.py --graph company_demo`, with FalkorDB running | The whole demo through the real routes, with no Slack app and no model key |
+| 6 | Open [/explore](https://brain.noobsurd.space/explore?node=billing-service) and click any node | That node's neighbourhood from the `explore` tool, drawn; each click steps to the node clicked, any relationship can be followed with `neighbors`, and the walk stays as a breadcrumb |
+| 7 | `claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp` | The same read-only tools over MCP, with no token, each result with the path it walked |
+| 8 | `python scripts/replay_workspace.py --graph company_demo`, with FalkorDB running | The whole demo through the real routes, with no Slack app and no model key |
 
 `python scripts/check_live.py` runs the live checks in one go: every example question, the questions in the next section, the team page, the deep link and MCP.
 
@@ -40,6 +41,8 @@ Graph Hacks 2026: track 03, Company Brain, also entered in tracks 01 and 02.
 Every answer ends with questions to ask next, and you can click any node in its drawing to ask about it.
 
 Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, the teams it depends on and the ones that depend on it, where its risk sits, and the edges behind every line. The team names at the top switch between teams. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
+
+Or wander the graph at [/explore](https://brain.noobsurd.space/explore?node=billing-service). Type any name, or start from one of the best-connected nodes; the view is the `explore` tool's answer and its cited edges, drawn as the ask page draws them. Click a node to step to it, follow one relationship type ("depended on by", "owned by") up to three hops with `neighbors`, or look two hops out. Every step has its own address (`/explore?node=auth-service&rel=DEPENDS_ON&dir=in&hops=2`), Back walks back, and each node offers questions that open on the ask page. The page reads three public GET routes, `/api/explore?node=&depth=`, `/api/explore/neighbors?node=&relation=&direction=&depth=` and `/api/explore/start`, which call the same domain tools in the company-wide scope and share the ask page's rate limit and one-minute cache.
 
 **Over MCP.** The same read-only tools, with the same cited results, from any MCP client. No token needed: read-only, the company-wide scope, 30 calls a minute per address, shared with the ask page. A token, where one was issued, lifts the limit.
 
