@@ -4,28 +4,27 @@
 
 **Ask how your company works. Every answer shows the path it walked.**
 
-Company Brain keeps a company's people, teams, what they run, documents, tickets, decisions and chat in one FalkorDB graph. A Slack agent, the live page and any MCP client answer by walking it, and print every edge they used as `A -[REL]-> B`. The agent never writes Cypher: it picks one of a fixed catalogue of hand-written, parameterised queries, resolves names against the graph first, and when the graph does not know something it says so instead of guessing.
+One FalkorDB graph of who owns what, what depends on what, and why. Slack, the web page and MCP clients ask it through fixed, hand-written Cypher tools. Every answer prints its edges as `A -[REL]-> B`, and it never guesses.
 
 [![“who knows billing” on the ask page: the ranked answer, the path drawn as a graph, and the same edges as A -[REL]-> B lines, including the pull request a teammate reviewed.](docs/images/01-who-should-look.png)](https://brain.noobsurd.space/?q=who%20knows%20billing)
 
-<sub>Taken on the local replay of the synthetic company, which adds a GitHub history. The live site answers the same question from the seeded graph, without the pull request.</sub>
+<sub>From the local replay, which adds GitHub history.</sub>
 
-Graph Hacks 2026: track 03, Company Brain, also entered in tracks 01 and 02.
+Graph Hacks 2026: track 03, Company Brain; also tracks 01 and 02.
 
 ## For judges: verify it in two minutes
 
 | | Do this | You should see |
 | --- | --- | --- |
-| 1 | Open [brain.noobsurd.space](https://brain.noobsurd.space) and click an example question | The answer, the path drawn edge by edge, and the same edges as `A -[REL]-> B` lines |
-| 2 | Open [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves) | What rests on one person alone, and who is next in line |
-| 3 | Ask [`who knows the payments gateway`](https://brain.noobsurd.space/?q=who%20knows%20the%20payments%20gateway) | A refusal that names the nearest things the graph does hold. It never guesses |
-| 4 | Scroll to [Take FalkorDB out](https://brain.noobsurd.space/#proof) on the page | The same questions run twice: five of six capabilities collapse without the graph, and the refusal stays a refusal |
-| 5 | Open a team: [/team/payments](https://brain.noobsurd.space/team/payments) | Its people, what it runs, what it depends on in other teams and who depends on it, where its risk sits, and the edges behind every line |
-| 6 | Open [/explore](https://brain.noobsurd.space/explore?node=billing-service) and click any node | That node's neighbourhood from the `explore` tool, drawn; each click steps to the node clicked, any relationship can be followed with `neighbors`, and the walk stays as a breadcrumb |
-| 7 | `claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp` | The same read-only tools over MCP, with no token, each result with the path it walked |
-| 8 | `python scripts/replay_workspace.py --graph company_demo`, with FalkorDB running | The whole demo through the real routes, with no Slack app and no model key |
+| 1 | Open [brain.noobsurd.space](https://brain.noobsurd.space) and click an example | The answer and its path |
+| 2 | [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves) | Who is next if one person leaves |
+| 3 | [`who knows the payments gateway`](https://brain.noobsurd.space/?q=who%20knows%20the%20payments%20gateway) | A refusal, with the nearest names |
+| 4 | [Take FalkorDB out](https://brain.noobsurd.space/#proof) | 5 of 6 answers fail without the graph |
+| 5 | [/team/payments](https://brain.noobsurd.space/team/payments), [/explore](https://brain.noobsurd.space/explore?node=billing-service) | A team's risk; any node's neighbours |
+| 6 | `claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp` | The same tools over MCP |
+| 7 | `python scripts/replay_workspace.py --graph company_demo` | The whole demo locally, no Slack, no model key |
 
-`python scripts/check_live.py` runs the live checks in one go: every example question, the questions in the next section, the team page, the deep link and MCP.
+`python scripts/check_live.py` checks it all live.
 
 ## Try it in two minutes
 
@@ -38,7 +37,7 @@ Graph Hacks 2026: track 03, Company Brain, also entered in tracks 01 and 02.
 | `why did we move the memory layer off postgres` | The decision, who proposed and approved it, the RFC and ticket it rests on, and the chat it came from |
 | `who knows the payments gateway` | Something the graph does not know: "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." It never guesses. |
 
-Every answer ends with questions to ask next, and you can click any node in its drawing to ask about it.
+Every answer ends with questions to ask next, and you can click any node in its drawing to ask about it. Or take the 60-second tour, from the hero or at [`/?tour=1`](https://brain.noobsurd.space/?tour=1): six live answers, each with a caption and a fact read off the graph.
 
 Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, the teams it depends on and the ones that depend on it, where its risk sits, and the edges behind every line. The team names at the top switch between teams. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
 

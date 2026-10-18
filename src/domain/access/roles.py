@@ -36,7 +36,7 @@ def role_of(slack_user_id: str, *, env_roles: bool = True) -> MemberRole:
     """
     if env_roles and settings.slack_owner_id and slack_user_id == settings.slack_owner_id:
         return ROLE_OWNER
-    if _is_installer_of_record(slack_user_id):
+    if _is_installer_of_record(slack_user_id) or _is_org_creator(slack_user_id):
         return ROLE_OWNER
     if env_roles and slack_user_id in settings.slack_admin_ids:
         return ROLE_ADMIN
@@ -45,6 +45,22 @@ def role_of(slack_user_id: str, *, env_roles: bool = True) -> MemberRole:
     if rows and rows[0][0] == ROLE_ADMIN:
         return ROLE_ADMIN
     return ROLE_MEMBER
+
+
+def _is_org_creator(slack_user_id: str) -> bool:
+    """Whether this Slack user made the console org in context (``Org.created_by`` is
+    ``"<team_id>:<slack_user_id>"``, with the team one routed to the org). The console makes the
+    creator its owner, so Slack does too, whoever installed the bot. Never in the legacy org."""
+    from src.core import tenancy
+
+    org = tenancy.current_org_or_none()
+    if not slack_user_id or org is None or tenancy.is_legacy(org):
+        return False
+    from src.domain import orgs
+
+    stored = orgs.get_org(org.id)
+    team, _, user = (stored.created_by or "").partition(":") if stored else ("", "", "")
+    return bool(team) and user == slack_user_id and team in orgs.teams_of(org.id)
 
 
 def _is_installer_of_record(slack_user_id: str) -> bool:

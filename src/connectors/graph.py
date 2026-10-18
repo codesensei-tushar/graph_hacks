@@ -113,7 +113,7 @@ def write_containers(install: Install, containers: list[Container]) -> list[str]
             """
             MERGE (c:Container {id: $id})
             SET c.name = $name, c.external_id = $external_id, c.url = $url, c.kind = $kind, c.source = $source,
-                c.install = $install, c.scope = $scope, c.restricted = $restricted, c.synced_at = $now
+                c.install = $install, c.scope = $scope, c.restricted = $restricted, c.available = $available, c.synced_at = $now
             WITH c
             MATCH (n)-[:IN_CONTAINER]->(c)
             WHERE n.scope <> c.scope
@@ -122,7 +122,7 @@ def write_containers(install: Install, containers: list[Container]) -> list[str]
             {
                 "id": container.id, "name": container.name, "external_id": str(container.external_id), "url": container.url,
                 "kind": container.kind, "source": install.source, "install": install.key, "scope": scope,
-                "restricted": bool(container.restricted), "now": now_ms(),
+                "restricted": bool(container.restricted), "available": container.available, "now": now_ms(),
             },
         )
         ids.append(container.id)
@@ -148,6 +148,25 @@ def container_scopes(install: Install) -> dict[str, str]:
     _, graph = connect()
     rows = graph.query("MATCH (c:Container {install: $install}) RETURN c.id, c.scope", {"install": install.key}).result_set
     return dict(rows)
+
+
+def container_facts(install: Install) -> dict[str, dict]:
+    """Container id -> ``{readers, available, name}`` for the install's containers, in one query. ``readers``
+    is None for a company-wide container, else how many linked accounts may read it (CAN_READ);
+    ``available`` is the vendor's own count when the listing gave one."""
+    _, graph = connect()
+    rows = graph.ro_query(
+        """
+        MATCH (c:Container {install: $install})
+        OPTIONAL MATCH (u:ExternalUser)-[:CAN_READ]->(c)
+        RETURN c.id, c.restricted, count(u), c.available, c.name
+        """,
+        {"install": install.key},
+    ).result_set
+    return {
+        cid: {"readers": int(readers) if restricted else None, "available": available, "name": name}
+        for cid, restricted, readers, available, name in rows
+    }
 
 
 def count_items(container_id: str) -> int:

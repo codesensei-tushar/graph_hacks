@@ -71,7 +71,7 @@ class JiraClient:
         keys = sorted(key for key in keys if PROJECT_KEY.fullmatch(key))
         found: list[dict] = []
         while keys:
-            page = self.http.get("/rest/api/3/project/search", {"keys": keys, "maxResults": 50, "startAt": len(found)}) or {}
+            page = self.http.get("/rest/api/3/project/search", {"keys": keys, "maxResults": 50, "startAt": len(found), "expand": "insight"}) or {}
             values = page.get("values") or []
             found.extend(values)
             if page.get("isLast", True) or not values:
@@ -83,7 +83,7 @@ class JiraClient:
         that does not move ``startAt`` forward ends the listing, so a broken ``isLast`` cannot loop."""
         found: list[dict] = []
         while len(found) < limit:
-            page = self.http.get("/rest/api/3/project/search", {"maxResults": min(50, limit - len(found)), "startAt": len(found), "orderBy": "key"}) or {}
+            page = self.http.get("/rest/api/3/project/search", {"maxResults": min(50, limit - len(found)), "startAt": len(found), "orderBy": "key", "expand": "insight"}) or {}
             values = page.get("values") or []
             found.extend(values[: limit - len(found)])
             if page.get("isLast", True) or not values:

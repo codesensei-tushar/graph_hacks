@@ -58,6 +58,11 @@ class FakeHubSpot:
         after = str(start + len(page)) if start + len(page) < len(found) else None
         return copy.deepcopy(page), after, {"date": self.server_date}
 
+    def total(self, object_type: str, filter_groups: list[dict]) -> int:
+        self.calls.append(("total", object_type))
+        records = self.companies if object_type == "companies" else self.deals
+        return sum(1 for record in records.values() if any(all(_matches(record, rule) for rule in group["filters"]) for group in filter_groups))
+
     def batch_read(self, object_type: str, ids: list[str], properties: list[str]) -> list[dict]:
         self.calls.append(("batch_read", object_type, list(ids)))
         records = self.companies if object_type == "companies" else self.deals

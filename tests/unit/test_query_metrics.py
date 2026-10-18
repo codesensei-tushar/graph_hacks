@@ -55,6 +55,8 @@ class MetricsTestCase(unittest.TestCase):
 
 
 class HookTest(MetricsTestCase):
+    NO_ORG_CONTEXT = True  # one test reads the org label with none in context (tests/strict_tenancy.py)
+
     def test_every_query_through_the_proxy_is_counted_under_its_tool_and_org(self):
         graph = _GraphProxy(FakeGraph(rows=4))
         with tenancy.org_context(tenancy.legacy_org()), query_metrics.tool_scope("who_owns"):

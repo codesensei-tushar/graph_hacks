@@ -264,7 +264,11 @@ def main() -> None:
     if args.app_url:
         run_against_instance(args)
     else:
-        run_in_process(args)
+        from src.core import tenancy
+
+        # In process the replay writes the legacy org's graph: said explicitly, for TENANCY_WRITE_STRICT.
+        with tenancy.org_context(tenancy.legacy_org()):
+            run_in_process(args)
 
 
 if __name__ == "__main__":

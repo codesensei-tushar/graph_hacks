@@ -40,6 +40,8 @@
   // The example chips that answer on this graph; a refusal with no near name offers the first two.
   // ``toolsReady`` settles once they are in, for a refusal that arrives first (a deep link).
   let examplesAnswered = [];
+  // Every example chip /api/ask/tools offers, the refusal included, for the tour's honesty check.
+  let examplesOffered = [];
   let toolsReady = Promise.resolve();
   let teamIds = null;
   // The stats' label counts once they arrive; {} when that call failed.
@@ -70,6 +72,7 @@
   function renderChips(examples) {
     const answered = examples.slice(0, -1);
     examplesAnswered = answered;
+    examplesOffered = examples.slice();
     const refusal = examples[examples.length - 1];
     chips.replaceChildren();
     const hidden = [];
@@ -432,6 +435,7 @@
       if (!fresh) answered.set(q, { at: Date.now(), data });
       entry.data = data;
       render(data, q);
+      return data;
     } catch (error) {
       out.replaceChildren();
       statusLine.textContent = error.message === TOO_MANY ? TOO_MANY : `No answer: ${error.message}`;
@@ -578,4 +582,12 @@
   watchQuickstart();
   const initial = new URLSearchParams(location.search).get("q");
   if (initial) { input.value = initial; ask(initial, true, "start"); }
+
+  // The guided tour (tour.js) asks through the page, so each step's answer, walk, cache and address
+  // behave as a click's: ``ask`` settles with the answer once it is drawn (nothing when it failed),
+  // ``offered`` once the chips are in.
+  window.BrainPage = {
+    ask: (question) => { input.value = question; return ask(question, true, "start"); },
+    offered: () => toolsReady.then(() => examplesOffered.slice()),
+  };
 })();
