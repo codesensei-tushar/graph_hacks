@@ -88,7 +88,7 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 - "Built for Graph Hacks. Track 03, Company Brain (primary); also Track 01, Agents That Act on Connected Data, and Track 02, Agent Memory and Coordination."
 - The AI disclosure, word for word from the README.
 - "Synthetic data and this project's own only."
-- Links: repository, README, blog and video when they exist, `/api/health`.
+- Links: repository, README, blog and video when they exist, `/healthz` (status, deployed commit, FalkorDB; `/api/health` counts every node, system ones too, so it would disagree with the page's public counts).
 
 ## 3. Visual direction
 

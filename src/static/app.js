@@ -45,6 +45,9 @@
   let teamIds = null;
   // The stats' label counts once they arrive; {} when that call failed.
   let counted = null;
+  // The whole graph's node and edge counts, and the hero sample's, for the line above the sample.
+  let totals = null;
+  let sampled = null;
 
   async function loadTools() {
     try {
@@ -139,7 +142,9 @@
       const data = await getJson("/api/graph/stats");
       const labels = data.labels || {};
       counted = labels;
+      totals = { nodes: data.nodes, edges: data.edges };
       renderGraphLine();
+      renderSampleCount();
       for (const cell of row.querySelectorAll("dd[data-stat]")) {
         const key = cell.dataset.stat;
         const value = key === "edges" ? data.edges : labels[key] || 0;
@@ -159,6 +164,16 @@
 
   // --- The hero's live slice ------------------------------------------------------------------
 
+  // "26 of 28 nodes · 58 of 62 edges": the sample reads as part of the graph the stats below
+  // count, not as a second count that disagrees with them.
+  function renderSampleCount() {
+    if (!sampled) return;
+    const part = (shown, total, one, many) => (total > shown ? `${shown} of ${plural(total, one, many)}` : plural(shown, one, many));
+    const count = $("#live-count");
+    count.replaceChildren(part(sampled.nodes, totals && totals.nodes, "node", "nodes"));
+    count.append(el("span", { class: "count-edges" }, ` · ${part(sampled.edges, totals && totals.edges, "edge", "edges")}`));
+  }
+
   async function loadSample() {
     const stage = $("#live-stage");
     const wait = $("#live-wait");
@@ -169,7 +184,8 @@
         wait.textContent = "Nothing public is in the graph yet, so there is nothing to draw.";
         return;
       }
-      $("#live-count").textContent = `${plural(mounted.nodes, "node", "nodes")} · ${plural(mounted.edges, "edge", "edges")}`;
+      sampled = { nodes: mounted.nodes, edges: mounted.edges };
+      renderSampleCount();
       window.BrainHero.legend($("#live-legend"), data.nodes);
     } catch (error) {
       wait.textContent = `The graph could not be drawn. ${error.message}`;

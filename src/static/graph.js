@@ -14,7 +14,10 @@
   const SCOPE_LABEL = { org_shared: "public channels" };
 
   const familyOf = (label) => FAMILY[label] || "other";
-  const kindOf = (label) => (label || "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+  // The line under a node name is lowercase like a Service's kind ("person", "pull request");
+  // product names keep their case.
+  const KIND_WORD = { SlackUser: "Slack user", GitHubUser: "GitHub user" };
+  const kindOf = (label) => KIND_WORD[label] || (label || "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
   const el = (tag, attrs = {}, text) => {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
@@ -301,7 +304,19 @@
     const canvas = el("div", { class: "canvas go" });
     const { svg, edgeEls, nodeEls, starts } = drawPath(nodes, edges);
     canvas.append(svg);
-    container.append(canvas);
+    // On a phone the drawing keeps a readable size and scrolls sideways: a fade at each edge with
+    // more beyond it, and a "scroll →" cue until the reader starts scrolling, say so.
+    const frame = el("div", { class: "canvas-frame" });
+    frame.append(canvas, el("span", { class: "scroll-cue", "aria-hidden": "true" }, "scroll →"));
+    container.append(frame);
+    const showEdges = () => {
+      const rest = canvas.scrollWidth - canvas.clientWidth;
+      frame.classList.toggle("more-left", rest > 1 && canvas.scrollLeft > 1);
+      frame.classList.toggle("more-right", rest > 1 && canvas.scrollLeft < rest - 1);
+    };
+    canvas.addEventListener("scroll", showEdges, { passive: true });
+    if ("ResizeObserver" in window) new ResizeObserver(showEdges).observe(canvas);
+    else showEdges();
     container.append(legend(nodes));
 
     const names = new Map(nodes.map((node) => [node.id, node.name]));
