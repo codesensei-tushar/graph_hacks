@@ -80,7 +80,7 @@ def _run_what_changed(args: dict, scopes: list[str]) -> ToolResult:
     # Imported here: what changed follows decisions forward, and decisions registers into this catalogue.
     from src.domain.knowledge import what_changed
 
-    return what_changed.what_changed(args.get("name") or "", scopes, args.get("days"), args.get("only"))
+    return what_changed.what_changed(args.get("name") or "", scopes, args.get("days"), args.get("only"), args.get("person"))
 
 
 def _run_reading_list(args: dict, scopes: list[str]) -> ToolResult:
@@ -378,14 +378,15 @@ register(
             "about. For one service it also reads what that service depends on, up to three hops, so a failure is "
             "traced to the change upstream; for a team, everything it runs; with nothing named, the whole company. Use "
             "for 'what changed this week', 'what's new in payments', 'billing is failing, what changed', 'what did "
-            "sales decide recently'. For why one decision was made, use decision_trace; for a list of what exists now "
-            "(the open tickets, every decision), not this."
+            "sales decide recently'. A service a search hit named is a good name to pass. For why one decision was made, "
+            "use decision_trace; for a list of what exists now (the open tickets, every decision), not this."
         ),
         args_schema=_schema(
             {
                 "name": {"type": "string", "description": "The service or team the question is about, copied from the question; omit for the whole company."},
                 "days": {"type": "integer", "minimum": 1, "maximum": 365, "description": "How far back, when the question says (today 1, this week 7, this month 30, recently 14)."},
                 "only": {"type": "string", "enum": ["decisions", "tickets", "pull_requests", "memories"], "description": "One kind of change inside the window, when the question asks for one."},
+                "person": {"type": "string", "description": "Whose things to read instead of a team or service: a person the question names ('what changed around Arjun's things'). Leave out otherwise."},
             },
             [],
         ),
@@ -528,7 +529,8 @@ register(
             "documents, tickets, pull requests, decisions, and chat memories the asker can read, then the people who wrote, "
             "worked on, reviewed, proposed, approved, or said each hit, ranked by those edges, with the thing each is about. "
             "Prefer who_knows for a named service, document, or ticket, explore for a named node's neighbourhood, and "
-            "recall for chat memories alone."
+            "recall for chat memories alone. Each hit names the service it is about: pass that name to what_changed, "
+            "reading_list or who_knows next."
         ),
         args_schema=_schema(
             {"text": {"type": "string", "description": "The words to search for, copied from the question (refunds, PDF layout, webhooks)."}},

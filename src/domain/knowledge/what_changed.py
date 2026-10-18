@@ -10,12 +10,13 @@ the decision that stands today through ``decisions.current_decision``), memories
 The question picks the scope. A team means everything it ``RUNS``; a service means itself
 and what it depends on, three ``DEPENDS_ON`` hops out, so "billing is failing, what changed"
 finds the change one hop upstream (a depth the question names, "one hop", narrows it);
-nothing named means the whole company. Time words pick the window (``window_in``): a week by
+nothing named means the whole company. ``person`` names whose things to read instead
+("what did I miss", where Slack fills in the asker): what they own, work on or know. Time words pick the window (``window_in``): a week by
 default, widened once to a month when the week is empty, and said so. ``only`` keeps one kind
 inside that window ("what did sales decide recently"). Current-state lists (the open
 tickets, every decision) are ``find``'s, not this tool's.
 
-When more than one thing changed, the answer opens as a digest grouped by thing ("Billing
+When more than one change touched more than one thing, the answer opens as a digest grouped by thing ("Billing
 Service: 2 changes; Auth Service (1 hop up): 1"), then tells the changes newest first.
 
 Every node is read through the asker's scopes, and dates are compared in Python, since the
@@ -120,18 +121,20 @@ class Scope:
     mode: str
     entity: Entity | None = None
     walked: dict[str, reading_list.Walked] = field(default_factory=dict)
+    # A person's own edge to each thing they hold, in person mode.
+    held: dict[str, str] = field(default_factory=dict)
 
     def covers(self, change: Change) -> bool:
         return self.mode == "company" or bool(change.service_ids & set(self.walked))
 
 
-def what_changed(question: str, scopes: list[str], days=None, only=None) -> ToolResult:
-    """What changed in the window, newest first, around what the question names; or one kind, listed."""
+def what_changed(question: str, scopes: list[str], days=None, only=None, person=None) -> ToolResult:
+    """What changed in the window, newest first, around what the question names, or around a person's own things."""
     _, graph = connect()
     text = question or ""
     only = only if only in ONLY else None
     window = (_clamp(days) if days is not None else window_in(text)) or DEFAULT_DAYS
-    scope = _scope(graph, text, scopes)
+    scope = _scope(graph, text, scopes, person)
     changes = [change for change in _changes(graph, scopes, only) if scope.covers(change)]
     result = ToolResult(tool=TOOL, answer="")
     now = now_millis()
@@ -143,7 +146,8 @@ def what_changed(question: str, scopes: list[str], days=None, only=None) -> Tool
     one, many = _NOUNS[only]
     where = _where(scope)
     if not recent:
-        result.answer = f"Nothing dated changed {where or 'around ' + _subject(scope)} in the last {_days(max(window, WIDER_DAYS) if widened else window)}."
+        place, span = where or f"around {_subject(scope)}", _days(max(window, WIDER_DAYS) if widened else window)
+        result.answer = f"No {many} {place} in the last {span}." if only else f"Nothing dated changed {place} in the last {span}."
         return result
     shown, rest = recent[:MAX_LISTED], recent[MAX_LISTED:]
     _cite(result, scope, shown)
@@ -165,10 +169,10 @@ def what_changed(question: str, scopes: list[str], days=None, only=None) -> Tool
 # --- scope ---------------------------------------------------------------------------------
 
 
-def _scope(graph, text: str, scopes: list[str]) -> Scope:
-    """A team first, then a service; anything else, a person included, is the whole company."""
+def _scope(graph, text: str, scopes: list[str], person: str | None = None) -> Scope:
+    """A team first, then a service, then the person whose things to read; anything else is the whole company."""
     if not text.strip():
-        return Scope("company")
+        return _person_scope(graph, person, scopes)
     team = resolve.resolve_name(text, ("Team",), scopes, graph=graph)
     if team.found:
         rows = graph.ro_query(
@@ -187,7 +191,28 @@ def _scope(graph, text: str, scopes: list[str]) -> Scope:
         depth = max(1, min(MAX_HOPS, named)) if named is not None else MAX_HOPS
         walked = reading_list.walk(graph, service.entity, scopes, depth=depth)
         return Scope("service", service.entity, {thing.id: thing for thing in walked})
-    return Scope("company")
+    return _person_scope(graph, person, scopes)
+
+
+def _person_scope(graph, person: str | None, scopes: list[str]) -> Scope:
+    """What a person owns, works on or knows; the whole company when they hold nothing or are not in the graph."""
+    found = resolve.resolve_name(person, ("Person",), scopes, graph=graph) if person else None
+    if found is None or not found.found:
+        return Scope("company")
+    rows = graph.ro_query(
+        f"""
+        MATCH (:Person {{id: $id}})-[held:OWNS|WORKED_ON|KNOWS]->(s:Service)
+        WHERE {SCOPED.format(var="s")}
+        RETURN s.id, s.name, {kinds.KIND_OF.format(var="s")}, collect(type(held))
+        """,
+        {"id": found.entity.id, "scopes": scopes},
+    ).result_set
+    if not rows:
+        return Scope("company")
+    walked = {thing_id: reading_list.Walked(thing_id, name, kind, 0, (thing_id,), (name,)) for thing_id, name, kind, _held in rows}
+    # The strongest edge first, as who_knows weighs them.
+    held = {thing_id: min(rels, key=("OWNS", "WORKED_ON", "KNOWS").index) for thing_id, _name, _kind, rels in rows}
+    return Scope("person", found.entity, walked, held)
 
 
 def _where(scope: Scope) -> str:
@@ -195,6 +220,8 @@ def _where(scope: Scope) -> str:
         return "across the company"
     if scope.mode == "team":
         return f"in {scope.entity.name}"
+    if scope.mode == "person":
+        return f"around what {scope.entity.name} works on"
     return ""
 
 
@@ -348,7 +375,7 @@ def _digest(scope: Scope, changes: list[Change], one: str, many: str) -> str:
             counts[thing_id] = counts.get(thing_id, 0) + 1
             hop = scope.walked[thing_id].hop if thing_id in scope.walked else 0
             names[thing_id] = f"{name} ({hop} hop{'s' if hop > 1 else ''} up)" if scope.mode == "service" and hop else name
-    if len(counts) < 2:
+    if len(counts) < 2 or len(changes) < 2:
         return ""
     hops = {thing_id: scope.walked[thing_id].hop if thing_id in scope.walked else 0 for thing_id in counts}
     ranked = sorted(counts, key=lambda thing_id: (-counts[thing_id], hops[thing_id], names[thing_id]))
@@ -370,6 +397,8 @@ def _cite(result: ToolResult, scope: Scope, changes: list[Change]) -> None:
             thing = scope.walked[thing_id]
             if scope.mode == "team":
                 result.add(_step(scope.entity.name, "RUNS", thing.name, scope.entity.id, thing.id, "Team", "Service"))
+            elif scope.mode == "person":
+                result.add(_step(scope.entity.name, scope.held[thing_id], thing.name, scope.entity.id, thing.id, "Person", "Service"))
             else:
                 result.extend(
                     _step(thing.names[index], "DEPENDS_ON", thing.names[index + 1], thing.ids[index], thing.ids[index + 1], "Service", "Service")

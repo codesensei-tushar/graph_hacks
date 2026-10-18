@@ -13,7 +13,15 @@ able to steer a turn into filing something; the approval card is the second guar
 A follow-up in a thread ("and two hops out", "who should look at it") names nothing
 by itself. When a question resolves to nothing and offers no candidates, the subject
 comes from the thread: the most recent node a person named, with the tool and depth
-the last reply used. A refusal that does name candidates is never overridden.
+the last reply used. A refusal that does name candidates is never overridden. When nobody in
+the thread named anything ("who knows about refunds" names a topic), the subject is what the
+last reply was about: the service its path lines point at most.
+
+A follow-up to a ``what_changed`` reply that changes only the window, the kind or the scope
+("and last month?", "only decisions", "what about platform?") asks ``what_changed`` again
+about the same question with that one thing changed, without a model call; and a
+``what_changed`` question that names nothing, asked after another tool's reply ("what changed
+there?" after a search), reads around the thread's subject instead of the whole company.
 
 This module knows nothing about Slack beyond the shape of a thread message. The turn
 that renders a reply lives in ``src/domain/slack/agent_turn.py``.
@@ -37,10 +45,21 @@ THREAD_MESSAGE_CHARS = 300
 THREAD_NAMED_LIMIT = 5
 THREAD_LABELS = ("Service", "Document", "Ticket", "Decision")
 
-_TOOL_IN_REPLY = re.compile(r"Tool `(\w+)`")
+# The footer names the tool: "Tool `who_knows`, picked by ..." in the blocks. Slack's plain-text
+# fallback of the same reply drops the backticks and, stripping italics, the underscores in the
+# name ("whatchanged"); ``reply_tool`` maps that back.
+_TOOL_IN_REPLY = re.compile(r"(?<![A-Za-z])Tool `?([a-z_]+)`?, (?:picked|run)\b")
 _DEPTH_IN_REPLY = re.compile(r"depth (\d+)")
 # An approved write's reply names what it filed: "Filed *TKT-104* about Billing Service."
 _FILED_IN_REPLY = re.compile(r"Filed \*([^*]+)\*")
+# What a reply's path lines are about: "• Billing runbook -[DESCRIBES]-> Billing Service".
+_PATH_LINE = re.compile(r"^\s*• (.+?) -\[([A-Z_]+)\]-> (.+?)\s*$", re.MULTILINE)
+_POINTS_AT = frozenset({"ABOUT", "DESCRIBES", "TOUCHES", "MENTIONS", "OWNS", "RUNS"})
+_MENTION = re.compile(r"<@[A-Z0-9]+>")
+# How a follow-up to what_changed opens, and "everything" to drop a kind filter.
+_FOLLOW_UP_OPENER = re.compile(r"^\s*(?:and|only|just|what about|how about|same for|over|for|in)\b", re.IGNORECASE)
+_EVERY_KIND = re.compile(r"\b(?:everything|all of it|all kinds|every kind)\b", re.IGNORECASE)
+CHANGE_FOLLOW_UP_WORDS = 6
 _DEEPER = re.compile(r"\b(?:deeper|further out|more hops|next hop|one more hop|keep going)\b", re.IGNORECASE)
 _ALL_THE_WAY = re.compile(r"\b(?:all the way|everything|the whole chain|the full chain|every hop)\b", re.IGNORECASE)
 
@@ -166,6 +185,27 @@ def _is_bot(message: dict, bot_ids: frozenset[str]) -> bool:
     return bool(message.get("bot_id") or message.get("app_id") or message.get("user") in bot_ids)
 
 
+def reply_tool(text: str) -> str | None:
+    """The catalogue tool a reply's footer names, from its blocks or its plain-text fallback."""
+    match = _TOOL_IN_REPLY.search(text or "")
+    if match is None:
+        return None
+    named = match.group(1)
+    if catalogue.get_tool(named) is not None:
+        return named
+    return next((name for name in catalogue.tool_names() if name.replace("_", "") == named.replace("_", "")), named)
+
+
+def message_text(message: dict) -> str:
+    """What a reader sees: a message's markdown blocks when it has them, else its text.
+
+    A reply's ``text`` is Slack's plain-text fallback, cut to one section and stripped of
+    backticks, so the footer that names the tool can be missing from it.
+    """
+    blocks = [block.get("text") for block in message.get("blocks") or [] if block.get("type") == "markdown" and block.get("text")]
+    return "\n".join(blocks) if blocks else str(message.get("text") or "")
+
+
 def thread_entities(thread: list[dict] | None, scopes: list[str], bot_ids: frozenset[str] = frozenset(), skip_text: str = "") -> list[Entity]:
     """Nodes named in the thread, most recent first.
 
@@ -190,19 +230,103 @@ def thread_entities(thread: list[dict] | None, scopes: list[str], bot_ids: froze
 
 
 def thread_subject(thread: list[dict] | None, scopes: list[str], bot_ids: frozenset[str] = frozenset(), skip_text: str = "") -> ThreadSubject | None:
-    named = thread_entities(thread, scopes, bot_ids, skip_text)
+    named = thread_entities(thread, scopes, bot_ids, skip_text) or reply_things(thread, scopes, bot_ids)
     if not named:
         return None
     tool = depth = None
     for message in reversed(thread or []):
         if _is_bot(message, bot_ids):
-            text = str(message.get("text") or "")
-            if match := _TOOL_IN_REPLY.search(text):
-                tool = match.group(1)
+            text = message_text(message)
+            tool = reply_tool(text) or tool
             if match := _DEPTH_IN_REPLY.search(text):
                 depth = int(match.group(1))
             break
     return ThreadSubject(named[0], tool, depth)
+
+
+def reply_things(thread: list[dict] | None, scopes: list[str], bot_ids: frozenset[str] = frozenset()) -> list[Entity]:
+    """The services the last reply was about, most cited first: what its path lines point at.
+
+    Only for a thread where nobody named anything; a person's own words always come first.
+    """
+    reply = _last_reply(thread, bot_ids)
+    if reply is None:
+        return []
+    counts: dict[str, int] = {}
+    for _source, rel, target in _PATH_LINE.findall(reply[1]):
+        if rel in _POINTS_AT:
+            counts[target] = counts.get(target, 0) + 1
+    things: list[Entity] = []
+    for target in sorted(counts, key=lambda name: -counts[name]):
+        found = resolve.resolve_name(target, ("Service",), scopes)
+        if found.found and found.entity not in things:
+            things.append(found.entity)
+    return things
+
+
+def changed_follow_up(question: str, thread: list[dict] | None, scopes: list[str], bot_ids: frozenset[str] = frozenset()) -> ToolChoice | None:
+    """``what_changed`` again, with only what the follow-up changes, or about the thread's subject. None otherwise."""
+    from src.domain.knowledge import what_changed
+
+    reply = _last_reply(thread, bot_ids)
+    if reply is None:
+        return None
+    index, text = reply
+    last_tool = reply_tool(text)
+    routed = ask_service.route(question)[0] == what_changed.TOOL
+    window, only, every = what_changed.window_in(question), what_changed.only_in(question), bool(_EVERY_KIND.search(question))
+    names_scope = _names_scope(question, scopes)
+    if last_tool == what_changed.TOOL:
+        opener = bool(_FOLLOW_UP_OPENER.search(question))
+        short = len(resolve.tokens(question)) <= CHANGE_FOLLOW_UP_WORDS
+        if not (routed or (opener and (window or only or every or names_scope)) or (short and (window or only or every))):
+            return None
+        # Newest first: this follow-up, then each question of the what_changed run it follows.
+        asked = [question, *_changed_run(thread, index, bot_ids)]
+        name = question if names_scope else next((earlier for earlier in asked[1:] if _names_scope(earlier, scopes)), asked[-1])
+        days = next((found for found in map(what_changed.window_in, asked) if found), None)
+        kind = None
+        for earlier in asked:
+            if _EVERY_KIND.search(earlier):
+                break
+            if found := what_changed.only_in(earlier):
+                kind = found
+                break
+    else:
+        if not routed or names_scope:
+            return None
+        subject = thread_subject(thread, scopes, bot_ids, skip_text=question)
+        if subject is None or subject.entity.label != "Service":
+            return None
+        name, days, kind = subject.entity.name, window, only
+    args = {key: value for key, value in (("name", name), ("days", days), ("only", kind)) if value}
+    return ToolChoice(what_changed.TOOL, args, "thread")
+
+
+def _last_reply(thread: list[dict] | None, bot_ids: frozenset[str]) -> tuple[int, str] | None:
+    for index in range(len(thread or []) - 1, -1, -1):
+        message = thread[index]
+        if _is_bot(message, bot_ids) and (text := message_text(message)):
+            return index, text
+    return None
+
+
+def _changed_run(thread: list[dict], index: int, bot_ids: frozenset[str]) -> list[str]:
+    """What people asked for each what_changed reply in the run ending at ``index``, newest first, without the bot's mention."""
+    asked: list[str] = []
+    for message in reversed(thread[: index + 1]):
+        text = message_text(message)
+        if _is_bot(message, bot_ids):
+            if reply_tool(text) != "what_changed":
+                break
+        elif text:
+            asked.append(" ".join(_MENTION.sub(" ", text).split()))
+    return asked
+
+
+def _names_scope(question: str, scopes: list[str]) -> bool:
+    """Whether the question names a team or a service of its own, so it sets what_changed's scope."""
+    return any(resolve.resolve_name(question, (label,), scopes).found for label in ("Team", "Service"))
 
 
 def thread_pull_request(thread: list[dict] | None, scopes: list[str], bot_ids: frozenset[str] = frozenset(), skip_text: str = "") -> Entity | None:
@@ -277,7 +401,13 @@ def choose_tool(
 ) -> ToolChoice:
     """One structured model call, or the keyword router when the model is unavailable or wrong."""
     specs = catalogue.list_tools() if specs is None else specs
-    named = thread_entities(thread, scopes, bot_ids, skip_text=question) if thread and scopes else []
+    if thread and scopes:
+        # A what_changed follow-up keeps the thread's scope; a model reading the thread could drop it.
+        follow_up = changed_follow_up(question, thread, scopes, bot_ids)
+        if follow_up is not None:
+            return follow_up
+    # Real names for the model to copy: what people named, else what the last reply was about.
+    named = (thread_entities(thread, scopes, bot_ids, skip_text=question) or reply_things(thread, scopes, bot_ids)) if thread and scopes else []
     try:
         choice = _choose_with_model(question, thread, specs, named)
         spec = next(candidate for candidate in specs if candidate.name == choice.tool)

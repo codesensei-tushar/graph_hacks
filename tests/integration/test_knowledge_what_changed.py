@@ -174,6 +174,18 @@ class WhatChangedTest(unittest.TestCase):
         self.assertIn("In the last 30, 3 changes.", near.answer)
         self.assertNotIn("Auth Service", near.answer)
 
+    def test_a_person_reads_around_what_they_own_work_on_or_know(self):
+        lena = what_changed.what_changed("", ORG, 30, person="Lena Fischer")
+        self.assertTrue(
+            lena.answer.startswith("In the last 30 days, 3 changes around what Lena Fischer works on. By thing: Billing Service: 2 changes; Invoice Worker: 1; Notification Service: 1."),
+            lena.answer,
+        )
+        self.assertIn("Lena Fischer -[OWNS]-> Invoice Worker", _cites(lena))
+        self.assertIn("Lena Fischer -[WORKED_ON]-> Billing Service", _cites(lena))
+        self.assertNotIn("Maya Ortiz said", lena.answer)
+        nobody = what_changed.what_changed("", ORG, 30, person="Someone Else")
+        self.assertTrue(nobody.answer.startswith("In the last 30 days, 4 changes across the company."), nobody.answer)
+
     def test_only_one_kind_inside_the_window(self):
         self.assertEqual(_changed("what did the sales team decide recently").answer, f"Nothing dated in the last 14 days. In the last 30, 1 decision across the company, newest first: {RETRIES}")
         self.assertEqual(
@@ -217,9 +229,11 @@ class WhatChangedTest(unittest.TestCase):
         decided = mcp_tools.call_tool("what_changed", {"only": "decisions"})
         self.assertTrue(decided["answer"].startswith("Nothing dated in the last 7 days. In the last 30, 1 decision across the company"), decided["answer"])
 
-    def test_in_slack_the_reply_cites_the_memories_it_quotes(self):
+    def test_in_slack_each_memory_is_quoted_once(self):
         with mock.patch.object(agent, "generate_object", side_effect=ModelUnavailable("no key")):
             outcome = agent_turn.answer_turn(_turn("what changed this week"))
         self.assertTrue(outcome.reply.startswith("Nothing dated in the last 7 days. In the last 30, 4 changes"), outcome.reply)
-        self.assertIn("*From conversations*", outcome.reply)
+        # The answer tells each memory in full, so the reply does not list them again under From conversations.
+        self.assertNotIn("*From conversations*", outcome.reply)
+        self.assertEqual(outcome.reply.count("auth session refresh rotates tokens every hour now"), 1)
         self.assertIn("Tool `what_changed`, picked by keywords", outcome.reply)

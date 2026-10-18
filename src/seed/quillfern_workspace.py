@@ -144,6 +144,14 @@ ENGINEERING_STEPS = (
             WorkspaceMessage(ENGINEERING, "UTOMAS", "why did we move billing retries to the invoice worker", "ask"),
         ),
     ),
+    # Right after the write: the decision just recorded is the newest thing that changed.
+    DemoStep(
+        "What changed this week, then only decisions",
+        (
+            WorkspaceMessage(ENGINEERING, "UTOMAS", "what changed this week", "ask"),
+            WorkspaceMessage(ENGINEERING, "UTOMAS", "only decisions", "follow_up"),
+        ),
+    ),
     DemoStep(
         "Blast radius, then two hops out",
         (
