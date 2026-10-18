@@ -154,9 +154,11 @@ def _what_changed(question: str, scopes: list[str], days=None, only=None, person
     only = only if only in ONLY else None
     window = (_clamp(days) if days is not None else window_in(text)) or DEFAULT_DAYS
     scope = _scope(graph, text, scopes, person)
-    changes = [change for change in _changes(graph, scopes, only) if scope.covers(change)]
-    result = ToolResult(tool=TOOL, answer="")
     now = now_millis()
+    # Nothing older than the widest window is ever told: synced tickets are read from there on.
+    since = now - max(window, WIDER_DAYS) * DAY_MS
+    changes = [change for change in _changes(graph, scopes, only, since) if scope.covers(change)]
+    result = ToolResult(tool=TOOL, answer="")
     dated = sorted((change for change in changes if change.at is not None), key=lambda change: (-change.at, _KIND_ORDER[change.kind], change.label))
     recent = [change for change in dated if change.at >= now - window * DAY_MS]
     widened = not recent and window < WIDER_DAYS
@@ -261,8 +263,8 @@ def _around(scope: Scope) -> str:
 # --- changes -------------------------------------------------------------------------------
 
 
-def _changes(graph, scopes: list[str], only: str | None) -> list[Change]:
-    readers = {"decisions": _decisions, "memories": _memories, "pull_requests": _pull_requests, "tickets": _tickets}
+def _changes(graph, scopes: list[str], only: str | None, since: int | None = None) -> list[Change]:
+    readers = {"decisions": _decisions, "memories": _memories, "pull_requests": _pull_requests, "tickets": lambda graph, scopes: _tickets(graph, scopes, since)}
     return [change for kind, read in readers.items() if only in (None, kind) for change in read(graph, scopes)]
 
 
@@ -360,18 +362,22 @@ def _pull_requests(graph, scopes: list[str]) -> list[Change]:
     return changes
 
 
-def _tickets(graph, scopes: list[str]) -> list[Change]:
-    rows = graph.ro_query(
-        f"""
-        MATCH (t:Ticket)
-        WHERE {SCOPED.format(var="t")}
+def _tickets(graph, scopes: list[str], since: int | None = None) -> list[Change]:
+    """Every readable ticket, or with ``since`` the ones that may have changed since then: a synced
+    ticket by its ``changed_at_ms`` (a range-index read, not every ticket), plus every ticket without
+    one (seeded, filed from Slack or GitHub: few). Each is dated below exactly as before."""
+    ticket_scan = "MATCH (t:Ticket) WHERE {where} AND " + SCOPED.format(var="t")
+    tail = f"""
         OPTIONAL MATCH (t)-[:ABOUT]->(s:Service)
         WHERE {SCOPED.format(var="s")}
-        RETURN t.id, t.name, coalesce(t.title, ''), coalesce(t.state, 'open'), coalesce(t.source_updated_at, t.updated_at), t.created_at,
-               collect(DISTINCT [s.id, s.name])
-        """,
-        {"scopes": scopes},
-    ).result_set
+        RETURN t.id AS id, t.name AS name, coalesce(t.title, '') AS title, coalesce(t.state, 'open') AS state,
+               coalesce(t.source_updated_at, t.updated_at) AS updated, t.created_at AS created, collect(DISTINCT [s.id, s.name]) AS about
+        """
+    if since is None:
+        query = ticket_scan.format(where="true") + tail
+    else:
+        query = ticket_scan.format(where="t.changed_at_ms >= $since") + tail + " UNION ALL " + ticket_scan.format(where="t.changed_at_ms IS NULL") + tail
+    rows = graph.ro_query(query, {"scopes": scopes, "since": since}).result_set
     changes = []
     for ticket_id, name, title, state, updated_at, created_at, about in rows:
         about = sorted((thing_id, thing) for thing_id, thing in about if thing_id)
