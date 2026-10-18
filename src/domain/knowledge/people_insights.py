@@ -140,8 +140,12 @@ def people_ranking(measure: str | None, scopes: list[str], team: str | None = No
         limit = DEFAULT_LIMIT
     _, graph = connect()
     members, team_entity = _members(graph, team, scopes)
-    tallies = {name: _tally(graph, name, scopes) for name in MEASURES}
+    # Jira and HubSpot users no person is linked to rank too, when the question names no team.
+    accounts = _accounts(graph, scopes) if members is None else {}
+    tallies = {name: _tally(graph, name, scopes, accounts) for name in MEASURES}
     people = _people(graph, scopes, members)
+    for identity in accounts.values():
+        people.setdefault(identity.id, (identity.name, None))
     result = ToolResult(tool=RANK_TOOL, answer="")
     ranked = sorted((tally for tally in tallies[measure].values() if tally.id in people and tally.count), key=lambda tally: (-tally.count, tally.name))
     result.grid = _rank_grid(measure, people, tallies)
@@ -256,7 +260,57 @@ _MEASURE_QUERIES = {
 }
 
 
-def _tally(graph, measure: str, scopes: list[str]) -> dict[str, _Tally]:
+# The same measures for a Jira or HubSpot user no person is linked to: what they own or work on, and
+# their open tickets. Named with their tool, one identity per person across tools (``people.py``).
+_UNLINKED = f"{SCOPED.format(var='a')} AND NOT (a)-[:IS]->(:Person)"
+_ACCOUNT_QUERIES = {
+    "holds": f"""
+        MATCH (a:ExternalUser)-[r:OWNS|WORKED_ON]->(s:Service)
+        WHERE {_UNLINKED} AND {SCOPED.format(var="s")}
+        RETURN a.id AS pid, a.name AS pname, s.id AS iid, s.name AS iname, 'Service' AS ilabel, type(r) AS rel, null AS tid, null AS tname
+    """,
+    "owns": f"""
+        MATCH (a:ExternalUser)-[r:OWNS]->(s:Service)
+        WHERE {_UNLINKED} AND {SCOPED.format(var="s")}
+        RETURN a.id AS pid, a.name AS pname, s.id AS iid, s.name AS iname, 'Service' AS ilabel, type(r) AS rel, null AS tid, null AS tname
+    """,
+    "load": f"""
+        MATCH (a:ExternalUser)-[r:ASSIGNED|WORKED_ON]->(t:Ticket)
+        WHERE {_UNLINKED} AND {SCOPED.format(var="t")} AND coalesce(t.state, 'open') <> 'closed'
+        RETURN a.id AS pid, a.name AS pname, t.id AS iid, t.name AS iname, 'Ticket' AS ilabel, type(r) AS rel, null AS tid, null AS tname
+    """,
+}
+
+
+def _accounts(graph, scopes: list[str]) -> dict[str, Entity]:
+    """Each readable, unlinked connector user's identity: user id -> the identity as shown ("Yash Patil (Jira, HubSpot)")."""
+    from src.domain.knowledge import people  # people reads the connectors' admin mappings; imported when ranking
+
+    shown: dict[str, Entity] = {}
+    for user_id, name in graph.ro_query(f"MATCH (a:ExternalUser) WHERE {_UNLINKED} RETURN a.id, a.name", {"scopes": scopes}).result_set:
+        if user_id not in shown:
+            entity = people.shown(graph, Entity(user_id, name, people.ACCOUNT), scopes)
+            if entity.label == people.ACCOUNT:
+                for member in people.identity_ids(graph, entity, scopes):
+                    shown[member] = entity
+    return shown
+
+
+def _tally(graph, measure: str, scopes: list[str], accounts: dict[str, Entity] | None = None) -> dict[str, _Tally]:
+    tallies = _person_tally(graph, measure, scopes)
+    if accounts and measure in _ACCOUNT_QUERIES:
+        for user_id, _name, item_id, item, label, rel, _tid, _tname in graph.ro_query(_ACCOUNT_QUERIES[measure], {"scopes": scopes}).result_set:
+            identity = accounts.get(user_id)
+            if identity is None:
+                continue
+            tally = tallies.setdefault(identity.id, _Tally(identity.id, identity.name))
+            if item_id not in tally.items:
+                tally.items[item_id] = (item, rel)
+                tally.steps.append(PathStep(identity.name, rel, item, from_id=user_id, to_id=item_id, from_label="ExternalUser", to_label=label))
+    return tallies
+
+
+def _person_tally(graph, measure: str, scopes: list[str]) -> dict[str, _Tally]:
     rows = graph.ro_query(_MEASURE_QUERIES[measure], {"scopes": scopes, "excluded": sorted(kinds.NOT_DEPENDABLE)}).result_set
     rows.sort(key=lambda row: (_ORDER.index(row[5]) if row[5] in _ORDER else len(_ORDER), str(row[3])))
     tallies: dict[str, _Tally] = {}

@@ -137,6 +137,11 @@ _NAMES_A_TEAM = re.compile(r"\bteam\b|\b(?:for|in|on|within)\s+(?:the\s+|our\s+)
 _NEWEST = re.compile(r"\b(?:newest|latest|most recent|last) decision(?P<many>s)?\b(?!.*\b(?:about|on|for|in)\s+\S)", re.IGNORECASE)
 # Services only: "tickets with no owner" asks about tickets, which have no owner filter.
 _UNOWNED = re.compile(r"\b(?:no|without an?) owners?\b|\bunowned\b|\bnobody owns\b", re.IGNORECASE)
+_KEY_PEOPLE = re.compile(
+    r"\b(?:most (?:important|critical|central|valuable)|key|load[- ]bearing) (?:people|persons|engineers|employees|folks)\b"
+    r"|\bwho (?:is|are) (?:the |our )?(?:most (?:important|critical)|bus factor|single points? of failure)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
 _NOT_SERVICES = re.compile(r"\b(?:tickets?|decisions?|docs?|documents?|pull requests?|prs?|accounts?|deals?|people|teams?)\b", re.IGNORECASE)
 # A person leaving, not a service failing. "who is the only one who knows billing" names a
 # service and stays on who_knows; "what is Arjun the only one who knows" names a person, and so
@@ -297,6 +302,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
         return "team_dependencies", {"name": text, "direction": "dependencies" if _TEAM_NEEDS.search(text) else "dependents"}
     if _DECISION_HEALTH.search(text):
         return "decision_health", {"name": text}
+    if _KEY_PEOPLE.search(text):
+        # "who are the most important people", "who is the bus factor": people ranked by what they hold,
+        # not services by PageRank, and not one person leaving.
+        return "people_ranking", {"measure": "holds", "team": text}
     if _PEOPLE_RANK.search(text):
         from src.domain.knowledge.people_insights import measure_in
 
@@ -308,6 +317,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
         return "find", {"label": "Decision", "standing": True, **({} if newest.group("many") else {"limit": 1})}
     if _UNOWNED.search(text) and not _NOT_SERVICES.search(text):
         return "find", {"label": "Service", "owner": "none"}
+    nouns = [noun.lower() for noun in _NOT_SERVICES.findall(text)]
+    if _UNOWNED.search(text) and nouns and all(noun.startswith("account") for noun in nouns):
+        # "which accounts have no owner": the CRM's accounts nobody owns, linked or not.
+        return "find", {"label": "Service", "kind": "account", "owner": "none"}
     if _CHANGED.search(text):
         from src.domain.knowledge.what_changed import only_in
 
@@ -677,6 +690,7 @@ def rank_people_tiered(path: list[PathStep], target: Entity) -> list[tuple[tuple
     scores: dict[tuple[str, str], int] = {}
     ticket_work: dict[tuple[str, str], int] = {}
     direct: set[tuple[str, str]] = set()
+    tickets_of: dict[tuple[str, str], set[str]] = {}
     names: dict[tuple[str, str], str] = {}
     reasons: dict[tuple[str, str], dict[str, list[str]]] = {}
     for step in path:
@@ -689,6 +703,7 @@ def rank_people_tiered(path: list[PathStep], target: Entity) -> list[tuple[tuple
         leads_to_target = step.to_id != target_id if step.to_id and target_id else step.to_name != target.name
         if step.to_label == "Ticket" and step.rel in TICKET_RELS and leads_to_target:
             ticket_work[who] = max(ticket_work.get(who, 0), weight)
+            tickets_of.setdefault(who, set()).add(step.to_id or step.to_name)
             scores.setdefault(who, 0)
         else:
             scores[who] = scores.get(who, 0) + weight
@@ -705,7 +720,8 @@ def rank_people_tiered(path: list[PathStep], target: Entity) -> list[tuple[tuple
         return 1 if who[0] in ACCOUNT_LABELS and who not in direct else 0
 
     ranked = []
-    for who in sorted(scores, key=lambda who: (tier(who), -scores[who], names[who], who)):
+    # Among equals, more tickets first: twelve assigned tickets ahead of one.
+    for who in sorted(scores, key=lambda who: (tier(who), -scores[who], -len(tickets_of.get(who, ())), names[who], who)):
         # "worked on it and TKT-102, wrote notebook#52": one clause per verb, "it" first.
         clauses = [f"{verb} {join_names(sorted(objects, key=lambda what: what != 'it'))}" for verb, objects in reasons[who].items()]
         ranked.append((who, names[who], scores[who], ", ".join(clauses), tier(who)))

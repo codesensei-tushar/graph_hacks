@@ -151,7 +151,11 @@ _BLOCKERS = _q(
     """
 )
 _ACCOUNTS_OF ="MATCH (a)-[:IS]->(p:Person {id: $id}) RETURN a.id"
-_OWNED = "MATCH (:Person)-[:OWNS]->(x:Service) WHERE x.id IN $ids RETURN DISTINCT x.id"
+# Owned by a person, or by a connector user (an unlinked HubSpot owner is an owner all the same).
+_OWNED = (
+    "MATCH (o)-[:OWNS]->(x:Service) WHERE x.id IN $ids AND labels(o)[0] IN ['Person', 'ExternalUser']"
+    " AND coalesce(o.scope, 'org_shared') IN $scopes RETURN DISTINCT x.id, labels(o)[0], o.name, o.source"
+)
 
 _NOUNS = {
     "Service": ("service", "services"), "Ticket": ("ticket", "tickets"), "Decision": ("decision", "decisions"),
@@ -283,6 +287,9 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
     qualified = ", ".join(allowed[key].words.format(value=_named(entity)) for key, entity in named.items())
     described = " ".join(part for part in (_noun(chosen, enums, len(ordered)), _deal_words(enums, filters), qualified) if part)
     hints = "".join(f" {people.unlinked_hint(entity)}" for entity in named.values() if people.is_account(entity))
+    if unlinked := enums.get("unlinked_owners"):
+        counted = [f"{count} by {who}" for who, count in sorted(unlinked.items(), key=lambda pair: (-pair[1], pair[0]))[:3]]
+        hints += f" Not counted as unowned: owned by someone not linked to a person ({join_names(counted)})."
     if not ordered:
         result.answer = f"No {described}.{hints}"
         return result
@@ -373,7 +380,16 @@ def _apply_enums(graph, label: str, rows: dict[str, Row], enums: dict, scopes: l
         replaced = _replaced(graph, list(rows), scopes)
         rows = {node_id: row for node_id, row in rows.items() if (node_id not in replaced) == enums["standing"]}
     if enums.get("unowned"):
-        owned = {row[0] for row in graph.ro_query(_OWNED, {"ids": list(rows)}).result_set}
+        owners = graph.ro_query(_OWNED, {"ids": list(rows), "scopes": list(scopes)}).result_set
+        owned = {row[0] for row in owners}
+        # Owned only by connector users nobody linked to a person: owned, and told apart in the answer.
+        by_person = {node_id for node_id, label, _name, _source in owners if label == "Person"}
+        unlinked: dict[str, int] = {}
+        for node_id, label, name, source in owners:
+            if label == "ExternalUser" and node_id not in by_person:
+                shown = people.account_label(name, source)
+                unlinked[shown] = unlinked.get(shown, 0) + 1
+        enums["unlinked_owners"] = unlinked
         rows = {node_id: row for node_id, row in rows.items() if node_id not in owned}
     return rows
 
