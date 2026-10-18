@@ -16,8 +16,8 @@ on the framework in [CONNECTORS.md](CONNECTORS.md); the code is `src/connectors/
 | A deal that is open, or was created or closed in the last 12 months | `(deal owner)-[:WORKED_ON {evidence: 'deal', stage}]->(account)`, one edge per owner, with the stage of their latest deal. A deal is never a node of its own. |
 
 `OWNS` and `WORKED_ON` start at the owner's Person when their account is linked, so
-`who_owns`, `who_knows`, `if_person_leaves` and the team pages count them like any other
-ownership. An unlinked owner still counts in `who_knows`, under their HubSpot name.
+`who_owns`, `who_knows` and `if_person_leaves` count them like any other ownership. An unlinked
+owner still counts in `who_knows`, under their HubSpot name.
 
 An account node carries `name`, `url` (the record in HubSpot), `state`, `status` (the raw
 lifecycle stage), `source_updated_at`, `summary` ("HubSpot company, lifecycle stage customer;
@@ -98,8 +98,8 @@ last synced until a later version notices removals.
 
 An owner becomes a Person's account only when their email is the email of exactly one Person
 in the graph; the connector never creates a Person. Until then the owner is an account of its
-own: `who_knows` names them under their HubSpot name, while `who_owns` and the team pages only
-count Persons. Once a Person with that email arrives (a team file, `onboard team:` or Slack),
+own: `who_knows` names them under their HubSpot name, while `who_owns` and `if_person_leaves`
+only count Persons. Once a Person with that email arrives (a team file, `onboard team:` or Slack),
 the next sync links them and their `OWNS` and `WORKED_ON` edges move onto the Person. The same
 people then cover Jira and HubSpot alike.
 
