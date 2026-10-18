@@ -32,15 +32,19 @@
 
 :root {
   color-scheme: light;
-  --bg: #f6f4ef;
-  --surface: #fcfcfb;
-  --surface-2: #f0eee8;
-  --surface-3: #e7e4dc;
-  --line: #d9d7cf;
-  --line-2: #c6c3b9;
-  --ink: #14181f;
-  --ink-2: #52514e;
-  --ink-3: #6e6c66;
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-2: #eff1f8;
+  --surface-3: #e4e7f2;
+  --line: rgba(18, 22, 48, 0.10);
+  --line-2: rgba(18, 22, 48, 0.18);
+  --ink: #11142a;
+  --ink-2: #484d68;
+  --ink-3: #62678a;
+  /* The horizon behind the ask box: an indigo glow and the haze under it. */
+  --horizon: #5257e8;
+  --horizon-glow: rgba(82, 87, 232, 0.18);
+  --horizon-haze: rgba(223, 225, 251, 0.85);
   --path: #0e8fa6;
   --path-ink: #0a7387;
   --on-path: #ffffff;
@@ -76,15 +80,18 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0b0d12;
-    --surface: #11141b;
-    --surface-2: #171b24;
-    --surface-3: #1e232e;
-    --line: #252a36;
-    --line-2: #333a49;
-    --ink: #eceef3;
-    --ink-2: #a7aebe;
-    --ink-3: #7d8597;
+    --bg: #08091a;
+    --surface: #0f1122;
+    --surface-2: #15182b;
+    --surface-3: #1c2036;
+    --line: rgba(200, 205, 255, 0.09);
+    --line-2: rgba(200, 205, 255, 0.16);
+    --ink: #eef0fb;
+    --ink-2: #aab0cf;
+    --ink-3: #8288ab;
+    --horizon: #4b50e6;
+    --horizon-glow: rgba(75, 80, 230, 0.32);
+    --horizon-haze: rgba(38, 43, 143, 0.45);
     --path: #2dd4e6;
     --path-ink: #2dd4e6;
     --on-path: #0b0d12;
@@ -103,15 +110,18 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b0d12;
-  --surface: #11141b;
-  --surface-2: #171b24;
-  --surface-3: #1e232e;
-  --line: #252a36;
-  --line-2: #333a49;
-  --ink: #eceef3;
-  --ink-2: #a7aebe;
-  --ink-3: #7d8597;
+  --bg: #08091a;
+  --surface: #0f1122;
+  --surface-2: #15182b;
+  --surface-3: #1c2036;
+  --line: rgba(200, 205, 255, 0.09);
+  --line-2: rgba(200, 205, 255, 0.16);
+  --ink: #eef0fb;
+  --ink-2: #aab0cf;
+  --ink-3: #8288ab;
+  --horizon: #4b50e6;
+  --horizon-glow: rgba(75, 80, 230, 0.32);
+  --horizon-haze: rgba(38, 43, 143, 0.45);
   --path: #2dd4e6;
   --path-ink: #2dd4e6;
   --on-path: #0b0d12;
@@ -228,12 +238,14 @@ code { font-variant-ligatures: none; }
 
 .hero { position: relative; padding: 40px 0 32px; isolation: isolate; overflow-x: clip; }
 .hero::before {
-  /* A faint dot grid that fades out: the canvas the graph sits on. */
-  content: ""; position: absolute; inset: 0 0 -80px; z-index: -1; pointer-events: none;
-  background-image: radial-gradient(color-mix(in oklab, var(--ink-3) 30%, transparent) 1px, transparent 1.2px);
-  background-size: 22px 22px;
-  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 70% 35%, #000 20%, transparent 75%);
-  mask-image: radial-gradient(ellipse 70% 60% at 70% 35%, #000 20%, transparent 75%);
+  /* The horizon: an indigo glow centred under the ask box in the left column, a haze under it,
+     fading out downwards. The live panel on the right stays clean. */
+  content: ""; position: absolute; inset: 0 0 -120px; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 28% 82%, var(--horizon-glow), transparent 70%),
+    radial-gradient(85% 38% at 28% 104%, var(--horizon-haze), transparent 72%);
+  -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent);
+  mask-image: linear-gradient(180deg, #000 72%, transparent);
 }
 /* Top-aligned, so the live panel never moves when the copy beside it reflows (a font swap, the chips). */
 .hero-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: start; }
@@ -687,6 +699,11 @@ footer.site a { color: var(--ink-2); }
   .depths, .path-head h3 + .copy-link { margin-left: 0; }
   .top nav { display: none; }
   .hero { padding: 24px 0 8px; }
+  .hero::before {
+    background:
+      radial-gradient(60% 50% at 50% 70%, var(--horizon-glow), transparent 70%),
+      radial-gradient(85% 38% at 50% 100%, var(--horizon-haze), transparent 72%);
+  }
   .hero h1 { font-size: clamp(2.15rem, 9.4vw, 2.5rem); }
   .hero .lede { font-size: 1rem; margin-bottom: 20px; }
   .eyebrow { font-size: 0.68rem; letter-spacing: 0.04em; margin-bottom: 14px; }
