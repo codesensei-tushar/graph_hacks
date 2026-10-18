@@ -63,6 +63,7 @@ EXAMPLES: dict[str, list[str]] = {
         "who is Arjun Mehta",
         "what changed this week",
         "which teams depend on platform",
+        "who is the go-to for postgres right now",
         "who knows the payments gateway",
     ],
     "company-brain": [
@@ -132,9 +133,9 @@ RATE_LIMIT = 60
 RATE_WINDOW_SECONDS = 60.0
 # A client may spend this many calls at once; the budget then refills at RATE_LIMIT per window.
 RATE_BURST = 30
-# Tools whose queries walk far (paths between far nodes, whole-graph rankings, a team's
+# Tools whose queries walk far (paths between far nodes, whole-graph rankings of things or people, a team's
 # whole brief) cost this many tokens a call, so one address gets RATE_LIMIT / HEAVY_COST of them a minute.
-HEAVY_TOOLS = frozenset({"path_between", "risk_map", "onboarding_brief"})
+HEAVY_TOOLS = frozenset({"path_between", "risk_map", "onboarding_brief", "people_ranking"})
 HEAVY_COST = 5
 # Explore at this depth or more is heavy too.
 HEAVY_EXPLORE_DEPTH = 2

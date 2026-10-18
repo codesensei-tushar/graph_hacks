@@ -108,6 +108,34 @@ _DECISION_HEALTH = re.compile(
     r"|\bdecision health\b|\b(?:any|which) decisions (?:in conflict|conflict|are stale|are outdated|need)\b|\bhealth of (?:our )?decisions\b",
     re.IGNORECASE,
 )
+# People ranked on a measure: "who reviewed the most code", "who is the busiest person", "top
+# reviewers". people_insights.measure_in picks the measure from the verb.
+_PEOPLE_RANK = re.compile(
+    r"\bwho (?:has |have )?(?:reviewed|owns?|worked on|works on|wrote|authored|proposed|approved|knows?|holds?) the most\b(?! about\b)"
+    r"|\bwho (?:has|carries) the most (?:open )?(?:tickets|work|pull requests|prs)\b|\bwho has the most on (?:their|his|her) plate\b"
+    r"|\bwho(?:'s| is) (?:the )?(?:busiest|most loaded|most overloaded|overloaded|most stretched)\b"
+    r"|\b(?:busiest|most active|most prolific) (?:people|person|reviewers?|engineers?|authors?|teammates?)\b"
+    r"|\btop (?:reviewers?|contributors?|owners?|authors?)\b|\bwho bridges the most teams\b",
+    re.IGNORECASE,
+)
+# Who to ask now, with dates: "who is the go-to for postgres right now", "who last worked on billing",
+# "when did we last touch the auth service". Before _ASK_WHO, which would answer undated.
+_GO_TO = re.compile(
+    r"\bgo[- ]to (?:person |people )?(?:for|on)\b|\bwho(?:'s| is)? .*\b(?:right now|these days|currently|lately)\b"
+    r"|\b(?:who|when) (?:last|most recently) (?:worked on|touched|changed|reviewed)\b"
+    r"|\bwhen did (?:we|anyone|someone|somebody) last\b|\bwho (?:has )?(?:last|recently) (?:worked on|touched|changed)\b",
+    re.IGNORECASE,
+)
+# Two superlatives find answers: the newest standing decision, and the services nobody owns.
+# A question that may name a team: "the biggest risks for the payments team", "risks in platform".
+# risk_map resolves it, and keeps the company view when it is no team.
+_NAMES_A_TEAM = re.compile(r"\bteam\b|\b(?:for|in|on|within)\s+(?:the\s+|our\s+)?(?!company\b|org\b|whole\b)\w+", re.IGNORECASE)
+# The newest decision, or the newest few ("the latest decisions"), with nothing they are about:
+# "the latest decision about billing" goes on to decision_trace.
+_NEWEST = re.compile(r"\b(?:newest|latest|most recent|last) decision(?P<many>s)?\b(?!.*\b(?:about|on|for|in)\s+\S)", re.IGNORECASE)
+# Services only: "tickets with no owner" asks about tickets, which have no owner filter.
+_UNOWNED = re.compile(r"\b(?:no|without an?) owners?\b|\bunowned\b|\bnobody owns\b", re.IGNORECASE)
+_NOT_SERVICES = re.compile(r"\b(?:tickets?|decisions?|docs?|documents?|pull requests?|prs?|accounts?|deals?|people|teams?)\b", re.IGNORECASE)
 # A person leaving, not a service failing. "who is the only one who knows billing" names a
 # service and stays on who_knows; "what is Arjun the only one who knows" names a person, and so
 # does "the bus factor on arjun"; "the bus factor for billing" names a service and stays on who_knows.
@@ -250,11 +278,23 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     if _GROUPS.search(text):
         return "working_groups", {}
     if _RISK.search(text):
-        return "risk_map", {}
+        # A team in the question narrows the map to what it runs; none keeps the company view.
+        return "risk_map", {"team": text} if _NAMES_A_TEAM.search(text) else {}
     if _TEAM_DEPS.search(text):
         return "team_dependencies", {"name": text, "direction": "dependencies" if _TEAM_NEEDS.search(text) else "dependents"}
     if _DECISION_HEALTH.search(text):
         return "decision_health", {"name": text}
+    if _PEOPLE_RANK.search(text):
+        from src.domain.knowledge.people_insights import measure_in
+
+        return "people_ranking", {"measure": measure_in(text), "team": text}
+    if _GO_TO.search(text):
+        return "go_to", {"name": text}
+    newest = _NEWEST.search(text)
+    if newest:
+        return "find", {"label": "Decision", "standing": True, **({} if newest.group("many") else {"limit": 1})}
+    if _UNOWNED.search(text) and not _NOT_SERVICES.search(text):
+        return "find", {"label": "Service", "owner": "none"}
     if _CHANGED.search(text):
         from src.domain.knowledge.what_changed import only_in
 
@@ -671,11 +711,25 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
     return bus_factor.if_person_leaves(question, scopes)
 
 
-def risk_map(scopes: list[str]) -> ToolResult:
+def risk_map(scopes: list[str], team: str | None = None) -> ToolResult:
     """Lives in ``risk_map.py``, which ranks people with ``knowers`` here. Kept here for the keyword router."""
     from src.domain.knowledge import risk_map as risk
 
-    return risk.risk_map(scopes)
+    return risk.risk_map(scopes, team)
+
+
+def people_ranking(measure: str | None, scopes: list[str], team: str | None = None, limit=None) -> ToolResult:
+    """Lives in ``people_insights.py``, which reads decisions (and so the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import people_insights
+
+    return people_insights.people_ranking(measure, scopes, team, limit)
+
+
+def go_to(name: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``people_insights.py``, which ranks people with ``knowers`` here. Kept here for the keyword router."""
+    from src.domain.knowledge import people_insights
+
+    return people_insights.go_to(name, scopes)
 
 
 def team_dependencies(name: str | None, scopes: list[str], direction: str | None = None) -> ToolResult:
@@ -741,7 +795,9 @@ _ROUTED = {
     "decision_trace": lambda args, scopes: decision_trace(args["topic"], scopes),
     "decision_pressure": lambda args, scopes: decision_pressure(args["topic"], scopes),
     "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
-    "risk_map": lambda args, scopes: risk_map(scopes),
+    "risk_map": lambda args, scopes: risk_map(scopes, args.get("team")),
+    "people_ranking": lambda args, scopes: people_ranking(args.get("measure"), scopes, args.get("team"), args.get("limit")),
+    "go_to": lambda args, scopes: go_to(args["name"], scopes),
     "person_profile": lambda args, scopes: person_profile(args["name"], scopes),
     "team_dependencies": lambda args, scopes: team_dependencies(args.get("name"), scopes, args.get("direction")),
     "decision_health": lambda args, scopes: decision_health(args.get("name"), scopes),

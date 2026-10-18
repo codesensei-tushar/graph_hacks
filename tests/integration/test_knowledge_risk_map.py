@@ -271,7 +271,9 @@ class RiskMapEdgeCasesTest(_Graph):
             graph.query("MATCH (s:Service {id: 'cron'}) DETACH DELETE s")
 
     def test_the_tool_needs_no_arguments(self):
-        self.assertEqual(catalogue.get_tool("risk_map").args_schema, {"type": "object", "properties": {}, "required": [], "additionalProperties": False})
+        # A team is optional: without one the map is the whole company.
+        schema = catalogue.get_tool("risk_map").args_schema
+        self.assertEqual((schema["required"], list(schema["properties"]), schema["additionalProperties"]), ([], ["team"], False))
         self.assertEqual(risk_map.MAX_LISTED, 3)
 
 
