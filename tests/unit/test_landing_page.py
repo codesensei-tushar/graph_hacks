@@ -19,7 +19,7 @@ from src.domain.knowledge.algorithms import depth_in  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-PAGE_SCRIPTS = ("shell.js", "graph.js", "hero.js", "app.js")
+PAGE_SCRIPTS = ("shell.js", "graph.js", "hero.js", "riskmap.js", "app.js")
 ALLOWED_ROUTES = {"/api/ask", "/api/ask/tools", "/api/ask/proof", "/api/teams", "/api/team/", "/api/graph/stats", "/api/graph/sample"}
 VOID = {"meta", "link", "input", "br", "img", "hr", "source", "path", "circle", "rect", "polygon", "line"}
 
@@ -151,7 +151,7 @@ class WeightTest(unittest.TestCase):
         self.assertTrue((STATIC / "fonts" / "OFL.txt").exists())
         own_js = sum((STATIC / name).stat().st_size for name in PAGE_SCRIPTS)
         self.assertLess(own_js, 80 * 1024)
-        page = own_js + sum((STATIC / name).stat().st_size for name in ("index.html", "style.css")) + sum(
+        page = own_js + sum((STATIC / name).stat().st_size for name in ("index.html", "style.css", "riskmap.css")) + sum(
             (STATIC / "fonts" / name).stat().st_size for name in fonts
         )
         self.assertLess(page, 300 * 1024)
@@ -247,3 +247,22 @@ class CopyLinkTest(unittest.TestCase):
         self.assertIn('head.insertBefore(copy, $(".replay", head));', self.app_js)
         for label in ('"Copy link"', '"Copied"', '"Not copied"'):
             self.assertIn(label, self.app_js)
+
+
+class RiskMapTest(unittest.TestCase):
+    """The risk_map grid (riskmap.js) renders only when the answer carries a risk_map grid."""
+
+    def test_the_hook_is_guarded_and_sits_between_the_answer_text_and_the_path(self):
+        app_js = (STATIC / "app.js").read_text()
+        render = app_js[app_js.index("function render(data, question)"):]
+        hook = 'if (data.grid && data.grid.kind === "risk_map" && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });'
+        self.assertEqual(app_js.count("RiskMap.render("), 1)
+        self.assertLess(render.index("data.answer));"), render.index(hook))
+        self.assertLess(render.index(hook), render.index("BrainGraph.renderPath("))
+
+    def test_the_page_loads_the_grid_before_app_js(self):
+        resources = _parse("index.html").resources
+        scripts = [resource.split("?")[0] for resource in resources if resource.endswith(".js") or ".js?" in resource]
+        self.assertLess(scripts.index("/static/riskmap.js"), scripts.index("/static/app.js"))
+        self.assertIn("/static/riskmap.css", [resource.split("?")[0] for resource in resources])
+        self.assertIn("window.RiskMap = { render };", (STATIC / "riskmap.js").read_text())
