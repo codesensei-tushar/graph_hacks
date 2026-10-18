@@ -4,122 +4,319 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Company Brain</title>
-<meta name="description" content="A Slack agent that answers from one FalkorDB graph and shows the path behind every answer. Ask the graph here.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='8' cy='16' r='4' fill='%232a78d6'/%3E%3Ccircle cx='24' cy='8' r='4' fill='%23eb6834'/%3E%3Ccircle cx='24' cy='24' r='4' fill='%231baf7a'/%3E%3Cpath d='M11 14l10-5M11 18l10 5' stroke='%23807e77' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/static/style.css">
+<meta name="description" content="Ask how your company works. Every answer shows the path it walked: a Slack agent over one FalkorDB graph, live on this page.">
+<meta name="theme-color" content="#0b0d12" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M9.5 17.6 22.5 23.4' stroke='%237d8597' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M9.5 14.4 22.5 8.6' stroke='%232dd4e6' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='6' cy='16' r='4.2' fill='%237c8cff'/%3E%3Crect x='21.5' y='3' width='8.5' height='8.5' rx='2' fill='%23f0703a'/%3E%3Cpath d='M25.8 20.5l4.5 4.5-4.5 4.5-4.5-4.5z' fill='%232ec48c'/%3E%3C/svg%3E">
+<link rel="preload" href="/static/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<script>try { var t = localStorage.getItem("brain-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <a class="brand" href="/">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="8" cy="16" r="4" fill="var(--person)"/><circle cx="24" cy="8" r="4" fill="var(--service)"/><circle cx="24" cy="24" r="4" fill="var(--knowledge)"/><path d="M11 14l10-5M11 18l10 5" stroke="var(--ink-3)" stroke-width="2"/></svg>
+<a class="skip" href="#main">Skip to the content</a>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Company Brain, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path class="mark-edge" d="M9.5 17.6 22.5 23.4" stroke-width="2.2" stroke-linecap="round"/><path class="mark-walk" d="M9.5 14.4 22.5 8.6" stroke-width="2.4" stroke-linecap="round"/><circle cx="6" cy="16" r="4.2" fill="var(--person)"/><rect x="21.5" y="3" width="8.5" height="8.5" rx="2" fill="var(--service)"/><path d="M25.8 20.5l4.5 4.5-4.5 4.5-4.5-4.5z" fill="var(--knowledge)"/></svg>
       Company Brain
     </a>
-    <nav>
+    <nav aria-label="Sections">
       <a href="#ask">Ask</a>
-      <a href="#teams">Teams</a>
-      <a href="#how">How it answers</a>
       <a href="#proof">Proof</a>
-      <a href="#tools">Tools</a>
-      <a href="#demo">Demo</a>
-      <a href="https://github.com/codesensei-tushar/graph_hacks">GitHub</a>
+      <a href="#teams">Teams</a>
+      <a href="#how">How it works</a>
+      <a href="#builders">Builders</a>
     </nav>
-  </header>
+    <div class="top-actions">
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
 
-  <section class="hero">
-    <h1>One graph of how the company is connected.<br>Answers that show the path.</h1>
-    <p class="lede">Company Brain is a Slack agent over a single FalkorDB graph. People, teams, services, documents, tickets, decisions and chat are nodes and edges; Slack and GitHub feed it live. Ask who owns billing, why a decision was made, or what breaks if auth goes down, and it answers by walking the graph, then prints the edges it used.</p>
-    <ul class="claims">
-      <li><b>The agent never writes Cypher.</b> It picks from a fixed catalogue of hand-written, parameterised queries.</li>
-      <li><b>The answer is the path.</b> Every tool returns the exact edges it walked, as <code>A -[REL]-&gt; B</code>.</li>
-      <li><b>It never guesses.</b> Names resolve against the graph first; a miss returns the nearest names.</li>
-      <li><b>Permissions are a graph query.</b> Every read is filtered by the rooms and repos the asker can see.</li>
-    </ul>
-  </section>
+<main id="main">
+  <!-- 2.1 Hero: the promise, the ask box, live counts and a live slice of the graph. -->
+  <section class="hero" id="ask" aria-labelledby="hero-title">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Graph Hacks · Track 03 · Company Brain on FalkorDB</p>
+        <h1 id="hero-title">Ask how your company works. <span class="tone">Every answer shows the <span class="walk">path</span> it walked.</span></h1>
+        <p class="lede">People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.</p>
+        <div class="ask-area">
+          <form id="ask-form" class="askbar" role="search" autocomplete="off" action="/" method="get">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="5" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M7.3 10.9 16.7 6.1M7.3 13.1l9.4 4.8"/></svg>
+            <input type="text" id="q" name="q" maxlength="300" placeholder="Ask who owns what, and why" aria-label="Your question">
+            <button class="btn" id="ask-btn" type="submit">Ask <kbd aria-hidden="true">↵</kbd></button>
+          </form>
+          <ul class="chips" id="chips" aria-label="Example questions"></ul>
+          <p class="quiet">It never writes Cypher, never guesses, and never shows you what you cannot read.</p>
+        </div>
+        <div class="hero-actions">
+          <a class="btn btn-ghost" href="#how">How it works <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
 
-  <section class="ask" id="ask">
-    <h2>Ask the graph</h2>
-    <p class="sub">The same tools the Slack bot runs, read-only, reading what a public channel reads. <span id="company"></span></p>
-    <form id="ask-form" autocomplete="off">
-      <input type="text" id="q" name="q" placeholder="who owns billing, and who else has worked on it" aria-label="Your question">
-      <button class="btn" id="ask-btn" type="submit">Ask</button>
-    </form>
-    <ul class="chips" id="chips" aria-label="Example questions"></ul>
-
-    <div class="answer" id="answer" aria-live="polite">
-      <div class="status" id="status"></div>
-      <div id="out"></div>
+      <div class="hero-live">
+        <div class="live-glow" aria-hidden="true"></div>
+        <figure class="live" id="live">
+          <div class="live-bar">
+            <span class="dot" aria-hidden="true"></span>
+            <span class="grow" id="live-name">Live sample of the graph</span>
+            <span class="count" id="live-count"></span>
+          </div>
+          <div class="live-stage" id="live-stage">
+            <p class="live-wait" id="live-wait">Loading the graph…</p>
+            <noscript><p class="live-wait">This part needs JavaScript.</p></noscript>
+          </div>
+          <figcaption class="live-foot">
+            <ul class="legend" id="live-legend" aria-label="Node families"></ul>
+            <p class="ticker" id="live-ticker"></p>
+          </figcaption>
+        </figure>
+        <dl class="stats" id="stats" aria-label="Live counts from the graph">
+          <div class="stat sk"><dt data-one="person">people</dt><dd data-stat="Person"></dd></div>
+          <div class="stat sk"><dt data-one="thing teams run">things teams run</dt><dd data-stat="Service"></dd></div>
+          <div class="stat sk"><dt data-one="decision">decisions</dt><dd data-stat="Decision"></dd></div>
+          <div class="stat sk"><dt data-one="edge">edges</dt><dd data-stat="edges"></dd></div>
+        </dl>
+      </div>
     </div>
   </section>
 
-  <section class="block" id="teams">
-    <h2>For every team</h2>
-    <p class="sub">Engineering was first. Sales, support and operations fit the same graph: a renewals process depends on the CRM, a pricing decision supersedes the last one, and the bot answers who owns what and why, with the path, for them too. Each team has a page: its people, what it runs grouped by kind, the decisions that stand and what was said.</p>
-    <ul class="team-cards" id="team-cards"><li class="note">Loading the teams…</li></ul>
+  <div class="wrap">
+    <!-- 2.2 Live proof: the answer to whatever was asked above, with the walk. -->
+    <section class="block" id="live-answer" aria-labelledby="live-title">
+      <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Live</p>
+      <h2 id="live-title">Ask the graph behind this project.</h2>
+      <p class="sub"><span id="graph-line">This page reads the live graph this server runs.</span> Pick a question or write your own. The answer comes back with its path, drawn in the order it was walked.</p>
+      <div class="answer" id="answer">
+        <div class="answer-bar"><span>answer</span><span class="q" id="answer-q"></span></div>
+        <div class="answer-body" aria-live="polite">
+          <div class="status" id="status"></div>
+          <div id="out">
+            <div class="answer-empty">
+              <p>Ask above, or pick one of the example questions. The walk draws here, edge by edge, with its <code>A -[REL]-&gt; B</code> lines.</p>
+              <noscript><p>This part needs JavaScript.</p></noscript>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="small">Public and read-only: public channels only, no model, answers cached for a minute.</p>
+    </section>
 
-    <div class="onboard" id="onboard" hidden>
-      <h3>Onboard your team</h3>
-      <p>Type one line in Slack. The bot shows an Approve card that counts what it will create before anything is written, and the reply cites the edges it wrote.</p>
-      <pre><code>onboard team: Sales | members: @priya @dev | owns: Renewals (process), HubSpot (system), Pricing playbook (playbook) | decision: annual plans only, decided 2026-09-01</code></pre>
-      <p class="note">Kinds: service, system, process, product, account, policy, playbook. Writes merge by id and never delete. A larger team imports from a TOML file with the same fields: the team, its members, what it runs (each with a kind and an owner), and its decisions. The guide is <code>docs/ONBOARDING-TEAMS.md</code>, the blank template <code>docs/templates/team.example.toml</code>, and a worked example <code>examples/teams/quillfern-sales.toml</code>.</p>
-    </div>
-  </section>
+    <!-- 2.3 Why the graph matters: the ablation, loaded when it scrolls into view. -->
+    <section class="block" id="proof" aria-labelledby="proof-title">
+      <h2 id="proof-title">Take FalkorDB out, and the answers go with it.</h2>
+      <p class="sub">The same questions run twice: once against FalkorDB, once with every graph read returning nothing.</p>
+      <div class="proof-head">
+        <p class="proof-line" id="proof-line"><span class="sk-line" aria-hidden="true"></span></p>
+        <p class="note" id="proof-refusal"></p>
+      </div>
+      <p id="proof-status" class="note">The proof runs when this section comes into view.<noscript> This part needs JavaScript.</noscript></p>
+      <div class="proof-wrap">
+        <table class="tools proof" id="proof-table">
+          <thead><tr><th scope="col">Question</th><th scope="col">Tool</th><th scope="col">With the graph</th><th scope="col">Without</th><th scope="col">Result</th></tr></thead>
+          <tbody id="proof-body">
+            <tr class="sk-row"><td colspan="5"></td></tr><tr class="sk-row"><td colspan="5"></td></tr><tr class="sk-row"><td colspan="5"></td></tr>
+            <tr class="sk-row"><td colspan="5"></td></tr><tr class="sk-row"><td colspan="5"></td></tr><tr class="sk-row"><td colspan="5"></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
-  <section class="block" id="how">
-    <h2>How it answers</h2>
-    <p class="sub">The design the whole project hangs on: the graph decides what the agent can know and how it explains itself.</p>
-    <ul class="how">
-      <li><b>A fixed tool catalogue</b><p>Each tool is a hand-written, parameterised traversal with a JSON schema for its arguments. One structured call to Claude Haiku picks the tool and fills the arguments; a keyword router does the same job with no model, so every path works offline. No model-generated string ever reaches a query.</p></li>
-      <li><b>The path comes back with the answer</b><p>Every tool returns the edges it walked. The reply prints them, names the tool, and says whether the model or the keywords picked it. Explanation is the traversal, not a sentence written afterwards.</p></li>
-      <li><b>Refuse to guess</b><p>The names in a question are resolved against the graph before anything runs. A miss answers "Nothing in the graph matches" and offers the nearest candidates.</p></li>
-      <li><b>Decisions stay current</b><p>A decision recorded in a channel, after approval, supersedes the one it replaces and links to the documents, tickets and pull requests it is based on. Asking about the old one answers "no longer current", then the current one, with both dates. Nothing is deleted.</p></li>
-      <li><b>Writes wait for a human</b><p>Tools that write the graph never run from the loop. The turn suspends with an Approve card that names the resolved target, and the write lands only after a click.</p></li>
-      <li><b>Algorithms as tools</b><p>PageRank over <code>DEPENDS_ON</code> ranks load-bearing services, a blast radius names the connector, counted from the routes it walked, <code>algo.SPpaths</code> explains why two things are connected, and label propagation finds who actually works together.</p></li>
-      <li><b>Scopes per room</b><p>Every node written from Slack or GitHub carries the scope of the public channel, private channel, DM or private repo it came from. Every query ends with the same filter on what the asker may read.</p></li>
-      <li><b>Take FalkorDB out and nothing answers</b><p>A proof route runs the same questions with every graph read returning nothing; all but the refusal collapse. FalkorDB is the only store, including the scheduler, approvals and dedupe keys.</p></li>
-    </ul>
-  </section>
+    <!-- 2.4 Every team. -->
+    <section class="block" id="teams" aria-labelledby="teams-title">
+      <h2 id="teams-title">Not only engineering.</h2>
+      <p class="sub">A <code>Service</code> node has a kind: a service, a system, a process, a product, an account, a policy or a playbook. A team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as a billing service, in their own words: a process stalls, a playbook no longer applies.</p>
+      <ul class="team-cards" id="team-cards">
+        <li class="sk-card" aria-hidden="true"></li><li class="sk-card" aria-hidden="true"></li><li class="sk-card" aria-hidden="true"></li>
+      </ul>
+      <noscript><p class="note">The team list needs JavaScript.</p></noscript>
 
-  <section class="block" id="proof">
-    <h2>Take the graph out</h2>
-    <p class="sub">The same questions, once against FalkorDB and once with every graph read returning nothing. A refusal stays a refusal. This reads what a public channel reads; the admin route at <code>/api/proof</code> is the same report for the terminal.</p>
-    <p id="proof-status" class="note">Running the proof…</p>
-    <table class="tools" id="proof-table" hidden>
-      <thead><tr><th>Question</th><th>Tool</th><th>With the graph</th><th>Without it</th><th>Verdict</th></tr></thead>
-      <tbody id="proof-body"></tbody>
-    </table>
-  </section>
+      <div class="team-more">
+        <div class="panel onboard">
+          <h3>One file, written for people who do not write code.</h3>
+          <p>Import it and the team is in the graph. The import only merges and deletes nothing, and people Slack already knows are matched by email, never duplicated.</p>
+          <figure class="code">
+            <figcaption>from <a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/templates/team.example.toml">docs/templates/team.example.toml</a></figcaption>
+<pre tabindex="0"><code><span class="c-sec">[team]</span>
+name = <span class="c-str">"Support"</span>
+summary = <span class="c-str">"Answers customers, fixes what they report, and keeps the help centre current."</span>
 
-  <section class="block" id="tools">
-    <h2>The tool catalogue</h2>
-    <p class="sub">The read-only tools this page can run, straight from the catalogue the agent picks from. Tools that write (filing a ticket, recording a decision) exist too; they run in Slack after approval. The Cypher behind each one is in the <a href="https://github.com/codesensei-tushar/graph_hacks#cypher-queries-the-product-depends-on">README</a>.</p>
-    <table class="tools">
-      <thead><tr><th>Tool</th><th>Answers</th><th>Arguments</th></tr></thead>
-      <tbody id="tools-body"><tr><td colspan="3" class="note">Loading the catalogue…</td></tr></tbody>
-    </table>
-  </section>
+<span class="c-sec">[[members]]</span>
+name = <span class="c-str">"Alex Kim"</span>
+role = <span class="c-str">"Support lead"</span>
+email = <span class="c-str">"alex@example.com"</span>
 
-  <section class="block" id="demo">
-    <h2>The demo, in order</h2>
-    <p class="sub" id="demo-sub">The script for the company in this graph. Steps that write, or that depend on who is asking, run in Slack; the rest run here too.</p>
-    <ol class="demo-steps" id="demo-steps">
-      <li><code>who owns billing, and who else has worked on it</code><span class="exp">The owner, then everyone linked by past work, pull requests and reviews, ranked by their edges to the service.</span></li>
-      <li><code>why did we move the memory layer off postgres</code><span class="exp">The decision, who proposed and approved it, the RFC and the ticket it is based on, and the decision it superseded.</span></li>
-      <li>In Slack: <code>decision: move billing retries to the invoice worker</code>, then Approve<span class="exp">The card names what the write will replace. The new decision supersedes the old one; asking "why" again shows both, with dates.</span></li>
-      <li><code>what breaks if auth goes down</code>, then <code>and two hops out</code><span class="exp">Dependents grouped by hop, the main connectors counted from the walked routes, and the route to the invoice worker two hops out.</span></li>
-      <li>In Slack: <code>ticket: billing exports time out</code>, Approve, then <code>who should look at it</code><span class="exp">The ticket is in the graph and the next answer ranks the people connected to that service.</span></li>
-      <li><code>who knows the payments gateway</code><span class="exp">Not in the graph. The answer says so and names the nearest matches. It never guesses.</span></li>
-      <li>The same question from two DMs<span class="exp">Only the teammate whose linked GitHub account can read a private repo sees that repo's pull requests. The permission check is a graph query.</span></li>
-    </ol>
-  </section>
+<span class="c-sec">[[runs]]</span>
+name = <span class="c-str">"Ticket triage"</span>
+kind = <span class="c-str">"process"</span>
+owner = <span class="c-str">"Alex Kim"</span></code></pre>
+          </figure>
+          <p class="note">The guide: <a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/ONBOARDING-TEAMS.md">docs/ONBOARDING-TEAMS.md</a>.<span id="onboard-slack" hidden> A small team can also onboard from Slack with one line, <code>onboard team: Sales | members: @priya @dev | owns: Renewals (process)</code>, and an Approve card lists everything it will create before anything is written.</span></p>
+        </div>
 
-  <footer>
-    <p>Built for Graph Hacks 2026, Track 03 Company Brain; also entered in Tracks 01 and 02 with the same build. FalkorDB is the only store.</p>
-    <p><a href="https://github.com/codesensei-tushar/graph_hacks">Source and README</a> · <a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/SLACK.md">Install the Slack app</a> · <a href="/healthz">Health</a></p>
-    <p>AI assistance: parts of this project were written with Claude Code (Anthropic). The graph model, the tool catalogue, the scope rules and every query were decided and reviewed by the team.</p>
-  </footer>
-</div>
-<script src="/static/graph.js"></script>
-<script src="/static/app.js"></script>
+        <div class="panel beat">
+          <h3>Ask what rests on one person.</h3>
+          <ul class="chips beat-chips" id="beat-chips" aria-label="Bus-factor questions" hidden></ul>
+          <blockquote>If Arjun Mehta leaves, 1 thing rests on them alone. Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes; 2 others depend on it.</blockquote>
+          <p class="source">The demo company's reply to <em>what if arjun mehta leaves</em>, pinned by <code>tests/integration/test_knowledge_bus_factor.py</code>.</p>
+          <p>Once the Sales team is imported, <em>what if priya shah leaves</em> shows the cross-team case: the next in line for the pricing playbook, Tomas Reyes, is on Platform.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.5 How it works. Static: it renders without JavaScript. -->
+    <section class="block" id="how" aria-labelledby="how-title">
+      <h2 id="how-title">How an answer is made.</h2>
+      <ol class="flow">
+        <li><span class="n" aria-hidden="true">01</span><b>Resolve.</b><p>Names in the question are matched against the graph first. No match, no guess: it says what it does not know and names the nearest things it does.</p></li>
+        <li><span class="n" aria-hidden="true">02</span><b>Pick a tool.</b><p>A fixed catalogue of hand-written, parameterised Cypher. In Slack a model picks the tool and fills in the arguments; it never writes a query.</p></li>
+        <li><span class="n" aria-hidden="true">03</span><b>Walk.</b><p>The tool walks the graph, filtered to what the asker may read.</p></li>
+        <li><span class="n" aria-hidden="true">04</span><b>Show the path.</b><p>The reply prints every edge it used, <code>A -[REL]-&gt; B</code>. The explanation is the traversal, not a sentence written afterwards.</p></li>
+      </ol>
+
+      <ul class="bento">
+        <li class="card">
+          <h3>It never writes Cypher.</h3>
+          <p>The model only fills in the arguments of a tool someone wrote and reviewed. No model-generated string reaches a query.</p>
+          <div class="vis mono">
+            <div><span class="k">tool</span> <span class="t">blast_radius</span></div>
+            <div><span class="k">args</span> { <span class="s">"name"</span>: string, <span class="s">"depth"</span>?: integer }</div>
+            <div><span class="k">runs</span> <span class="dim">one fixed, parameterised traversal</span></div>
+          </div>
+        </li>
+        <li class="card">
+          <h3>It refuses to guess.</h3>
+          <p>A name the graph does not hold is refused, with the nearest names it does hold.</p>
+          <div class="vis">
+            <p class="mono refusal">Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”).</p>
+            <p class="source">The demo company's reply, pinned by <code>tests/integration/test_knowledge_catalogue.py</code>.</p>
+            <p class="try" id="refusal-try" hidden>Try one here: <button class="link-btn" type="button" id="refusal-ask"></button></p>
+          </div>
+        </li>
+        <li class="card">
+          <h3>Writes wait for a human.</h3>
+          <p>Filing a ticket or recording a decision shows a card that names the target before anything is written.</p>
+          <div class="vis slack-card">
+            <b>Ingest ticket needs approval</b>
+            <span class="dim">Review exact action</span>
+            <p><b>What will happen</b><br>File a ticket titled <b>Billing exports time out</b> in the company graph, linked to <b>Billing Service</b>. Visible to public channels.</p>
+            <span class="buttons" aria-hidden="true"><span class="ok">Approve action</span><span>Deny</span></span>
+            <p class="source">The card's wording, pinned by <code>tests/integration/test_slack_agent_turn.py</code>.</p>
+          </div>
+        </li>
+        <li class="card">
+          <h3>Decisions stay current.</h3>
+          <p>A new decision supersedes the old one; both dates stay, and the answer quotes the message it came from.</p>
+          <div class="vis mono edge-vis"><span class="nd knowledge">New</span><span class="rel">-[SUPERSEDES]-&gt;</span><span class="nd knowledge">Old</span></div>
+        </li>
+        <li class="card">
+          <h3>Permissions are a graph query.</h3>
+          <p>Whether someone sees a private repo's pull requests is a path from their Slack account to the repo.</p>
+          <div class="vis mono edge-vis"><span class="nd other">(:SlackUser)</span><span class="rel">-[:IS]-&gt;</span><span class="nd person">(:Person)</span><span class="rel">&lt;-[:IS]-</span><span class="nd other">(:GitHubUser)</span><span class="rel">-[:CAN_READ]-&gt;</span><span class="nd other">(:Repo)</span></div>
+        </li>
+      </ul>
+
+      <figure class="model">
+        <figcaption><b>The data model.</b> The main labels and edges, in the four families the drawings use. The full model and every query are in the README's <a href="https://github.com/codesensei-tushar/graph_hacks#graph-data-model">Graph data model</a>.</figcaption>
+        <div class="model-frame" tabindex="0" aria-label="The data model diagram; scrolls sideways on a narrow screen">
+          <svg viewBox="0 0 1000 410" role="img" aria-labelledby="dm-title dm-desc">
+            <title id="dm-title">The graph data model</title>
+            <desc id="dm-desc">Slack users and GitHub users are each linked to a Person by IS, and a GitHub user CAN_READ a Repo. A Person is a MEMBER_OF a Team and OWNS, WORKED_ON or KNOWS a Service; a Team RUNS a Service, and a Service DEPENDS_ON other services. A Person PROPOSED or APPROVED a Decision. A Decision and a Ticket are ABOUT a Service, a Document DESCRIBES it, a pull request TOUCHES it and a Memory MENTIONS it. A Decision SUPERSEDES an older one.</desc>
+            <defs><marker id="dm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="dm-head"/></marker></defs>
+            <g class="dm-groups">
+              <rect x="22" y="44" width="156" height="350" rx="14"/><text x="100" y="30">Access</text>
+              <rect x="252" y="44" width="156" height="350" rx="14"/><text x="330" y="30">People and teams</text>
+              <rect x="512" y="44" width="176" height="350" rx="14"/><text x="600" y="30">What teams run</text>
+              <rect x="807" y="44" width="156" height="350" rx="14"/><text x="885" y="30">Knowledge</text>
+            </g>
+            <g class="dm-edges">
+              <path d="M162 120 L268 172"/><text x="214" y="136">IS</text>
+              <path d="M162 230 L268 180"/><text x="214" y="198">IS</text>
+              <path d="M100 247 L100 323"/><text x="108" y="289" text-anchor="start">CAN_READ</text>
+              <path d="M330 192 L330 303"/><text x="338" y="252" text-anchor="start">MEMBER_OF</text>
+              <path d="M392 318 L534 252"/><text x="458" y="302">RUNS</text>
+              <path d="M392 178 L534 236"/><text x="466" y="184"><tspan x="466">OWNS · WORKED_ON</tspan><tspan x="466" dy="12">· KNOWS</tspan></text>
+              <path d="M392 166 C 520 92, 700 84, 823 98"/><text x="609" y="88">PROPOSED · APPROVED</text>
+              <path d="M585 262 C 568 322, 632 322, 615 262"/><text x="600" y="334">DEPENDS_ON</text>
+              <path d="M823 104 L666 236"/><text x="776" y="132">ABOUT</text>
+              <path d="M823 170 L666 240"/><text x="780" y="184">DESCRIBES</text>
+              <path d="M823 240 L666 245"/><text x="780" y="236">ABOUT</text>
+              <path d="M823 310 L666 250"/><text x="780" y="290">TOUCHES</text>
+              <path d="M823 380 L666 255"/><text x="772" y="342">MENTIONS</text>
+              <path d="M874 83 C 860 54, 910 54, 896 83"/><text x="885" y="60">SUPERSEDES</text>
+            </g>
+            <g class="dm-nodes">
+              <g class="other"><rect x="38" y="103" width="124" height="34" rx="8"/><text x="100" y="124">SlackUser</text></g>
+              <g class="other"><rect x="38" y="213" width="124" height="34" rx="8"/><text x="100" y="234">GitHubUser</text></g>
+              <g class="other"><rect x="38" y="323" width="124" height="34" rx="8"/><text x="100" y="344">Repo</text></g>
+              <g class="person"><rect x="268" y="158" width="124" height="34" rx="8"/><text x="330" y="179">Person</text></g>
+              <g class="person"><rect x="268" y="303" width="124" height="34" rx="8"/><text x="330" y="324">Team</text></g>
+              <g class="service"><rect x="534" y="228" width="132" height="34" rx="8"/><text x="600" y="249">Service</text></g>
+              <g class="knowledge"><rect x="823" y="83" width="124" height="34" rx="8"/><text x="885" y="104">Decision</text></g>
+              <g class="knowledge"><rect x="823" y="153" width="124" height="34" rx="8"/><text x="885" y="174">Document</text></g>
+              <g class="knowledge"><rect x="823" y="223" width="124" height="34" rx="8"/><text x="885" y="244">Ticket</text></g>
+              <g class="knowledge"><rect x="823" y="293" width="124" height="34" rx="8"/><text x="885" y="314">PullRequest</text></g>
+              <g class="knowledge"><rect x="823" y="363" width="124" height="34" rx="8"/><text x="885" y="384">Memory</text></g>
+            </g>
+          </svg>
+        </div>
+      </figure>
+    </section>
+
+    <!-- 2.6 For builders: the same tools over MCP. -->
+    <section class="block" id="builders" aria-labelledby="builders-title">
+      <h2 id="builders-title">The same tools, over MCP.</h2>
+      <p class="sub">Every read-only tool in the catalogue is served at <code>/mcp</code> over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, behind a token.</p>
+      <div class="builders">
+        <div class="panel tool-panel">
+          <p class="tool-count" id="tool-count"><span class="sk-line short" aria-hidden="true"></span></p>
+          <ul class="tool-list" id="tool-list">
+            <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
+            <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
+          </ul>
+          <noscript><p class="note">The tool list needs JavaScript.</p></noscript>
+        </div>
+        <div class="builders-side">
+          <figure class="code mcp-code">
+            <figcaption>an MCP client, from the README</figcaption>
+<pre tabindex="0"><code><span class="c-kw">from</span> mcp.client.session <span class="c-kw">import</span> ClientSession
+<span class="c-kw">from</span> mcp.client.streamable_http <span class="c-kw">import</span> create_mcp_http_client, streamable_http_client
+
+<span class="c-kw">async with</span> create_mcp_http_client(headers={<span class="c-str">"Authorization"</span>: <span class="c-str">f"Bearer {token}"</span>}) <span class="c-kw">as</span> http:
+    <span class="c-kw">async with</span> streamable_http_client(<span class="c-str">"https://brain.noobsurd.space/mcp"</span>, http_client=http) <span class="c-kw">as</span> streams:
+        <span class="c-kw">async with</span> ClientSession(streams[0], streams[1]) <span class="c-kw">as</span> session:
+            <span class="c-kw">await</span> session.initialize()
+            tools = <span class="c-kw">await</span> session.list_tools()
+            result = <span class="c-kw">await</span> session.call_tool(<span class="c-str">"who_owns"</span>, {<span class="c-str">"name"</span>: <span class="c-str">"billing"</span>})
+            print(result.structured_content[<span class="c-str">"path"</span>])</code></pre>
+          </figure>
+          <ul class="links">
+            <li><a href="https://github.com/codesensei-tushar/graph_hacks#graph-data-model">The data model and the query list</a><span>in the README</span></li>
+            <li><a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/SETUP.md">Local setup</a><span><code>docker compose up -d</code>, then two commands</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- 2.7 Footer. -->
+<footer class="site">
+  <div class="wrap">
+    <p>Built for Graph Hacks. Track 03, Company Brain (primary); also Track 01, Agents That Act on Connected Data, and Track 02, Agent Memory and Coordination.</p>
+    <p>AI assistance: parts of this project were written with Claude Code (Anthropic), including the production infrastructure, deploy pipeline and their docs.</p>
+    <p>Synthetic data and this project's own only.</p>
+    <p class="foot-links"><a href="https://github.com/codesensei-tushar/graph_hacks#readme">README</a><a href="/api/health">/api/health</a></p>
+  </div>
+</footer>
+<script src="/static/shell.js?v=4"></script>
+<script src="/static/graph.js?v=4"></script>
+<script src="/static/hero.js?v=4"></script>
+<script src="/static/app.js?v=4"></script>
 </body>
 </html>

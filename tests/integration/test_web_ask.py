@@ -146,7 +146,7 @@ class WebAskTest(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertTrue(page.headers["content-type"].startswith("text/html"))
         self.assertIn("Company Brain", page.text)
-        self.assertIn("Take the graph out", page.text)
+        self.assertIn("Take FalkorDB out, and the answers go with it.", page.text)
         self.assertIn("/static/app.js", page.text)
         script = self.http.get("/static/app.js")
         self.assertEqual(script.status_code, 200)
