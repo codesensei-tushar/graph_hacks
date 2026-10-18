@@ -746,11 +746,14 @@ footer.site a { color: var(--ink-2); }
 section.block.band-dark {
   --bg: #07081a; --surface: #0f1126; --surface-2: #15182e; --surface-3: #1c2036; --ink: #eef0fb; --ink-2: #aab0cf; --ink-3: #8288ab;
   --line: rgba(200, 205, 255, 0.10); --line-2: rgba(200, 205, 255, 0.18); --path: #2dd4e6; --path-ink: #2dd4e6;
-  position: relative; isolation: isolate; color: var(--ink); background: var(--bg);
+  position: relative; isolation: isolate; color: var(--ink);
+  /* Soft ends: a 48 px fade, so no hard line shows at the sides where the waves curve away. */
+  background: linear-gradient(180deg, transparent, var(--bg) 48px, var(--bg) calc(100% - 48px), transparent);
   margin: 160px 0; padding: 120px 0; overflow-x: clip;
 }
 .band-dark::before, .band-dark::after {
-  content: ""; position: absolute; left: 0; right: 0; height: 180px; z-index: -1; pointer-events: none; filter: blur(28px);
+  /* 40 px past each side: the blur fades out beyond the band's overflow-x clip, not at the viewport edge. */
+  content: ""; position: absolute; left: -40px; right: -40px; height: 180px; z-index: -1; pointer-events: none; filter: blur(28px);
   background: radial-gradient(60% 100% at 30% 50%, #4549df, transparent 70%), radial-gradient(50% 90% at 72% 40%, #2b2fb0, transparent 70%), #07081a;
 }
 .band-dark::before { top: -110px; border-radius: 50% 50% 0 0 / 60% 40% 0 0; }
