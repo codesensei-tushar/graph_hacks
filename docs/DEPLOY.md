@@ -34,7 +34,7 @@ project. Never `gcloud config configurations activate` it on a shared machine; p
   │   nginx :80 :443 ── the only published ports                                 │
   │     │  TLS 1.2+, :80 → https, ACME challenges from the certbot webroot       │
   │     ├── brain.* ─────────────► backend :8000 (FastAPI, src/)                 │
-  │     │                          /slack/*, /healthz, /api/health, /mcp → 501   │
+  │     │                          /slack/*, /healthz, /api/*, /mcp (public)     │
   │     └── gdb.* (basic auth, ──► falkordb-browser :3000                        │
   │          rate limited)                 │                                     │
   │                       backend ──► falkordb :6379 ◄──┘  (requirepass, AOF,    │
@@ -63,7 +63,8 @@ loopback. They exist only on the Compose network.
 | `deploy/slack-app-manifest.yaml` | Manifest for the production Slack app |
 | `.github/workflows/ci.yml` | ruff, pytest (with a FalkorDB service), docker build |
 | `.github/workflows/deploy.yml` | CI, then build, push, deploy, verify |
-| `src/api/ops.py` | `/healthz`, the reserved `/mcp`, the Slack event clock |
+| `src/api/ops.py` | `/healthz`, `POST /ops/seed`, `POST /ops/import`, the Slack event clock |
+| `src/api/mcp.py` | `/mcp`: the read-only tools over MCP, public and rate-limited |
 
 ## How a deploy works
 
@@ -257,7 +258,7 @@ dev app uses a tunnel.
 - **Where the code goes.** The Slack routes and the dispatch are `src/api/v1/slack.py`,
   the turn handling is `src/domain/slack/`, and the model seam is
   `src/integrations/llm/model.py`. The infra touches only `src/api/ops.py` (`/healthz`,
-  `/mcp` → 501), one line in `src/main.py`, and the FalkorDB password in
+  the seed refresh), one line in `src/main.py`, and the FalkorDB password in
   `src/core/config.py` and `src/db/falkordb_client.py`.
 - **Env vars in production.** `FALKORDB_HOST=falkordb`, `FALKORDB_PORT=6379`,
   `FALKORDB_PASSWORD`, `PUBLIC_URL=https://brain.noobsurd.space`, `SLACK_SIGNING_SECRET`,
