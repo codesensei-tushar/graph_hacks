@@ -123,6 +123,15 @@ class McpServerTest(unittest.TestCase):
         self.assertFalse(result.structured_content["found"])
         self.assertEqual(result.structured_content["path"], [])
 
+    def test_blast_radius_takes_a_direction(self):
+        async def work(session):
+            return await session.call_tool("blast_radius", {"name": "invoice worker", "direction": "dependencies"})
+
+        result = asyncio.run(self._with_session(work))
+        self.assertFalse(result.is_error, result)
+        self.assertTrue(result.structured_content["answer"].startswith("Invoice Worker depends on Billing Service and Notification Service (1 hop)"))
+        self.assertIn({"from": "Invoice Worker", "rel": "DEPENDS_ON", "to": "Billing Service"}, result.structured_content["path"])
+
     def test_writing_tools_are_refused(self):
         async def work(session):
             return await session.call_tool("ingest_ticket", {"title": "billing exports time out"})

@@ -116,6 +116,43 @@ class AlgorithmToolsTest(unittest.TestCase):
         routed = ask_service.ask("what breaks if auth goes down, one hop", ORG)
         self.assertEqual((routed.tool, routed.depth), ("blast_radius", 1))
 
+    # --- what a service depends on ---
+
+    def test_what_a_service_depends_on_walks_forward_and_never_answers_the_dependents(self):
+        needs = ask_service.ask("what does the invoice worker depend on", ORG)
+        self.assertEqual((needs.tool, needs.found, needs.depth), ("blast_radius", True, 2))
+        self.assertEqual(
+            needs.answer,
+            "Invoice Worker depends on Billing Service and Notification Service (1 hop) and, through them, Auth Service and "
+            "Postgres (2 hops). Depth 2 reached 4 services; nothing new past depth 2.",
+        )
+        self.assertEqual(
+            [step.cite() for step in needs.path],
+            [
+                "Invoice Worker -[DEPENDS_ON]-> Billing Service",
+                "Invoice Worker -[DEPENDS_ON]-> Notification Service",
+                "Billing Service -[DEPENDS_ON]-> Auth Service",
+                "Notification Service -[DEPENDS_ON]-> Auth Service",
+                "Billing Service -[DEPENDS_ON]-> Postgres",
+            ],
+        )
+        # The same walk by the argument the model and MCP pass, and by the question alone with no argument.
+        self.assertEqual(catalogue.get_tool("blast_radius").run({"name": "invoice worker", "direction": "dependencies"}, ORG).answer, needs.answer)
+        self.assertEqual(algorithms.blast_radius("what does the invoice worker depend on", ORG).answer, needs.answer)
+        one = ask_service.ask("what does the invoice worker depend on, one hop", ORG)
+        self.assertEqual(
+            one.answer,
+            "Invoice Worker depends on Billing Service and Notification Service (1 hop). "
+            "It needs 2 more further down (Auth Service at depth 2 and Postgres at depth 2); ask with more hops.",
+        )
+        self.assertEqual(ask_service.ask("what are billing's dependencies", ORG).answer.split(".")[0], "Billing Service depends on Auth Service and Postgres (1 hop)")
+        self.assertEqual(ask_service.ask("what does postgres depend on", ORG).answer, "Postgres depends on nothing else in the graph.")
+        # The other way round is unchanged.
+        self.assertEqual(algorithms.blast_radius("invoice worker", ORG).answer, "Nothing in the graph depends on Invoice Worker.")
+        self.assertTrue(ask_service.ask("what depends on billing", ORG).answer.startswith("If Billing Service goes down, these stop with it"))
+        # An argument that is neither direction falls back to what the question asks.
+        self.assertEqual(catalogue.get_tool("blast_radius").run({"name": "invoice worker", "direction": "sideways"}, ORG).answer, "Nothing in the graph depends on Invoice Worker.")
+
     # --- shortest paths ---
 
     def test_path_between_cites_each_hop_in_its_true_direction(self):
