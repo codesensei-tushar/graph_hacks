@@ -26,7 +26,7 @@ from src.domain.slack.channels import reset as channel_reset
 from src.domain.slack.compute import register_turn_agent
 from src.domain.slack.turn import approval_expiry, reaction_queue  # noqa: F401  register expiry and reaction jobs
 from src.domain.slack.turn import reset as turn_reset
-from src.domain.slack.workspace import list_all_connected_workspaces
+from src.domain.slack.workspace import list_all_connected_workspaces, rollback_stale_pending_workspaces
 from src.seed.seed import company_module, reset_and_seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -73,6 +73,12 @@ def _recover() -> None:
             job()
         except Exception:
             log.exception("startup recovery failed: %s", name)
+    for org in [tenancy.legacy_org(), *_other_orgs()]:
+        try:
+            with tenancy.org_context(org):
+                rollback_stale_pending_workspaces()
+        except Exception:
+            log.exception("rolling back unverified installs failed org=%s", org.id)
     for org, workspace in list_all_connected_workspaces():
         with tenancy.org_context(org):
             # Token-mode installs never hit the OAuth callback; run its after-install steps once.
