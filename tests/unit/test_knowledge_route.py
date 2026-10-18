@@ -122,6 +122,30 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("who owns billing")[0], "who_owns")
         self.assertEqual(ask_service.route("who connects payments and platform")[0], "connectors")
 
+    def test_what_a_service_depends_on_is_blast_radius_the_other_way(self):
+        for question in (
+            "what does the invoice worker depend on",
+            "What does Billing depend on?",
+            "the invoice worker depends on what",
+            "what are billing's dependencies",
+            "dependencies of the api gateway",
+            "what does search need",
+            "what does auth rely on",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("blast_radius", {"name": question, "direction": "dependencies"}))
+        self.assertEqual(
+            ask_service.route("what does the invoice worker depend on, one hop"),
+            ("blast_radius", {"name": "what does the invoice worker depend on, one hop", "direction": "dependencies", "depth": 1}),
+        )
+        # What depends on a service, and questions that only share the words, are unchanged.
+        for question in ("what depends on billing", "what breaks if auth goes down", "who are the dependents of auth"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("blast_radius", {"name": question}))
+        self.assertEqual(ask_service.route("what do i need to know about billing")[0], "who_knows")
+        self.assertEqual(ask_service.route("which service is most depended on")[0], "load_bearing")
+        self.assertFalse(algorithms.asks_for_dependencies("what does billing need to know"))
+
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)
         self.assertEqual(algorithms.depth_in("and 3 hops out"), 3)

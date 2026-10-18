@@ -117,8 +117,10 @@ def route(question: str) -> tuple[str, dict]:
         return "who_should_know", {"name": text}
     if _ASK_WHO.search(text):
         return "who_knows", {"name": text}
-    if _BLAST.search(text):
-        args = {"name": text}
+    needs = algorithms.asks_for_dependencies(text)
+    if needs or _BLAST.search(text):
+        # "what does the invoice worker depend on" walks forward; "what depends on it" stays the default.
+        args = {"name": text, "direction": algorithms.DEPENDENCIES} if needs else {"name": text}
         depth = algorithms.depth_in(text)
         if depth is not None:
             args["depth"] = depth
@@ -443,7 +445,7 @@ _ROUTED = {
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
-    "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth")),
+    "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth"), args.get("direction")),
     "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
     "who_knows": lambda args, scopes: who_knows(args["name"], scopes),

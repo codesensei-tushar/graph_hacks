@@ -45,6 +45,16 @@ _WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
 _HOPS = re.compile(r"\b(\d+|one|two|three|four|five|six)\s+hops?\b", re.IGNORECASE)
 _DEPTH = re.compile(r"\bdepth\s+(\d+)\b", re.IGNORECASE)
 _DIRECT = re.compile(r"\b(?:directly|direct dependents|immediate(?:ly)?|first hop)\b", re.IGNORECASE)
+# What a service needs, not what needs it: "what does the invoice worker depend on", "billing's
+# dependencies", "what does search need". "what depends on billing" and "dependents" are the other way.
+_NEEDS = re.compile(
+    r"\bwhat (?:does|do|did) .+ (?:depend|rely) on\b|\b(?:depends|relies) on what\b|\bdependenc(?:y|ies)\b|\bupstream of\b"
+    r"|\bwhat (?:does|do) (?!i\b|we\b|you\b|they\b)[\w' ]+? need\b(?! to\b)",
+    re.IGNORECASE,
+)
+# blast_radius walks DEPENDS_ON one way or the other.
+DEPENDENTS = "dependents"
+DEPENDENCIES = "dependencies"
 
 
 def clamp_depth(value) -> int | None:
@@ -70,16 +80,27 @@ def depth_in(question: str) -> int | None:
     return None
 
 
+def asks_for_dependencies(question: str) -> bool:
+    """Whether a question asks what a service depends on, rather than what depends on it."""
+    return bool(_NEEDS.search(question or ""))
+
+
 # --- blast radius ------------------------------------------------------------------------
 
 
-def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
+def blast_radius(question: str, scopes: list[str], depth=None, direction=None) -> ToolResult:
     """What stops working if a service goes down, following DEPENDS_ON for ``depth`` hops.
 
     Services and systems that depend on it are listed together by hop, in the same words
     whatever else hangs off it; a process, product or playbook gets its own clause with its
     own verb ("the Renewals process stalls (1 hop)").
+
+    ``direction="dependencies"`` walks the other way: what the service itself depends on. A
+    question that asks that ("what does the invoice worker depend on") walks that way even when
+    no direction is passed, so it never gets the dependents.
     """
+    if direction not in (DEPENDENTS, DEPENDENCIES):
+        direction = DEPENDENCIES if asks_for_dependencies(question) else DEPENDENTS
     _, graph = connect()
     resolution = resolve.resolve_name(question, ("Service",), scopes, graph=graph)
     if not resolution.found:
@@ -88,11 +109,14 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
     wanted = clamp_depth(depth)
     subject = kinds.subject(target.name, target.kind)
     if kinds.kind_or_default(target.kind) in kinds.NOT_DEPENDABLE:
+        either = "nothing depends on it" if direction == DEPENDENTS else "it depends on nothing"
         return ToolResult(
             tool="blast_radius",
-            answer=f"{target.name} is an {target.kind}: nothing depends on it. Ask who owns it or who knows it instead.",
+            answer=f"{target.name} is an {target.kind}: {either}. Ask who owns it or who knows it instead.",
             candidates=resolution.candidate_names(),
         )
+    if direction == DEPENDENCIES:
+        return _dependencies(graph, target, resolution, wanted, scopes)
 
     # Always walk to the ceiling so the reply can say where the walk stopped finding anything new.
     rows = graph.ro_query(
@@ -166,6 +190,69 @@ def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
             parts.append(f"Among them, {named} is the main connector: {reach} it.")
         else:
             parts.append(f"Among them, {named} are the main connectors: {reach} each.")
+    result.answer = " ".join(parts)
+    return result
+
+
+def _dependencies(graph, target: Entity, resolution, wanted: int | None, scopes: list[str]) -> ToolResult:
+    """What a service depends on: DEPENDS_ON followed forward, nearest first, each at its shortest hop count.
+
+    Grouped by hop in the words blast_radius lists services in: "Invoice Worker depends on
+    Billing Service (1 hop) and, through it, Postgres (2 hops)". Every node on a route must be
+    readable and no account is ever on one, as for any path.
+    """
+    rows = graph.ro_query(
+        f"""
+        MATCH path = (service:Service {{id: $id}})-[:DEPENDS_ON*1..{MAX_DEPTH}]->(dependency:Service)
+        WHERE {_SCOPED_PATH} AND all(n IN nodes(path) WHERE NOT {kinds.KIND_OF.format(var="n")} IN $excluded)
+        RETURN dependency.id, dependency.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name],
+               {kinds.KIND_OF.format(var="dependency")}
+        ORDER BY length(path), dependency.name
+        """,
+        {"id": target.id, "excluded": sorted(kinds.NOT_DEPENDABLE), "scopes": scopes},
+    ).result_set
+    shortest: dict[str, list[tuple[str, int, list[str], list[str]]]] = {}
+    kind_of: dict[str, str] = {}
+    for dependency_id, dependency_name, length, ids, names, dependency_kind in rows:
+        kind_of[dependency_id] = dependency_kind
+        routes = shortest.setdefault(dependency_id, [])
+        if not routes or routes[0][1] == length:
+            routes.append((dependency_name, length, ids, names))
+
+    subject = kinds.capitalized(kinds.subject(target.name, target.kind))
+    saturation = max((routes[0][1] for routes in shortest.values()), default=0)
+    reached = wanted if wanted is not None else saturation
+    result = ToolResult(tool="blast_radius", answer="", candidates=resolution.candidate_names(), depth=max(reached, 1))
+    if not shortest:
+        result.answer = f"{subject} depends on nothing else in the graph."
+        return result
+
+    needed = {node_id: routes for node_id, routes in shortest.items() if routes[0][1] <= reached}
+    for routes in needed.values():
+        # Equal-length routes come back in any order; cited by name, the path is the same on every run.
+        for _name, _length, ids, names in sorted(routes, key=lambda route: route[3]):
+            for index in range(len(ids) - 1):
+                result.add(PathStep(names[index], "DEPENDS_ON", names[index + 1], from_id=ids[index], to_id=ids[index + 1], from_label="Service", to_label="Service"))
+
+    by_hop: dict[int, list[tuple[str, str]]] = {}
+    for node_id, routes in needed.items():
+        by_hop.setdefault(routes[0][1], []).append((routes[0][0], kind_of[node_id]))
+    groups = [
+        f"{join_names([kinds.subject(name, kind) for name, kind in sorted(things)])} ({hop} hop{'s' if hop > 1 else ''})"
+        for hop, things in sorted(by_hop.items())
+    ]
+    nearest = by_hop[min(by_hop)]
+    if len(groups) == 1:
+        parts = [f"{subject} depends on {groups[0]}."]
+    else:
+        parts = [f"{subject} depends on {groups[0]} and, through {'it' if len(nearest) == 1 else 'them'}, {', then '.join(groups[1:])}."]
+    beyond = sorted((routes[0][1], kinds.listed(routes[0][0], kind_of[node_id])) for node_id, routes in shortest.items() if routes[0][1] > reached)
+    if beyond:
+        further = join_names([f"{name} at depth {length}" for length, name in beyond])
+        parts.append(f"It needs {len(beyond)} more further down ({further}); ask with more hops.")
+    else:
+        noun = "service" if all(kinds.kind_or_default(kind_of[node_id]) in kinds.GOES_DOWN for node_id in needed) else "thing"
+        parts.append(f"Depth {reached} reached {len(needed)} {noun}{'s' if len(needed) != 1 else ''}; nothing new past depth {saturation}.")
     result.answer = " ".join(parts)
     return result
 

@@ -135,11 +135,23 @@ class KindsTest(unittest.TestCase):
         )
         self.assertEqual(ask_service.route("what depends on hubspot")[0], "blast_radius")
 
+    def test_what_a_playbook_depends_on_reads_by_kind_and_crosses_teams(self):
+        needs = ask_service.ask("what does the pricing playbook depend on", ORG)
+        self.assertEqual(needs.tool, "blast_radius")
+        self.assertEqual(
+            needs.answer,
+            "The Pricing playbook depends on the Renewals process (1 hop) and, through it, Billing Service and the HubSpot "
+            "system (2 hops), then Auth Service and Postgres (3 hops). Depth 3 reached 5 things; nothing new past depth 3.",
+        )
+        self.assertIn("Renewals -[DEPENDS_ON]-> HubSpot", [step.cite() for step in needs.path])
+
     def test_accounts_are_never_in_dependency_answers(self):
         account = algorithms.blast_radius("enterprise accounts", ORG)
         self.assertTrue(account.found)
         self.assertEqual(account.path, [])
         self.assertEqual(account.answer, "Enterprise accounts is an account: nothing depends on it. Ask who owns it or who knows it instead.")
+        forward = algorithms.blast_radius("enterprise accounts", ORG, direction="dependencies")
+        self.assertEqual((forward.answer, forward.path), ("Enterprise accounts is an account: it depends on nothing. Ask who owns it or who knows it instead.", []))
         ranked = algorithms.load_bearing(10)
         self.assertNotIn("Enterprise accounts", ranked.answer)
         self.assertIn("HubSpot", ranked.answer)

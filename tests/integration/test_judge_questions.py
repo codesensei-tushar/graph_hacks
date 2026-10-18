@@ -52,6 +52,7 @@ class JudgeQuestionsTest(unittest.TestCase):
             "who is the bus factor for billing": ("who_knows", "Billing Service is owned by Arjun Mehta. Ask first: Arjun Mehta"),
             "what does the payments team own": ("onboarding_brief", "The Payments team is Arjun Mehta (Billing engineer) and Lena Fischer"),
             "who is on the platform team": ("onboarding_brief", "The Platform team is Maya Ortiz (Platform lead), Sara Lindqvist"),
+            "what does the invoice worker depend on": ("blast_radius", "Invoice Worker depends on Billing Service and Notification Service (1 hop)"),
         }
         for question, (tool, start) in cases.items():
             with self.subTest(question=question):

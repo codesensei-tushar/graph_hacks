@@ -57,7 +57,7 @@ def _run_working_groups(_args: dict, scopes: list[str]) -> ToolResult:
 
 
 def _run_blast_radius(args: dict, scopes: list[str]) -> ToolResult:
-    return algorithms.blast_radius(args["name"], scopes, args.get("depth"))
+    return algorithms.blast_radius(args["name"], scopes, args.get("depth"), args.get("direction"))
 
 
 def _run_who_should_know(args: dict, scopes: list[str]) -> ToolResult:
@@ -183,7 +183,9 @@ register(
         name="blast_radius",
         description=(
             "What stops working if a service goes down: the services that depend on it, following DEPENDS_ON edges "
-            "for a number of hops, with the main connector: the one most of the others reach it through."
+            "for a number of hops, with the main connector: the one most of the others reach it through. With "
+            "direction 'dependencies', the other way: what the service itself depends on (\"what does the invoice "
+            "worker depend on\", \"billing's dependencies\")."
         ),
         args_schema=_schema(
             {
@@ -193,6 +195,11 @@ register(
                     "minimum": 1,
                     "maximum": algorithms.MAX_DEPTH,
                     "description": "How many dependency hops to follow when the question says (one hop, two hops out). Omit to follow all.",
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": [algorithms.DEPENDENTS, algorithms.DEPENDENCIES],
+                    "description": "'dependents' (the default): what depends on the service. 'dependencies': what the service depends on.",
                 },
             },
             ["name"],
