@@ -41,10 +41,17 @@
   --ink: #11142a;
   --ink-2: #484d68;
   --ink-3: #62678a;
-  /* The horizon behind the ask box: an indigo glow and the haze under it. */
   --horizon: #5257e8;
-  --horizon-glow: rgba(82, 87, 232, 0.26);
-  --horizon-haze: rgba(223, 225, 251, 0.85);
+  /* The hero's horizon: navy at the top in both themes, a vivid indigo band behind the headline,
+     then lavender to the page at the fold. */
+  --hz-7: #05061a; --hz-6: #0a0b26; --hz-5: #1f2290; --hz-4: #4549df;
+  --hz-3: #7b80ee; --hz-2: #c9ccf7; --hz-1: #eef0fc; --hz-0: #f6f7fb;
+  --hero-ink: #f4f5ff;
+  --hero-ink-2: rgba(230, 232, 255, 0.74);
+  --composer-bg: rgba(255, 255, 255, 0.86);
+  --composer-line: rgba(255, 255, 255, 0.9);
+  --send-bg: #5458e6;
+  --send-bg-hover: #4549df;
   --path: #0e8fa6;
   --path-ink: #0a7387;
   --on-path: #ffffff;
@@ -98,8 +105,14 @@
     --ink-2: #aab0cf;
     --ink-3: #8288ab;
     --horizon: #4b50e6;
-    --horizon-glow: rgba(75, 80, 230, 0.44);
-    --horizon-haze: rgba(38, 43, 143, 0.45);
+    --hz-7: #05061a; --hz-6: #08091f; --hz-5: #151766; --hz-4: #3236c4;
+    --hz-3: #4a4fe3; --hz-2: #2b2fb0; --hz-1: #141858; --hz-0: #0d0f2e;
+    --hero-ink: #f4f5ff;
+    --hero-ink-2: rgba(230, 232, 255, 0.74);
+    --composer-bg: rgba(15, 17, 40, 0.72);
+    --composer-line: rgba(200, 205, 255, 0.16);
+    --send-bg: #5d62f0;
+    --send-bg-hover: #6f74ff;
     --path: #2dd4e6;
     --path-ink: #2dd4e6;
     --on-path: #0b0d12;
@@ -128,8 +141,14 @@
   --ink-2: #aab0cf;
   --ink-3: #8288ab;
   --horizon: #4b50e6;
-  --horizon-glow: rgba(75, 80, 230, 0.44);
-  --horizon-haze: rgba(38, 43, 143, 0.45);
+  --hz-7: #05061a; --hz-6: #08091f; --hz-5: #151766; --hz-4: #3236c4;
+  --hz-3: #4a4fe3; --hz-2: #2b2fb0; --hz-1: #141858; --hz-0: #0d0f2e;
+  --hero-ink: #f4f5ff;
+  --hero-ink-2: rgba(230, 232, 255, 0.74);
+  --composer-bg: rgba(15, 17, 40, 0.72);
+  --composer-line: rgba(200, 205, 255, 0.16);
+  --send-bg: #5d62f0;
+  --send-bg-hover: #6f74ff;
   --path: #2dd4e6;
   --path-ink: #2dd4e6;
   --on-path: #0b0d12;
@@ -177,7 +196,7 @@ code { font-variant-ligatures: none; }
 
 /* An eyebrow is a quiet label in parentheses; screen readers skip the parentheses. */
 .eyebrow {
-  display: inline-flex; align-items: center; margin: 0 0 18px;
+  display: block; margin: 0 0 18px;
   font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2);
 }
 .eyebrow .dot { display: none; }
@@ -194,12 +213,21 @@ code { font-variant-ligatures: none; }
   border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
 }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 20px; height: 100%; }
+/* Over the hero's dark top the header is transparent with light ink (app.js sets data-over-hero);
+   once the hero leaves it is solid again, so a deep link lands under a solid header. */
+.top { transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease); }
+:root[data-over-hero] .top { background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-over-hero] .top, :root[data-over-hero] .top nav a { color: var(--hero-ink-2); }
+:root[data-over-hero] .brand { color: var(--hero-ink); }
+:root[data-over-hero] .top nav a:hover { color: var(--hero-ink); background: rgba(255, 255, 255, 0.08); }
+:root[data-over-hero] .icon-btn { color: var(--hero-ink-2); background: transparent; border-color: rgba(230, 232, 255, 0.22); }
+:root[data-over-hero] .icon-btn:hover { color: var(--hero-ink); border-color: rgba(230, 232, 255, 0.4); }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.01em; text-decoration: none; color: var(--ink); font-size: var(--fs-base); }
 .brand svg { width: 26px; height: 26px; flex: none; }
 .brand .mark-edge { stroke: var(--ink-3); }
 .brand .mark-walk { stroke: var(--path); }
-.top nav { display: flex; align-items: center; gap: 4px; }
-.top nav a { color: var(--ink-2); text-decoration: none; font-size: var(--fs-sm); padding: 6px 10px; border-radius: 8px; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
+.top nav { display: flex; flex: 1; align-items: center; justify-content: center; gap: clamp(16px, 4vw, 56px); }
+.top nav a { color: var(--ink-2); text-decoration: none; font: 500 var(--fs-xs)/1 var(--font); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 4px; border-radius: 8px; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
 .top nav a:hover { color: var(--ink); background: var(--surface-2); }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 .icon-btn {
@@ -236,6 +264,9 @@ code { font-variant-ligatures: none; }
 .chips { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
 /* Room for three rows of example chips before they arrive, so nothing below them moves. */
 #chips { min-height: 118px; }
+/* Two rows fit the 760 px block; the reserved height keeps the block from moving as they arrive. */
+.hero .chips { justify-content: flex-start; margin-top: 12px; }
+.hero #chips { min-height: 76px; }
 /* Quiet pills under the composer: a hairline, no fill; "N more" is a plain underlined link. */
 .chip {
   display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border-radius: 999px; cursor: pointer;
@@ -248,55 +279,73 @@ code { font-variant-ligatures: none; }
 
 /* --- Hero -------------------------------------------------------------------------------- */
 
-.hero { position: relative; padding: 40px 0 32px; isolation: isolate; overflow-x: clip; }
-.hero::before {
-  /* The horizon: an indigo glow centred under the ask box in the left column, a haze under it,
-     fading out downwards. The live panel on the right stays clean. */
-  content: ""; position: absolute; inset: 0 0 -120px; z-index: -1; pointer-events: none;
+/* The whole first screen: a centred block on a curved horizon. The hero pulls up under the sticky
+   header (negative margin), so the navy runs to the top edge. */
+.hero {
+  position: relative; isolation: isolate; overflow: hidden;
+  --hero-h: max(640px, min(100svh, 940px));
+  min-height: var(--hero-h); margin-top: calc(-1 * var(--header));
+  /* The composer's top lands at 59% of the hero at every height: under it sit 12 + 76 px of chips
+     and the bottom padding, over it the 116 px composer (0.41 x height - 204 px). The headline ends
+     48 px above it, on the vivid band, never on the lavender. */
+  padding: calc(var(--header) + 48px) var(--gutter) max(48px, calc(var(--hero-h) * 0.41 - 204px));
+  display: grid; place-items: end center;
+  color: var(--hero-ink);
   background:
-    radial-gradient(60% 50% at 28% 82%, var(--horizon-glow), transparent 70%),
-    radial-gradient(85% 38% at 28% 104%, var(--horizon-haze), transparent 72%);
-  -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent);
-  mask-image: linear-gradient(180deg, #000 72%, transparent);
+    linear-gradient(180deg, transparent 82%, var(--bg)),
+    radial-gradient(140% 95% at 50% 115%, var(--hz-0) 0%, var(--hz-1) 37%, var(--hz-2) 52%, var(--hz-3) 60%, var(--hz-4) 66%, var(--hz-5) 72%, var(--hz-6) 79%, var(--hz-7) 88%);
 }
-/* Top-aligned, so the live panel never moves when the copy beside it reflows (a font swap, the chips). */
-.hero-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: start; }
-.hero-live { padding-top: 34px; }
+/* The dark top of the hero: the header is transparent while this part is under it (app.js). */
+.hero-sky { position: absolute; top: 0; left: 0; right: 0; height: 55%; pointer-events: none; }
+.hero-center { position: relative; width: min(760px, 100%); display: grid; gap: 22px; }
+.hero .eyebrow { margin: 0; color: var(--hero-ink-2); }
 .hero h1 {
-  margin: 0 0 18px; font-size: clamp(2.3rem, 4.4vw, 3.5rem); line-height: 1.05; letter-spacing: -0.03em; font-weight: 420;
-  text-wrap: balance;
+  margin: 0 0 26px; font-size: clamp(2.5rem, 5vw, 4.25rem); font-weight: 300; line-height: 1.04; letter-spacing: -0.035em;
+  color: var(--hero-ink); text-wrap: balance;
 }
-.hero h1 .tone { color: var(--ink-3); }
-/* Geist has no italic: the one heavy word carries a dotted underline. */
-.hero h1 .walk {
-  color: var(--path-ink); font-weight: 600;
-  text-decoration: underline dotted 0.07em; text-underline-offset: 0.16em; text-decoration-color: color-mix(in oklab, var(--path) 55%, transparent);
+.hero h1 .tone { color: var(--hero-ink-2); }
+/* Two heavy, slanted words. Geist has no italic face, so the browser slants it. */
+.hero h1 .em {
+  font-style: italic; font-synthesis: weight style; font-weight: 700; color: var(--hero-ink);
+  text-decoration: underline dotted 0.06em; text-underline-offset: 0.14em; text-decoration-color: color-mix(in oklab, var(--hero-ink) 55%, transparent);
 }
-.hero .lede { margin: 0 0 26px; font-size: var(--fs-base); line-height: 1.6; color: var(--ink-2); max-width: 32em; text-wrap: pretty; }
 
-/* The composer: a frosted card on the horizon. Grid only, markup unchanged: the input on top,
-   the icon bottom-left, the Ask button bottom-right. */
+/* The composer, the centre of the page: the input on top; a status pill and the round send button below. */
 .askbar {
-  display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: minmax(48px, 1fr) auto;
-  align-items: center; gap: 6px 10px; min-height: 120px; padding: 14px 12px 12px 18px;
-  border: 1px solid var(--line-2); border-radius: 20px;
-  background: color-mix(in oklab, var(--surface) 84%, transparent);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
-  box-shadow: 0 1px 0 var(--highlight) inset, 0 28px 64px -32px var(--horizon);
+  display: grid; grid-template-rows: auto auto; gap: 14px; width: 100%;
+  min-height: 116px; padding: 16px 14px 12px 20px; border-radius: 18px;
+  background: var(--composer-bg); border: 1px solid var(--composer-line);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25); backdrop-filter: blur(16px) saturate(1.25);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 30px 60px -28px rgba(36, 40, 150, 0.45);
+  color: var(--ink);
   transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .askbar { background: var(--surface); } }
-.askbar:focus-within { border-color: var(--path); box-shadow: 0 0 0 4px var(--glow), 0 28px 64px -32px var(--horizon); }
-.askbar svg { grid-column: 1; grid-row: 2; width: 18px; height: 18px; color: var(--ink-3); }
-.askbar input {
-  grid-column: 1 / -1; grid-row: 1; align-self: start; min-width: 0; height: 40px; border: 0; outline: 0;
-  background: transparent; color: var(--ink); font: 400 var(--fs-base)/1.4 var(--font);
+.askbar:focus-within { border-color: var(--path); box-shadow: 0 0 0 4px var(--glow), 0 30px 60px -28px rgba(36, 40, 150, 0.45); }
+.askbar input { min-width: 0; height: 32px; font: 400 var(--fs-base)/1.4 var(--font); background: transparent; border: 0; outline: 0; color: var(--ink); }
+.ask-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line-2); font: 400 var(--fs-xs)/1 var(--font); color: var(--ink-2); }
+.pill svg { width: 14px; height: 14px; }
+.send {
+  width: 40px; height: 40px; flex: none; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--send-bg); color: #fff; transition: transform var(--fast) var(--ease), background var(--fast) var(--ease);
 }
-.askbar .btn { grid-column: 3; grid-row: 2; min-height: 36px; padding: 0 14px; font-size: var(--fs-sm); }
+.send:hover { background: var(--send-bg-hover); }
+.send:active { transform: scale(0.96); }
+.send[disabled] { opacity: 0.6; cursor: progress; }
+.send svg { width: 18px; height: 18px; }
+/* Visually hidden, still read: the send button's text. */
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .askbar input::placeholder { color: var(--ink-3); }
 .askbar input:focus-visible { outline: 0; }
 
-.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-top: 20px; }
+/* The hero foot: the lede as a caption at the bottom-left, How it works at the bottom-right. */
+.hero-foot {
+  position: absolute; left: 0; right: 0; bottom: 28px; width: min(var(--max), 100% - 2 * var(--gutter)); margin: 0 auto;
+  display: flex; justify-content: space-between; align-items: end; gap: 24px;
+}
+.hero-foot .lede { max-width: 30em; font-size: var(--fs-sm); line-height: 1.55; color: var(--ink-2); margin: 0; }
+.hero-foot .btn-ghost { min-height: 36px; font-size: var(--fs-sm); border-radius: 8px; }
 .text-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--ink); font-weight: 500; font-size: var(--fs-md); text-decoration: none; }
 .text-link span { transition: transform var(--fast) var(--ease); }
 .text-link:hover span { transform: translateX(3px); }
@@ -321,11 +370,6 @@ code { font-variant-ligatures: none; }
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   box-shadow: inset 0 1px 0 var(--highlight);
 }
-.hero-live { position: relative; }
-.live-glow {
-  position: absolute; z-index: -1; inset: -12% -8% -18% -8%; pointer-events: none;
-  background: radial-gradient(closest-side, var(--glow), transparent 70%);
-}
 .live-bar {
   display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 14px;
   border-bottom: 1px solid var(--line); font: 500 var(--fs-xs)/1 var(--mono); color: var(--ink-2);
@@ -335,7 +379,7 @@ code { font-variant-ligatures: none; }
 .live-bar .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-bar .count { color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .live-stage {
-  position: relative; aspect-ratio: 7 / 5; width: 100%;
+  position: relative; aspect-ratio: 2 / 1; width: 100%;
   background-image: radial-gradient(color-mix(in oklab, var(--ink-3) 22%, transparent) 1px, transparent 1.2px);
   background-size: 20px 20px; background-position: 10px 10px;
 }
@@ -440,8 +484,9 @@ h3 { letter-spacing: -0.01em; }
 .answer .status.error { color: var(--danger); }
 /* Larger and narrower than before; the bar above and the gap below are tighter, so a four-line answer
    still fits a 1080p frame at 125% with its path. */
-.answer .text { font-size: var(--fs-lg); line-height: 1.55; white-space: pre-wrap; margin: 0 0 8px; max-width: 46em; }
-.answer .text.refused { padding-left: 12px; border-left: 2px solid var(--line-2); }
+/* p.text: the answer paragraph only, never a grid cell that happens to carry a "text" class. */
+.answer p.text { font-size: var(--fs-lg); line-height: 1.55; white-space: pre-wrap; margin: 0 0 8px; max-width: 46em; }
+.answer p.text.refused { padding-left: 12px; border-left: 2px solid var(--line-2); }
 .answer .notice { margin: 0 0 12px; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--line); border-left: 3px solid var(--path); background: var(--surface-2); color: var(--ink-2); font-size: var(--fs-md); }
 .answer h3 { font-size: var(--fs-md); margin: 20px 0 10px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .path-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin: 12px 0 10px; }
@@ -696,15 +741,24 @@ footer.site a { color: var(--ink-2); }
 .foot-links { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 14px !important; }
 .foot-links a { display: inline-flex; align-items: center; min-height: 32px; }
 
+/* --- The dark band (the proof): its own tokens, entered and left through blurred indigo waves ---- */
+
+section.block.band-dark {
+  --bg: #07081a; --surface: #0f1126; --surface-2: #15182e; --surface-3: #1c2036; --ink: #eef0fb; --ink-2: #aab0cf; --ink-3: #8288ab;
+  --line: rgba(200, 205, 255, 0.10); --line-2: rgba(200, 205, 255, 0.18); --path: #2dd4e6; --path-ink: #2dd4e6;
+  position: relative; isolation: isolate; color: var(--ink); background: var(--bg);
+  margin: 160px 0; padding: 120px 0; overflow-x: clip;
+}
+.band-dark::before, .band-dark::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 180px; z-index: -1; pointer-events: none; filter: blur(28px);
+  background: radial-gradient(60% 100% at 30% 50%, #4549df, transparent 70%), radial-gradient(50% 90% at 72% 40%, #2b2fb0, transparent 70%), #07081a;
+}
+.band-dark::before { top: -110px; border-radius: 50% 50% 0 0 / 60% 40% 0 0; }
+.band-dark::after { bottom: -110px; border-radius: 0 0 50% 50% / 0 0 40% 60%; }
+
 /* --- Entrance and motion ------------------------------------------------------------------------ */
 
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.hero-copy > * { animation: rise 520ms var(--ease) both; }
-.hero-copy > :nth-child(2) { animation-delay: 40ms; }
-.hero-copy > :nth-child(3) { animation-delay: 80ms; }
-.hero-copy > :nth-child(4) { animation-delay: 120ms; }
-.hero-copy > :nth-child(n + 5) { animation-delay: 160ms; }
-.hero-live { animation: rise 640ms var(--ease) 120ms both; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
@@ -713,10 +767,6 @@ footer.site a { color: var(--ink-2); }
 /* --- Small screens ------------------------------------------------------------------------------ */
 
 @media (max-width: 1080px) {
-  .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 36px; }
-  .hero-live { padding-top: 0; }
-  .hero { padding-top: 40px; }
-  .hero .lede { max-width: 40em; }
   .team-more, .builders-side { grid-template-columns: minmax(0, 1fr); }
   .links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -731,19 +781,21 @@ footer.site a { color: var(--ink-2); }
   /* The path head wraps here; the buttons start their row like the replay button. */
   .depths, .path-head h3 + .copy-link { margin-left: 0; }
   .top nav { display: none; }
-  .hero { padding: 24px 0 8px; }
-  .askbar { min-height: 108px; }
-  .askbar .btn { min-height: 44px; }
-  .hero::before {
+  .hero {
+    min-height: max(600px, 100svh); padding: calc(var(--header) + 48px) var(--gutter) 40px; place-items: start center;
     background:
-      radial-gradient(60% 50% at 50% 70%, var(--horizon-glow), transparent 70%),
-      radial-gradient(85% 38% at 50% 100%, var(--horizon-haze), transparent 72%);
+      linear-gradient(180deg, transparent 82%, var(--bg)),
+      radial-gradient(180% 116% at 50% 112%, var(--hz-0) 0%, var(--hz-1) 37%, var(--hz-2) 52%, var(--hz-3) 60%, var(--hz-4) 66%, var(--hz-5) 72%, var(--hz-6) 79%, var(--hz-7) 88%);
   }
-  .hero h1 { font-size: clamp(2.15rem, 9.4vw, 2.5rem); }
-  .hero .lede { font-size: var(--fs-base); margin-bottom: 20px; }
+  .hero-center { width: 100%; }
+  .hero h1 { font-size: clamp(2.2rem, 10.5vw, 2.5rem); }
+  .askbar { min-height: 112px; }
+  .ask-tools { flex-wrap: wrap; }
+  .send { width: 44px; height: 44px; }
+  .hero-foot { position: static; width: 100%; margin-top: 28px; flex-direction: column; align-items: start; gap: 14px; }
+  .hero #chips { min-height: 148px; }
   .eyebrow { font-size: var(--fs-xs); letter-spacing: 0.04em; margin-bottom: 14px; }
   .live-stage { aspect-ratio: 1 / 1; }
-  .live-glow { inset: -8% 0 -10% 0; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat:nth-child(3) { padding-left: 0; border-left: 0; }
   .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
@@ -778,9 +830,7 @@ footer.site a { color: var(--ink-2); }
 @media (max-width: 420px) {
   /* The sample line keeps its node count; the edge count is in the stats right below. */
   .live-bar .count-edges { display: none; }
-  .askbar { padding-left: 14px; }
-  .askbar .btn { padding: 0 14px; }
-  .askbar .btn kbd { display: none; }
+  .askbar { padding-left: 16px; }
   .chip { min-height: 44px; }
   #chips { min-height: 148px; }
   .replay, .copy-link { min-height: 44px; }

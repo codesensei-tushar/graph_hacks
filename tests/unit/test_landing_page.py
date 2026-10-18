@@ -96,6 +96,7 @@ class SectionsTest(unittest.TestCase):
             [
                 ("h1", "Ask how your company works. Every answer shows the path it walked."),
                 ("h2", "Ask the graph behind this project."),
+                ("h2", "The graph behind every answer."),
                 ("h2", "Take FalkorDB out, and the answers go with it."),
                 ("h2", "Not only engineering."),
                 ("h2", "How an answer is made."),
@@ -104,7 +105,7 @@ class SectionsTest(unittest.TestCase):
         )
         for landmark in ("header", "main", "footer"):
             self.assertEqual(page.tags.count(landmark), 1, landmark)
-        for section in ("ask", "live-answer", "proof", "teams", "how", "builders"):
+        for section in ("ask", "live-answer", "graph", "proof", "teams", "how", "builders"):
             self.assertIn(section, page.text_by_id)
 
     def test_the_footer_carries_the_readme_ai_disclosure_word_for_word(self):
@@ -287,5 +288,9 @@ class TypeScaleTest(unittest.TestCase):
 
     def test_weights_are_400_500_and_600_plus_the_hero_headline(self):
         weights = set(re.findall(r"font-weight:\s*(\d{3})\b", self.css)) | set(re.findall(r"font:\s*(\d{3})\s", self.css))
-        self.assertLessEqual(weights, {"100", "400", "420", "500", "600"})  # 100 is the @font-face range
-        self.assertNotIn("700", weights)
+        self.assertLessEqual(weights, {"100", "300", "400", "500", "600", "700"})  # 100 is the @font-face range
+        # 300 and 700 belong to the hero alone: the light headline and its two heavy words.
+        for weight in ("300", "700"):
+            css = re.sub(r"/\*.*?\*/", "", self.css, flags=re.S)
+            rules = [rule for rule in re.findall(r"([^{}]+)\{([^{}]*)\}", css) if re.search(rf"font-weight:\s*{weight}\b|font:\s*{weight}\s", rule[1])]
+            self.assertTrue(rules and all(selector.strip().startswith(".hero h1") for selector, _ in rules), weight)

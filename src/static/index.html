@@ -11,7 +11,7 @@
 <link rel="preload" href="/static/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <script>try { var t = localStorage.getItem("brain-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
-<link rel="stylesheet" href="/static/style.css?v=10">
+<link rel="stylesheet" href="/static/style.css?v=11">
 <link rel="stylesheet" href="/static/riskmap.css?v=1">
 </head>
 <body>
@@ -24,6 +24,7 @@
     </a>
     <nav aria-label="Sections">
       <a href="#ask">Ask</a>
+      <a href="#graph">Graph</a>
       <a href="#proof">Proof</a>
       <a href="#teams">Teams</a>
       <a href="#how">How it works</a>
@@ -39,50 +40,26 @@
 </header>
 
 <main id="main">
-  <!-- 2.1 Hero: the promise, the ask box, live counts and a live slice of the graph. -->
+  <!-- 2.1 Hero: the whole first screen. A centred block on the horizon: the promise, the ask box and the example chips. -->
   <section class="hero" id="ask" aria-labelledby="hero-title">
-    <div class="wrap hero-grid">
-      <div class="hero-copy">
-        <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Graph Hacks · Track 03 · Company Brain on FalkorDB</p>
-        <h1 id="hero-title">Ask how your company works. <span class="tone">Every answer shows the <span class="walk">path</span> it walked.</span></h1>
-        <p class="lede">People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.</p>
-        <div class="ask-area">
-          <form id="ask-form" class="askbar" role="search" autocomplete="off" action="/" method="get">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="5" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M7.3 10.9 16.7 6.1M7.3 13.1l9.4 4.8"/></svg>
-            <input type="text" id="q" name="q" maxlength="300" placeholder="Ask who owns what, and why" aria-label="Your question">
-            <button class="btn" id="ask-btn" type="submit">Ask <kbd aria-hidden="true">↵</kbd></button>
-          </form>
-          <ul class="chips" id="chips" aria-label="Example questions"></ul>
-        </div>
-        <div class="hero-actions">
-          <a class="btn btn-ghost" href="#how">How it works <span aria-hidden="true">→</span></a>
-        </div>
-      </div>
-
-      <div class="hero-live">
-        <div class="live-glow" aria-hidden="true"></div>
-        <figure class="live" id="live">
-          <div class="live-bar">
-            <span class="dot" aria-hidden="true"></span>
-            <span class="grow" id="live-name">Live sample of the graph</span>
-            <span class="count" id="live-count"></span>
+    <span class="hero-sky" aria-hidden="true"></span>
+    <div class="hero-center">
+      <p class="eyebrow">Graph Hacks · Track 03 · Company Brain on FalkorDB</p>
+      <h1 id="hero-title">Ask how your company works. <span class="tone">Every answer shows the <em class="em">path</em> it <em class="em">walked</em>.</span></h1>
+      <div class="ask-area">
+        <form id="ask-form" class="askbar" role="search" autocomplete="off" action="/" method="get">
+          <input type="text" id="q" name="q" maxlength="300" placeholder="Ask who owns what, and why" aria-label="Your question">
+          <div class="ask-tools">
+            <span class="pill" title="This page reads public channels only"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="5" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M7.3 10.9 16.7 6.1M7.3 13.1l9.4 4.8"/></svg>Public channels only</span>
+            <button class="send" id="ask-btn" type="submit" aria-label="Ask"><span class="sr">Ask</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
           </div>
-          <div class="live-stage" id="live-stage">
-            <p class="live-wait" id="live-wait">Loading the graph…</p>
-            <noscript><p class="live-wait">This part needs JavaScript.</p></noscript>
-          </div>
-          <figcaption class="live-foot">
-            <ul class="legend" id="live-legend" aria-label="Node families"></ul>
-            <p class="ticker" id="live-ticker"></p>
-          </figcaption>
-        </figure>
-        <dl class="stats" id="stats" aria-label="Live counts from the graph">
-          <div class="stat sk"><dt data-one="person">people</dt><dd data-stat="Person"></dd></div>
-          <div class="stat sk"><dt data-one="thing teams run">things teams run</dt><dd data-stat="Service"></dd></div>
-          <div class="stat sk"><dt data-one="decision">decisions</dt><dd data-stat="Decision"></dd></div>
-          <div class="stat sk"><dt data-one="edge">edges</dt><dd data-stat="edges"></dd></div>
-        </dl>
+        </form>
+        <ul class="chips" id="chips" aria-label="Example questions"></ul>
       </div>
+    </div>
+    <div class="hero-foot">
+      <p class="lede">People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.</p>
+      <a class="btn btn-ghost" href="#how">How it works <span aria-hidden="true">↗</span></a>
     </div>
   </section>
 
@@ -107,8 +84,38 @@
       <p class="small">Public and read-only: public channels only, no model, answers cached for a minute.</p>
     </section>
 
-    <!-- 2.3 Why the graph matters: the ablation, loaded when it scrolls into view. -->
-    <section class="block" id="proof" aria-labelledby="proof-title">
+    <!-- 2.2b The graph behind every answer: a live slice of it and the live counts. -->
+    <section class="block" id="graph" aria-labelledby="graph-title">
+      <p class="eyebrow">The graph</p>
+      <h2 id="graph-title">The graph behind every answer.</h2>
+      <figure class="live" id="live">
+        <div class="live-bar">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="grow" id="live-name">Live sample of the graph</span>
+          <span class="count" id="live-count"></span>
+        </div>
+        <div class="live-stage" id="live-stage">
+          <p class="live-wait" id="live-wait">Loading the graph…</p>
+          <noscript><p class="live-wait">This part needs JavaScript.</p></noscript>
+        </div>
+        <figcaption class="live-foot">
+          <ul class="legend" id="live-legend" aria-label="Node families"></ul>
+          <p class="ticker" id="live-ticker"></p>
+        </figcaption>
+      </figure>
+      <dl class="stats" id="stats" aria-label="Live counts from the graph">
+        <div class="stat sk"><dt data-one="person">people</dt><dd data-stat="Person"></dd></div>
+        <div class="stat sk"><dt data-one="thing teams run">things teams run</dt><dd data-stat="Service"></dd></div>
+        <div class="stat sk"><dt data-one="decision">decisions</dt><dd data-stat="Decision"></dd></div>
+        <div class="stat sk"><dt data-one="edge">edges</dt><dd data-stat="edges"></dd></div>
+      </dl>
+    </section>
+
+  </div>
+
+  <!-- 2.3 Why the graph matters: the ablation, loaded when it scrolls into view. A dark band, entered and left through blurred waves. -->
+  <section class="block band-dark" id="proof" aria-labelledby="proof-title">
+    <div class="wrap">
       <h2 id="proof-title">Take FalkorDB out, and the answers go with it.</h2>
       <p class="sub">The same questions run twice: once against FalkorDB, once with every graph read returning nothing.</p>
       <div class="proof-head">
@@ -125,7 +132,10 @@
           </tbody>
         </table>
       </div>
-    </section>
+    </div>
+  </section>
+
+  <div class="wrap">
 
     <!-- 2.4 Every team. -->
     <section class="block" id="teams" aria-labelledby="teams-title">
@@ -318,6 +328,6 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
 <script src="/static/graph.js?v=6"></script>
 <script src="/static/hero.js?v=4"></script>
 <script src="/static/riskmap.js?v=2"></script>
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

@@ -28,12 +28,12 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 
 ### 2.1 Hero
 
-- Eyebrow: `Graph Hacks · Track 03 · Company Brain on FalkorDB`
-- Headline, two tones: **Ask how your company works.** then, muted, *Every answer shows the path it walked.*
-- Subline: "People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used."
-- The ask box sits in the hero, with the example chips from `/api/ask/tools` under it: the product is the demo. Asking renders the answer and the walk directly below the hero (2.2). A ghost link **How it works** scrolls to 2.5. Add **Watch the demo** only once the video link exists.
-- Live counts from `/api/graph/stats`, in mono with tabular numerals and reserved width: for example **{people}** people · **{services}** things teams run · **{decisions}** decisions · **{edges}** edges. Only counts the API returns; if the call fails, the row is not shown.
-- Right side on desktop, below on mobile: a live slice of the graph from `/api/graph/sample`, laid out deterministically (the same input gives the same picture), with node names on hover and focus. Pulses travel along real edges in their true direction (see 3.4). It is real data from the public scope, never a decorative fake graph.
+The whole first screen (between 640 and 940 px tall), on a curved horizon: navy at the top in both themes, a vivid indigo band behind the headline, then lavender to near-white (light) or deep indigo (dark) at the fold. The hero pulls up under the header, which is transparent with light ink while the hero's dark top is under it and solid once it leaves, so a deep link lands under a solid header.
+
+- A centred 760 px block, left-aligned inside: the eyebrow `Graph Hacks · Track 03 · Company Brain on FalkorDB`; the headline in a light weight, **Ask how your company works.** then, muted, *Every answer shows the path it walked.*, with *path* and *walked* heavy, slanted and dotted-underlined; the composer; the example chips from `/api/ask/tools`.
+- The composer is the centre of the page: a wide frosted card with the question on top, a "Public channels only" status pill (true: the page reads `org_shared`) and a round send button named "Ask". The product is the demo: asking renders the answer and the walk in 2.2.
+- At the foot of the screen: the subline as a small caption at the bottom-left ("People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.") and **How it works ↗** at the bottom-right. Add **Watch the demo** only once the video link exists.
+- The nav is sparse, uppercase and spread across the top, with **Graph** after **Ask**.
 
 ### 2.2 Live proof: ask the graph
 
@@ -43,7 +43,15 @@ Sections in this order. The copy below is final unless main changes; numbers in 
 - Footer under each answer, from the response: "Tool `{tool}` · picked by keywords · read from public channels".
 - Small print: "Public and read-only: public channels only, no model, answers cached for a minute."
 
+### 2.2b The graph behind every answer
+
+- Eyebrow: `The graph`. Heading: **The graph behind every answer.**
+- A live slice of the graph from `/api/graph/sample`, laid out deterministically (the same input gives the same picture), with node names on hover and focus; clicking a node asks about it. Pulses travel along real edges in their true direction (see 3.4). It is real data from the public scope, never a decorative fake graph.
+- Under it, the live counts from `/api/graph/stats`, in mono with tabular numerals and reserved width: for example **{people}** people · **{services}** things teams run · **{decisions}** decisions · **{edges}** edges. Only counts the API returns; if the call fails, the row is not shown.
+
 ### 2.3 Why the graph matters
+
+A full-width dark band in both themes, entered and left through blurred indigo waves; the proof table takes the band's own tokens.
 
 - Heading: **Take FalkorDB out, and the answers go with it.**
 - Body: "The same questions run twice: once against FalkorDB, once with every graph read returning nothing."
