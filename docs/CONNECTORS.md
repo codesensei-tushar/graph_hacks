@@ -141,8 +141,13 @@ the legacy org's env install keeps `connector:sync:<source>`. An external accoun
 
 Disconnecting (`DELETE /console/api/connections/{id}`) marks the install `removing`, stops its
 job, deletes everything it wrote 500 nodes at a time (a scheduler job, so a restart resumes it),
-then the install node and its external account, and writes an audit entry. Env installs can only
-be turned off in the environment, as below.
+then the install node and its external account (unless another install of the org still holds
+it), and writes an audit entry. Env installs can only be turned off in the environment, as below.
+
+Data whose install is configured nowhere any more (its env variables were removed) keeps
+answering until it is purged. `GET /ops/connectors` lists such installs under `orphaned`, and
+`DELETE /ops/connectors/orphans/<source>:<install>` deletes their data 500 nodes at a time
+(`?org=<id>` for another org than the legacy one).
 
 ## Operate it
 

@@ -54,7 +54,7 @@ class ConsoleFake(Connector):
 
     def containers(self, install):
         wanted = set(install.get_list("projects"))
-        return [Container(id=install.container_id(key), name=key, external_id=pid) for pid, key in self.PROJECTS.items() if key in wanted]
+        return [Container(id=install.container_id(pid), name=key, external_id=pid) for pid, key in self.PROJECTS.items() if key in wanted]
 
     def fetch(self, install, container, cursor):
         items = [
@@ -172,14 +172,68 @@ class ConsoleConnectorsTest(unittest.TestCase):
         self.assertIsNone(orgs.external_account_org(self.account))
         self.assertIn("connector.disconnect", [call.args[2] for call in audit.call_args_list])
 
-    def test_mutations_need_the_csrf_token_and_origin(self):
+    def test_bodies_must_be_json(self):
+        # CSRF (Origin, X-CSRF-Token) is checked by console_user/console_admin themselves.
         key = self.install.key
-        body = {"selected": ["10"]}
-        self.assertEqual(self.client.put(f"/console/api/connections/{key}/containers", json=body).status_code, 403)
-        self.assertEqual(self.client.put(f"/console/api/connections/{key}/containers", json=body, headers={**self.headers, "x-csrf-token": "wrong"}).status_code, 403)
-        self.assertEqual(self.client.put(f"/console/api/connections/{key}/containers", json=body, headers={**self.headers, "origin": "https://evil.example"}).status_code, 403)
-        self.assertEqual(self.client.post(f"/console/api/connections/{key}/sync", headers={"origin": ORIGIN}).status_code, 403)
-        self.assertEqual(self.client.put(f"/console/api/connections/{key}/containers", content=b"selected=10", headers={**self.headers, "content-type": "application/x-www-form-urlencoded"}).status_code, 415)
+        response = self.client.put(f"/console/api/connections/{key}/containers", content=b"selected=10", headers={**self.headers, "content-type": "application/x-www-form-urlencoded"})
+        self.assertEqual(response.status_code, 415)
+
+    def test_jira_sites_come_from_package_d_in_the_ui_shape(self):
+        from types import SimpleNamespace
+
+        with tenancy.org_context(self.x.id):
+            jira = store.create("jira", auth="oauth", created_by="p-ada", secrets={"access_token": "a"})
+        calls = []
+        fake = SimpleNamespace(
+            sites_for=lambda install: calls.append(("sites", install.key, tenancy.current_org())) or [SimpleNamespace(cloud_id="c1", name="One", url="https://one.atlassian.net")],
+            choose_site=lambda org, key, cloud_id: calls.append(("choose", org, key, cloud_id)) or (key if cloud_id == "c1" else (_ for _ in ()).throw(PermissionError("claimed"))),
+        )
+        try:
+            with mock.patch.object(console_connectors, "_jira_oauth", return_value=fake):
+                sites = self.client.get(f"/console/api/connections/{jira.id}/sites").json()
+                self.assertEqual(sites, [{"cloud_id": "c1", "name": "One", "url": "https://one.atlassian.net"}])
+                chosen = self.client.post(f"/console/api/connections/{jira.id}/site", json={"cloud_id": "c1"}, headers=self.headers)
+                self.assertEqual(chosen.json(), {"ok": True, "id": jira.id})
+                self.assertEqual(self.client.post(f"/console/api/connections/{jira.id}/site", json={"cloud_id": "c2"}, headers=self.headers).status_code, 409)
+                self.assertEqual(self.client.get(f"/console/api/connections/{self.install.key}/sites").status_code, 400)
+            self.assertEqual(calls[0], ("sites", jira.id, self.x.id))
+            self.assertEqual(calls[1], ("choose", self.x.id, jira.id, "c1"))
+            with mock.patch.object(console_connectors, "_jira_oauth", return_value=None):
+                self.assertEqual(self.client.get(f"/console/api/connections/{jira.id}/sites").status_code, 503)
+        finally:
+            with tenancy.org_context(self.x.id):
+                store.delete(jira.id)
+
+    def test_rearm_makes_a_backed_off_install_due_now(self):
+        install = store.to_install(self._stored())
+        registry.put(install)
+        with tenancy.org_context(self.x.id):
+            from src.connectors import graph as connector_graph
+
+            connector_graph.set_state(install.container_id("10"), install, due_at=int(time.time() * 1000) + 3_600_000, failures=3)
+            connector_graph.set_state(install.key, install, failures=3, last_error="rejected")
+            sync.schedule("consolefake", 3600, install)
+            sync.rearm(install)
+            self.assertLess(scheduler.due_at(f"connector:sync:{self.x.id}:consolefake:{self.install.id}"), time.time() + 1)
+            self.assertEqual(connector_graph.get_state(install.container_id("10"))["due_at"], 0)
+            self.assertNotIn("last_error", connector_graph.get_state(install.key))
+
+    def _stored(self):
+        with tenancy.org_context(self.x.id):
+            return store.get(self.install.key)
+
+    def test_removal_keeps_an_account_another_install_still_holds(self):
+        with tenancy.org_context(self.x.id):
+            twin = store.create("consolefake", auth="token", created_by="p-ada", external_account=self.account, secrets={"token": SECRET})
+        try:
+            self.assertEqual(self.client.delete(f"/console/api/connections/{self.install.key}", headers=self.headers).status_code, 202)
+            self._run_scheduler(5)
+            with tenancy.org_context(self.x.id):
+                self.assertIsNone(store.get(self.install.key))
+            self.assertEqual(orgs.external_account_org(self.account), self.x.id)
+        finally:
+            with tenancy.org_context(self.x.id):
+                store.delete(twin.id)
 
     def test_members_view_but_do_not_change(self):
         self.session = {**self.session, "role": "member"}
@@ -253,6 +307,48 @@ class ConsoleConnectorsTest(unittest.TestCase):
                 store.delete(self.install.key)
         registry.drop(self.x.id, "consolefake", self.install.id)
         orgs.release_external_account(self.account, self.x.id)
+
+
+class OrphanedInstallTest(unittest.TestCase):
+    """Data an install wrote stays after its configuration is gone; the operator sees and purges it."""
+
+    def test_orphans_are_listed_and_purged_in_batches(self):
+        from src.api.v1 import connectors as connectors_route
+        from src.connectors import graph as connector_graph
+        from src.connectors.base import Install
+
+        org = orgs.create_org("Orphan Org", created_by="TO:UO")
+        app = FastAPI()
+        app.include_router(connectors_route.router)
+        saved = settings.brain_admin_token
+        object.__setattr__(settings, "brain_admin_token", "orphan-admin")
+        headers = {"authorization": "Bearer orphan-admin"}
+        try:
+            gone = Install(source="jira", id="old", org=org.id)
+            with tenancy.org_context(org.id):
+                connector_graph.write_containers(gone, [Container(id=gone.container_id("1"), name="OLD", external_id="1")])
+                connector_graph.set_state(gone.key, gone, account="old@example.com")
+                _, graph = connect()
+                for n in range(7):
+                    graph.query("CREATE (:Ticket {id: $id, install: $key, scope: 'org_internal'})", {"id": gone.item_id(n), "key": gone.key})
+            client = TestClient(app)
+            body = client.get(f"/ops/connectors?org={org.id}", headers=headers).json()
+            self.assertEqual([row["install"] for row in body["orphaned"]], ["jira:old"])
+            self.assertEqual(body["orphaned"][0]["nodes"], 9)
+            self.assertEqual(client.delete(f"/ops/connectors/orphans/jira:nothing?org={org.id}", headers=headers).status_code, 409)
+            with mock.patch.object(sync, "REMOVE_BATCH", 4), mock.patch.object(sync, "_audit"):
+                self.assertEqual(client.delete(f"/ops/connectors/orphans/jira:old?org={org.id}", headers=headers).status_code, 202)
+                for _ in range(5):
+                    scheduler.run_due(now=time.time() + 1)
+            with tenancy.org_context(org.id):
+                _, graph = connect()
+                self.assertEqual(graph.query("MATCH (n {install: 'jira:old'}) RETURN count(n)").result_set[0][0], 0)
+            self.assertEqual(client.get(f"/ops/connectors?org={org.id}", headers=headers).json()["orphaned"], [])
+        finally:
+            object.__setattr__(settings, "brain_admin_token", saved)
+            scheduler.cancel_org(org.id)
+            falkordb_client.client().select_graph(org.graph).delete()
+            tenancy.control_graph().query("MATCH (o:Org {id: $id}) DETACH DELETE o", {"id": org.id})
 
 
 if __name__ == "__main__":

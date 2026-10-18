@@ -50,6 +50,7 @@ log = logging.getLogger(__name__)
 
 SYNC_JOB = "runConnectorSync"
 REMOVE_JOB = "runConnectorRemoval"
+PURGE_JOB = "runConnectorPurge"
 REMOVE_BATCH = 500
 # A container keeps at most this many items; past it, new items are dropped and existing ones update.
 MAX_ITEMS_PER_CONTAINER = 1000
@@ -384,6 +385,19 @@ def status() -> list[dict]:
 # --- disconnect ---------------------------------------------------------------------------
 
 
+def rearm(install: Install) -> None:
+    """Sync ``install`` again now: after a reconnect revives it (new credentials), a job parked in a
+    credentials back-off (up to an hour) must not wait it out. Every container is due at once."""
+    with tenancy.org_context(install.org):
+        _containers.pop(_cache_key(install), None)
+        for state in graph.list_states(install):
+            fields = {"due_at": 0, "failures": 0}
+            if state.get("id") == install.key:
+                fields = {"failures": 0, "last_error": None}
+            graph.set_state(state["id"], install, **fields)
+    schedule(install.source, 0, install)
+
+
 def remove_install(install_key: str, actor: str | None = None) -> bool:
     """Disconnect a stored install of the org in context: mark it removing, stop its sync, and queue the
     batched deletion of everything it wrote. False when there is no such install, or it is an env install."""
@@ -433,23 +447,77 @@ def run_removal(payload: dict) -> None:
         return
     org = tenancy.current_org_ref().id
     store.delete(install_key)
-    if stored.external_account:
+    # Another install of the org may hold the same account (a duplicate made by a racing callback):
+    # the account stays the org's while one does.
+    if stored.external_account and not any(row.external_account == stored.external_account for row in store.list_installs()):
         orgs.release_external_account(stored.external_account, org)
     _audit(org, payload.get("actor"), "connector.disconnect", install_key, "ok")
     log.info("[connectors] removed install=%s org=%s", install_key, org)
 
 
-def _audit(org: str, actor: str | None, action: str, target: str, result: str) -> None:
-    """Package A's audit log, when it is in this build; otherwise the application log."""
-    try:
-        from src.domain.console import audit
-    except ImportError:
-        log.info("[audit] org=%s actor=%s action=%s target=%s result=%s", org, actor, action, target, result)
+# --- orphans: data left by an install that is no longer configured --------------------------
+
+
+def _configured_keys(org: str) -> set[str]:
+    from src.connectors import store
+
+    keys = {install.key for _connector, install in registry.installs_of(org)}
+    return keys | {row.id for row in store.list_installs()}
+
+
+def orphans() -> list[dict]:
+    """Installs of the org in context that left data in the graph but are configured nowhere (their
+    env variables were removed, say). Their items still answer questions until purged."""
+    org = tenancy.current_org_ref().id
+    configured = _configured_keys(org)
+    _, graph_ = connect()
+    keys = {
+        row[0]
+        for label in ("ConnectorState", "Container")
+        for row in graph_.query(f"MATCH (n:{label}) WHERE n.install IS NOT NULL RETURN DISTINCT n.install").result_set
+    }
+    found = []
+    for key in sorted(keys - configured):
+        state = graph.get_state(key)
+        nodes = graph_.query("MATCH (n {install: $key}) RETURN count(n)", {"key": key}).result_set[0][0]
+        found.append({"install": key, "source": key.split(":", 1)[0], "nodes": int(nodes), "account": state.get("account"), "last_sync_at": state.get("last_sync_at")})
+    return found
+
+
+def purge_orphan(install_key: str, actor: str | None = None) -> bool:
+    """Queue the batched deletion of an orphaned install's data in the org in context. False when the
+    install is still configured (disconnect it instead) or left nothing."""
+    org = tenancy.current_org_ref().id
+    if install_key in _configured_keys(org) or install_key not in {row["install"] for row in orphans()}:
+        return False
+    scheduler.schedule(0, PURGE_JOB, {"install": install_key, "actor": actor}, job_id=f"connector:purge:{install_key}")
+    return True
+
+
+def run_purge(payload: dict) -> None:
+    install_key = (payload or {}).get("install") or ""
+    org = tenancy.current_org_ref().id
+    if not install_key or install_key in _configured_keys(org):
+        log.warning("[connectors] purge of %s skipped: it is configured again", install_key)
         return
     try:
-        audit.record(org, actor, action, target, result)
+        deleted = delete_batch(install_key)
     except Exception:
-        log.exception("[audit] not recorded: %s %s", action, target)
+        log.exception("[connectors] purge batch failed install=%s; retrying in a minute", install_key)
+        scheduler.schedule(60, PURGE_JOB, payload, job_id=f"connector:purge:{install_key}")
+        return
+    if deleted >= REMOVE_BATCH:
+        scheduler.schedule(0, PURGE_JOB, payload, job_id=f"connector:purge:{install_key}")
+        return
+    _audit(org, payload.get("actor"), "connector.purge", install_key, "ok")
+    log.info("[connectors] purged orphaned install=%s org=%s", install_key, org)
+
+
+def _audit(org: str, actor: str | None, action: str, target: str, result: str) -> None:
+    """The console's audit log (control graph). It never raises."""
+    from src.domain.console import audit
+
+    audit.record(org, actor or "system", action, target, result)
 
 
 # --- webhooks -----------------------------------------------------------------------------
@@ -488,3 +556,4 @@ def _deliver(connector: Connector, install: Install, source: str, request: Webho
 
 scheduler.register(SYNC_JOB, run_sync)
 scheduler.register(REMOVE_JOB, run_removal)
+scheduler.register(PURGE_JOB, run_purge)

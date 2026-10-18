@@ -1,7 +1,6 @@
 """The console's JSON API for connections, and its ask. The console UI uses only this.
 
     GET    /console/api/connections                    every connection of the org, with sync status
-    POST   /console/api/connectors/{source}/connect    {authorize_url}: starts the vendor's OAuth (admins)
     GET    /console/api/connections/{id}/sites         Jira sites to choose from, when more than one (admins)
     POST   /console/api/connections/{id}/site          {cloud_id}: the chosen site (admins)
     GET    /console/api/connections/{id}/available     [{external_id, key, name}]: containers to select (admins)
@@ -10,19 +9,20 @@
     DELETE /console/api/connections/{id}               disconnect: removes everything it wrote (admins)
     POST   /console/api/ask                            {q}: the /api/ask shape, with the asker's own scopes
 
-Everything is 404 unless ``CONSOLE_ENABLED``. Sessions come from package A's ``console_user`` /
-``console_admin`` dependencies (members view and ask; owners and admins change things); every
-route runs in the session's org (``tenancy.org_context``), so it only ever sees that org's
-graph. A mutation needs the session's ``X-CSRF-Token`` and an ``Origin`` equal to
-``PUBLIC_URL``. Nothing secret is returned, and vendor error text is never echoed.
+Connecting a source (``POST /console/api/connectors/{source}/connect``) and the vendor callbacks
+are package D's (``console_oauth.py``); the Jira site routes here call D's
+``jira.oauth.sites_for`` and ``choose_site``.
+
+Everything is 404 unless ``CONSOLE_ENABLED``. Sessions come from ``console_user`` /
+``console_admin`` (members view and ask; owners and admins change things), which also check
+CSRF (``Origin``, ``X-CSRF-Token``, JSON) on every cookie mutation. Every route runs in the
+session's org (``tenancy.org_context``), so it only ever sees that org's graph. Nothing secret
+is returned, and vendor error text is never echoed.
 
 ``{id}`` is the install key, ``<source>:<install>``.
 """
 
-import inspect
 import logging
-import re
-import secrets
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -34,25 +34,13 @@ from src.connectors.base import Install
 from src.core import tenancy
 from src.core.config import settings
 from src.db.falkordb_client import kv
-from src.domain import orgs
+from src.domain.console.session import console_admin, console_user
 
 log = logging.getLogger(__name__)
 
 MODEL_QUESTIONS_PER_ORG_PER_DAY = 200
 MAX_SELECTED = 200
-JIRA_SITE_URL = re.compile(r"^https://[a-z0-9][a-z0-9-]{0,62}\.atlassian\.net$")
 _ADMIN_ROLES = ("owner", "admin")
-
-try:  # package A
-    from src.domain.console.session import console_admin, console_user
-except ImportError:  # until A lands: no console session, every route answers 503
-
-    async def console_user(request: Request):
-        raise HTTPException(status_code=503, detail="console sign-in is not available")
-
-    async def console_admin(request: Request):
-        raise HTTPException(status_code=503, detail="console sign-in is not available")
-
 
 def _enabled() -> None:
     if not settings.console_enabled:
@@ -76,19 +64,11 @@ def _org(session) -> tenancy.OrgRef:
 
 
 def _actor(session) -> str:
+    if isinstance(getattr(session, "actor", None), str):
+        return session.actor
     person = _get(session, "person")
     person = person.get("id") if isinstance(person, dict) else getattr(person, "id", person)
     return str(person or _get(session, "slack_user") or "unknown")
-
-
-def _check_mutation(request: Request, session) -> None:
-    expected = _get(session, "csrf") or ""
-    presented = request.headers.get("x-csrf-token") or ""
-    if not expected or not secrets.compare_digest(presented, str(expected)):
-        raise HTTPException(status_code=403, detail="csrf")
-    origin = settings.public_url or str(request.base_url).rstrip("/")
-    if request.headers.get("origin") != origin:
-        raise HTTPException(status_code=403, detail="origin")
 
 
 async def _json(request: Request) -> dict:
@@ -171,60 +151,57 @@ def connections(session=Depends(console_user)):
         return list_connections(org)
 
 
-@router.post("/connectors/{source}/connect")
-async def connect_source(source: str, request: Request, session=Depends(console_admin)):
-    _check_mutation(request, session)
-    connector = _connector(source)
-    if connector.oauth is None:
-        return JSONResponse({"error": "this connector cannot be connected from the console"}, status_code=400)
+def _jira_oauth():
     try:
-        from src.connectors import oauth  # package D
+        from src.connectors.jira import oauth  # package D
     except ImportError:
-        return JSONResponse({"error": "connecting is not available yet"}, status_code=503)
-    org = _org(session)
-    url = oauth.authorize_url(source, org.id, session)
-    if inspect.isawaitable(url):
-        url = await url
-    return {"authorize_url": url}
+        return None
+    return oauth
 
 
 @router.get("/connections/{install_key}/sites")
-def sites(install_key: str, session=Depends(console_admin)):
-    with tenancy.org_context(_org(session)):
+async def sites(install_key: str, session=Depends(console_admin)):
+    """The Jira sites the install's grant covers: ``[{cloud_id, name, url}]``."""
+    oauth = _jira_oauth()
+    if oauth is None:
+        return JSONResponse({"error": "Jira sign-in is not available yet"}, status_code=503)
+    org = _org(session)
+    with tenancy.org_context(org):
         stored = _stored(install_key)
-        return [
-            {"cloud_id": str(site.get("id")), "name": site.get("name") or "", "url": site.get("url") or ""}
-            for site in stored.config.get("sites") or []
-            if isinstance(site, dict) and site.get("id")
-        ]
+        if stored.source != "jira" or stored.auth != "oauth":
+            return JSONResponse({"error": "only a Jira connection made by sign-in has sites"}, status_code=400)
+        install = store.to_install(stored)
+    try:
+        found = await run_in_threadpool(tenancy.in_org, org, oauth.sites_for, install)
+    except Exception as error:
+        log.warning("[console] Jira sites failed install=%s: %s", install_key, type(error).__name__)
+        return JSONResponse({"error": "Jira could not be reached; try again"}, status_code=502)
+    return [{"cloud_id": site.cloud_id, "name": site.name, "url": site.url} for site in found]
 
 
 @router.post("/connections/{install_key}/site")
 async def choose_site(install_key: str, request: Request, session=Depends(console_admin)):
-    _check_mutation(request, session)
+    """``{cloud_id}``: point the install at one site. Answers the install id to continue with
+    (the org's existing install of that site, when it has one)."""
+    oauth = _jira_oauth()
+    if oauth is None:
+        return JSONResponse({"error": "Jira sign-in is not available yet"}, status_code=503)
     body = await _json(request)
+    cloud_id = body.get("cloud_id")
+    if not isinstance(cloud_id, str) or not cloud_id:
+        return JSONResponse({"error": "choose one of the listed sites"}, status_code=400)
     org = _org(session)
-    with tenancy.org_context(org):
-        stored = _stored(install_key)
-        if stored.source != "jira":
-            return JSONResponse({"error": "only Jira has sites"}, status_code=400)
-        cloud_id = body.get("cloud_id")
-        site = next((s for s in stored.config.get("sites") or [] if isinstance(s, dict) and str(s.get("id")) == cloud_id), None)
-        if not isinstance(cloud_id, str) or site is None:
-            return JSONResponse({"error": "choose one of the listed sites"}, status_code=400)
-        account = f"jira:{cloud_id}"
-        if not orgs.claim_external_account(account, org.id):
-            return JSONResponse({"error": "that Jira site is already connected to another org"}, status_code=409)
-        url = (site.get("url") or "").rstrip("/").lower()
-        site_url = url if JIRA_SITE_URL.match(url) else ""
-        if stored.external_account and stored.external_account != account:
-            orgs.release_external_account(stored.external_account, org.id)
-        store.update_config(
-            install_key, {"cloud_id": cloud_id, "site_url": site_url, "sites": None},
-            site=site_url.removeprefix("https://") or site.get("name") or cloud_id, external_account=account,
-        )
-        _audit(org.id, session, "connector.site", install_key)
-        return {"ok": True}
+    try:
+        chosen = await run_in_threadpool(oauth.choose_site, org.id, install_key, cloud_id)
+    except LookupError:
+        return JSONResponse({"error": "choose one of the listed sites"}, status_code=400)
+    except PermissionError:
+        return JSONResponse({"error": "that Jira site is already connected to another org"}, status_code=409)
+    except Exception as error:
+        log.warning("[console] Jira site choice failed install=%s: %s", install_key, type(error).__name__)
+        return JSONResponse({"error": "Jira could not be reached; try again"}, status_code=502)
+    _audit(org.id, session, "connector.site", chosen)
+    return {"ok": True, "id": chosen}
 
 
 @router.get("/connections/{install_key}/available")
@@ -244,7 +221,6 @@ async def available(install_key: str, session=Depends(console_admin)):
 
 @router.put("/connections/{install_key}/containers")
 async def select_containers(install_key: str, request: Request, session=Depends(console_admin)):
-    _check_mutation(request, session)
     body = await _json(request)
     selected = body.get("selected")
     if not isinstance(selected, list) or len(selected) > MAX_SELECTED or not all(isinstance(item, str) for item in selected):
@@ -279,7 +255,6 @@ async def select_containers(install_key: str, request: Request, session=Depends(
 
 @router.post("/connections/{install_key}/sync")
 def sync_connection(install_key: str, request: Request, session=Depends(console_admin)):
-    _check_mutation(request, session)
     org = _org(session)
     with tenancy.org_context(org):
         source, _, install_id = install_key.partition(":")
@@ -297,7 +272,6 @@ def sync_connection(install_key: str, request: Request, session=Depends(console_
 
 @router.delete("/connections/{install_key}")
 def disconnect(install_key: str, request: Request, session=Depends(console_admin)):
-    _check_mutation(request, session)
     org = _org(session)
     with tenancy.org_context(org):
         stored = store.get(install_key)
@@ -346,7 +320,6 @@ def _model_allowed(org: tenancy.OrgRef) -> bool:
 
 @router.post("/ask")
 async def ask(request: Request, session=Depends(console_user)):
-    _check_mutation(request, session)
     body = await _json(request)
     question = body.get("q")
     if not isinstance(question, str) or not question.strip():
