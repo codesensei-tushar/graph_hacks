@@ -55,6 +55,15 @@ class OffByDefaultTest(unittest.TestCase):
         self.assertEqual(response.headers["content-security-policy"], console_web.CSP)
         self.assertIn("Refactron", response.text)
 
+    def test_privacy_names_one_contact_and_the_promises_the_explorer_asked_for(self):
+        text = self.http.get("/privacy").text
+        self.assertNotIn("{{contact}}", text)
+        self.assertEqual(text.count(f'href="mailto:{console_web.PRIVACY_CONTACT}"'), 2)
+        self.assertNotIn("github.com", text)
+        self.assertIn("email addresses to link each Jira account", text)
+        self.assertIn("any tool that was connected in the console", text)
+        self.assertIn("kept until it is deleted", text)
+
 
 class OnTest(unittest.TestCase):
     def setUp(self):
