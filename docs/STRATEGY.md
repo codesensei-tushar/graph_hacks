@@ -290,25 +290,25 @@ Ticket numbers (`TKT-106`, `graph_hacks#N`) depend on the day's graph; read what
 
 ## Recording script, Quillfern on production (primary)
 
-**Record this.** It runs 2:30, all on production: six asks, then the proof and MCP on the page, with one line to say per shot. Production serves Quillfern, a synthetic company. On 18 Oct at 21:50 IST, on `f45f9fd`, every quoted reply below was checked through the replay's fake Slack (`scripts/replay_workspace.py`, pinned by `tests/integration/test_demo_replay.py`) and by GET on production. This cut drops the ticket, "what changed this week", the private-repo DMs, the terminal proof and the local Sales beat. The 3:26 version is in git at `f45f9fd`.
+**Record this.** It runs 2:30, all on production: six asks, then the proof and MCP on the page, with one line to say per shot. Production serves Quillfern, a synthetic company. On 18 Oct at 21:50 IST, on `f45f9fd`, every quoted reply below was checked through the replay's fake Slack (`scripts/replay_workspace.py`, pinned by `tests/integration/test_demo_replay.py`) and by GET on production. They were rechecked at 22:30 on `c14d54b`, after the minimal page (#211) and the compound answers (#206, #212, #214), on the replay and by GET on production once that commit had deployed. All of them still read as written. This cut drops the ticket, "what changed this week", the private-repo DMs, the terminal proof and the local Sales beat. The 3:26 version is in git at `f45f9fd`.
 
 **Before the first take**
 
-1. Production is refreshed. On the page, `why did we move the memory layer off postgres` ends with "This replaced *Keep notebook links in Postgres join tables* (decided 1 Jun 2026)", which was true at 21:50. If it does not: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed` (the response must say `"company": "quillfern"`), then run `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c` in the Browser.
+1. Production is refreshed. On the page, `why did we move the memory layer off postgres` (click More: the card shows only the lead) ends with "This replaced *Keep notebook links in Postgres join tables* (decided 1 Jun 2026)", which was true at 21:50. If it does not: `curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/seed` (the response must say `"company": "quillfern"`), then run `MATCH (d:Decision)-[c:CITES]->(s) WHERE (d)-[:BASED_ON]->(s) DELETE c` in the Browser.
 2. `python scripts/check_live.py` passes.
 3. No merges during a take: every merge redeploys production.
 4. Browser at 1920x1080 with 125% zoom. Slack is the dev workspace, in #engineering.
 
 | Time | Do | On screen, check | Say |
 | --- | --- | --- | --- |
-| 0:00 | The landing page. Click the chip `who owns billing, and who else has worked on it` | "Billing Service is owned by Arjun Mehta.", then the walk draws | "Ask how your company works. Every answer shows the path it walked." |
+| 0:00 | The landing page. Click the chip `who owns billing, and who else has worked on it` | "Billing Service is owned by Arjun Mehta." leads the card, then the walk draws | "Ask how your company works. Every answer shows the path it walked." |
 | 0:15 | Slack: `@Company Brain why did we move the memory layer off Postgres` | "Proposed by Kofi Mensah. Approved by Tomas Reyes." and "This replaced *Keep notebook links in Postgres join tables*" | "The decision, who made it, and what it replaced." |
 | 0:35 | Post `we're moving billing retries to the invoice worker, decided in today's sync`, then `@Company Brain decision: move billing retries to the invoice worker`, then Approve, then `@Company Brain why did we move billing retries to the invoice worker` | The card names *Retry renewal webhooks inside the billing service*. The trace reads "Decided in #engineering on <date> by <you>: “we're moving billing retries ...”" | "Writes wait for an Approve. The old decision stays, marked as replaced." |
 | 1:05 | `@Company Brain what breaks if auth goes down, one hop`, then `and two hops out` in the thread | "1 more breaks further out (Invoice Worker at depth 2)", then "Invoice Worker (2 hops)" | "Two hops out. A search box can't do that." |
 | 1:30 | `@Company Brain who knows the payments gateway` | "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." | "If the graph doesn't know, it says so." |
 | 1:45 | `@Company Brain what if arjun mehta leaves` | "Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes" | "What rests on one person, and who's next." |
-| 2:00 | The browser, the page's [Take FalkorDB out](https://brain.noobsurd.space/#proof) section | 5 of 6 rows collapse; the refusal row reads "refused both ways" | "Take FalkorDB out, and the answers go with it." |
-| 2:15 | Scroll to Builders: the `claude mcp add` line | The quick start and the tool list | "The same tools, over MCP. One command." |
+| 2:00 | The browser, the page's [Take FalkorDB out](https://brain.noobsurd.space/#proof) section | "5 of 6 answers disappear without the graph.", five rows marked ✕ refused, and the refusal row reads "refused both ways" | "Take FalkorDB out, and the answers go with it." |
+| 2:15 | Scroll to Builders: the `claude mcp add` line | The quick start, then one line of tool names: "27 read-only tools, 3 writes behind an Approve card." | "The same tools, over MCP. One command." |
 | 2:25 | Back to the top of the page | The URL | "Company Brain, on FalkorDB." |
 
 Read the reply that is on screen, never the table. Numbers and dates depend on the day's graph.

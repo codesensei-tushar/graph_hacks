@@ -216,7 +216,9 @@ code { font-variant-ligatures: none; }
 /* Over the hero's dark top the header is transparent with light ink (app.js sets data-over-hero);
    once the hero leaves it is solid again, so a deep link lands under a solid header. */
 .top { transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease); }
-:root[data-over-hero] .top { background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* Still clear over the hero's dark top, but blurred and faintly shaded, so the headline scrolling
+   under it never collides with the section links. */
+:root[data-over-hero] .top { background: linear-gradient(180deg, rgba(4, 6, 20, 0.55), rgba(4, 6, 20, 0)); border-color: transparent; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 :root[data-over-hero] .top, :root[data-over-hero] .top nav a { color: var(--hero-ink-2); }
 :root[data-over-hero] .brand { color: var(--hero-ink); }
 :root[data-over-hero] .top nav a:hover { color: var(--hero-ink); background: rgba(255, 255, 255, 0.08); }
@@ -230,6 +232,8 @@ code { font-variant-ligatures: none; }
 .top nav a { color: var(--ink-2); text-decoration: none; font: 500 var(--fs-xs)/1 var(--font); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 4px; border-radius: 8px; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
 .top nav a:hover, .top nav a[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
 .top-actions { display: flex; align-items: center; gap: 8px; }
+/* The Menu button only shows on phones, where the section links fold behind it. */
+.top .nav-toggle { display: none; }
 /* "Sign in" to the console: shown only when the server runs it (console_web unhides it). */
 .top-signin {
   display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line);
@@ -274,9 +278,15 @@ code { font-variant-ligatures: none; }
 .chips { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
 /* Room for three rows of example chips before they arrive, so nothing below them moves. */
 #chips { min-height: 118px; }
-/* Two rows fit the 760 px block; the reserved height keeps the block from moving as they arrive. */
+/* Two chips and "More" fill one row of the 760 px block, and the tour link sits under them: 76 px
+   under the composer, as the hero's padding expects. The reserved height keeps the block from moving
+   as the chips arrive. */
 .hero .chips { justify-content: flex-start; margin-top: 12px; }
-.hero #chips { min-height: 76px; }
+.hero #chips { min-height: 32px; }
+/* The guided tour (tour.js unhides it): a quiet link under the chips. */
+.hero .tour-start { margin-top: 10px; color: var(--ink-2); font-size: var(--fs-sm); }
+.hero .tour-start::before { content: "▶"; content: "▶" / ""; display: inline-block; margin-right: 0.5em; font-size: 0.75em; vertical-align: 0.1em; text-decoration: none; }
+.hero .tour-start:hover { color: var(--ink); }
 /* Quiet pills under the composer: a hairline, no fill; "N more" is a plain underlined link. */
 .chip {
   display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border-radius: 999px; cursor: pointer;
@@ -349,23 +359,20 @@ code { font-variant-ligatures: none; }
 .askbar input::placeholder { color: var(--ink-3); }
 .askbar input:focus-visible { outline: 0; }
 
-/* The hero foot: the lede as a caption at the bottom-left, How it works at the bottom-right. */
-.hero-foot {
-  position: absolute; left: 0; right: 0; bottom: 28px; width: min(var(--max), 100% - 2 * var(--gutter)); margin: 0 auto;
-  display: flex; justify-content: space-between; align-items: end; gap: 24px;
-}
-.hero-foot .lede { max-width: 30em; font-size: var(--fs-sm); line-height: 1.55; color: var(--ink-2); margin: 0; }
-.hero-foot .btn-ghost { min-height: 36px; font-size: var(--fs-sm); border-radius: 8px; }
-
-/* Live counts: mono, tabular, and their width reserved before the numbers arrive. */
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 14px 0 0; padding: 0 4px; }
+/* The graph line over the live section: the graph's name, then its counts, in one mono row. */
+.graph-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 0; margin: 0 0 16px; font: 500 var(--fs-sm)/1.5 var(--mono); color: var(--ink-2); }
+.stats { display: inline-flex; flex-wrap: wrap; margin: 0; padding: 0; }
 .stats[data-state="failed"] { visibility: hidden; }
-.stat { display: flex; flex-direction: column-reverse; justify-content: flex-end; padding: 12px 14px 2px 0; min-width: 0; }
-.stat + .stat { padding-left: 14px; border-left: 1px solid var(--line); }
-.stat dd { margin: 0; font: 500 var(--fs-xl)/1.2 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--ink); min-height: 1.2em; }
-/* ink-2: the haze reaches under the stats, and ink-3 drops below 4.5:1 there. */
-.stat dt { margin: 2px 0 0; font-size: var(--fs-sm); color: var(--ink-2); line-height: 1.3; }
+/* dt before dd in the markup; drawn count first ("7 people"), each after a dot. */
+.stat { display: inline-flex; flex-direction: row-reverse; gap: 0.6ch; }
+.stat::after { content: "·"; content: "·" / ""; margin: 0 0.8ch; color: var(--ink-3); }
+.stat dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; min-width: 1ch; }
+.stat dt { margin: 0; }
 .stat.sk dd::before { content: ""; display: inline-block; width: 2.6ch; height: 0.8em; border-radius: 4px; background: var(--surface-3); vertical-align: -0.05em; }
+/* The answer card opens on the first ask, above the live sample; until then the graph line sits
+   close under the hero. */
+.live-block .answer { margin: 0 0 20px; }
+section.block.live-block:has(> .answer[hidden]) { padding-top: 16px; }
 
 /* The live panel: a framed window holding a real slice of the graph. */
 .live {
@@ -462,11 +469,10 @@ h3 { letter-spacing: -0.01em; }
 
 /* Skeletons hold each async section at its final size until the data arrives. */
 @keyframes shimmer { from { opacity: 0.55; } to { opacity: 1; } }
-.sk-line, .sk-card, .sk-tool, .sk-row td::before { background: var(--surface-3); border-radius: 6px; animation: shimmer 900ms ease-in-out infinite alternate; }
+.sk-line, .sk-card, .sk-row td::before { background: var(--surface-3); border-radius: 6px; animation: shimmer 900ms ease-in-out infinite alternate; }
 .sk-line { display: inline-block; width: 20ch; height: 0.9em; vertical-align: -0.1em; }
 .sk-line.short { width: 11ch; }
 .sk-card { list-style: none; height: 128px; border-radius: var(--radius); }
-.sk-tool { list-style: none; height: 22px; margin: 0 0 14px; }
 .sk-row td { height: 45px; }
 .sk-row td::before { content: ""; display: block; height: 14px; width: 70%; }
 
@@ -484,8 +490,6 @@ h3 { letter-spacing: -0.01em; }
 .answer-bar > span:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
 .answer-bar .q { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .answer-body { padding: 22px 24px 24px; min-height: 152px; }
-.answer-empty { display: grid; place-items: center; min-height: 112px; text-align: center; color: var(--ink-3); font-size: var(--fs-md); }
-.answer-empty p { margin: 0; max-width: 34em; }
 .answer .status { color: var(--ink-3); font: var(--fs-sm) var(--mono); min-height: 1.4em; margin-bottom: 8px; }
 .answer .status:empty { display: none; }
 .answer .status.error { color: var(--danger); }
@@ -499,6 +503,15 @@ h3 { letter-spacing: -0.01em; }
 .path-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin: 12px 0 10px; }
 .path-head h3 { margin: 0 !important; font-size: var(--fs-md); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .path-head .meta { color: var(--ink-3); font: 400 var(--fs-sm) var(--mono); }
+/* The compact card (answer.js): one quiet row for the tool, the edges and who picked, a "More"
+   after the lead sentence, and "+N edges" after the third edge line. */
+.path-head .meta-row { margin: 0; color: var(--ink-3); font: 400 var(--fs-sm) var(--mono); }
+.path-head .meta-row code { color: var(--path-ink); }
+.path-head .meta-row + .copy-link { margin-left: auto; }
+.answer p.text .text-more { font-size: var(--fs-md); }
+.steps li.steps-more::before { content: none; }
+.steps li.steps-more { padding-top: 2px; padding-bottom: 2px; }
+.steps .link-btn { font: inherit; color: var(--ink-2); }
 .meta code { background: var(--surface-2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; color: var(--path-ink); }
 .replay, .copy-link {
   display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 999px; cursor: pointer;
@@ -602,11 +615,13 @@ table.tools td.name { white-space: nowrap; }
 table.tools td.name code { color: var(--path-ink); }
 /* Fixed columns, so the header does not move when the rows replace the skeleton. */
 table.proof { table-layout: fixed; }
-table.proof th:nth-child(1) { width: 40%; }
-table.proof th:nth-child(2) { width: 17%; }
-table.proof th:nth-child(3), table.proof th:nth-child(4) { width: 14%; }
-table.proof td:nth-child(3), table.proof td:nth-child(4) { font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+table.proof th:nth-child(1) { width: 56%; }
+table.proof th:nth-child(2), table.proof th:nth-child(3) { width: 22%; }
+table.proof td:nth-child(2), table.proof td:nth-child(3) { font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+/* A collapsed row's "Without" is marked and tinted; a refusal kept both ways reads in full ink. */
 table.proof td.verdict { font-family: var(--mono); font-size: var(--fs-sm); color: var(--ink-2); }
+table.proof tr.gone td.verdict { color: var(--danger); }
+table.proof tr.gone td.verdict::before { content: "✕ "; content: "✕ " / ""; }
 table.proof tr.kept td.verdict { color: var(--ink); }
 
 /* --- Teams (2.4) ------------------------------------------------------------------------------- */
@@ -635,13 +650,9 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 
 /* --- How it works (2.5) ------------------------------------------------------------------------- */
 
-.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 8px 0 28px; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.flow li { position: relative; padding: 20px 22px 4px 0; }
-.flow li + li { padding-left: 22px; border-left: 1px solid var(--line); }
-.flow .n { display: block; margin-bottom: 10px; font: 500 var(--fs-xs) var(--mono); color: var(--path-ink); }
-.flow b { display: block; margin-bottom: 6px; font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em; }
-.flow p { margin: 0; color: var(--ink-2); font-size: var(--fs-md); }
-
+/* How it works: the proof band's second half. */
+.how { margin-top: 96px; }
+.how .how-title { font-size: clamp(1.5rem, 2.6vw, 2rem); line-height: 1.15; letter-spacing: -0.02em; font-weight: 500; margin: 0 0 20px; }
 .bento { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .bento .card { display: flex; flex-direction: column; grid-column: span 2; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: inset 0 1px 0 var(--highlight); padding: 20px; }
 .bento .card:nth-child(4), .bento .card:nth-child(5) { grid-column: span 3; }
@@ -655,7 +666,9 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 .vis .dim, .dim { color: var(--ink-3); }
 .vis p { margin: 0; }
 .vis .refusal { color: var(--ink); line-height: 1.6; }
-.vis .try { margin-top: 10px; font-size: var(--fs-sm); color: var(--ink-2); }
+/* The refusal card's visual is the question itself: one click asks it. */
+.refusal-vis { display: flex; align-items: center; min-height: 64px; }
+.refusal-vis .ask-chip::after { content: " →"; content: " →" / ""; color: var(--ink-3); }
 .slack-card { display: flex; flex-direction: column; gap: 4px; }
 .slack-card > b { font-size: var(--fs-md); }
 .slack-card .dim { font-size: var(--fs-xs); }
@@ -686,7 +699,6 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 }
 .arch-frame:focus-visible { outline-offset: 2px; }
 .arch-frame svg { display: block; width: 100%; max-width: 1160px; min-width: 880px; height: auto; margin: 0 auto; font-family: var(--font); }
-.arch figcaption { margin: 12px 0 0; color: var(--ink-2); font-size: var(--fs-sm); max-width: 60em; }
 .arch-cols text { font: 500 var(--fs-xs) var(--mono); letter-spacing: 0.08em; text-transform: uppercase; fill: var(--ink-2); text-anchor: middle; }
 .arch-nodes rect { fill: var(--surface); stroke: var(--line-2); stroke-width: 1.2; }
 .arch-nodes .catalogue rect { fill: color-mix(in oklab, var(--path) 6%, var(--surface)); stroke: color-mix(in oklab, var(--path) 55%, var(--line-2)); }
@@ -757,42 +769,18 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 .snippet .copy:hover { color: var(--ink); border-color: var(--path); }
 .snippet .copy.copied { color: var(--path-ink); border-color: var(--path); }
 
-.catalogue-panel { margin: 40px 0 28px; }
-.tool-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin: 0 0 16px; }
-.tool-count { margin: 0; font-size: var(--fs-base); color: var(--ink-2); min-height: 1.6em; }
-.tool-count b { font: 600 var(--fs-xl) var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; margin-right: 4px; }
-.tool-filter input {
-  width: min(340px, 100%); height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--line-2);
-  background: var(--surface); color: var(--ink); font: 400 var(--fs-sm)/1 var(--font);
-}
-.tool-filter input::placeholder { color: var(--ink-3); }
-.tool-filter input:focus-visible { outline: 2px solid var(--path); outline-offset: 2px; }
-.tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.tool-grid .sk-tool { height: 112px; margin: 0; border-radius: 14px; }
-.tool-card {
-  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px 16px; scroll-margin-top: calc(var(--header) + 24px);
-  border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
-  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
-}
-.tool-card:hover { border-color: var(--line-2); }
-/* These set a display, which would beat the hidden attribute the filter and the no-script state use. */
-.tool-card[hidden], .arch-routes[hidden], .qs-tabs[hidden] { display: none; }
-/* A proof row's tool name links here; the card it lands on is lit. */
-.tool-card:target { border-color: var(--path); box-shadow: 0 0 0 3px var(--glow); }
-.tool-name { color: var(--path-ink); font-size: var(--fs-sm); font-weight: 500; }
-/* The whole first sentence, never cut mid-word; the full description is the card's title. */
-.tool-does { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.5; }
-.tool-args { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: auto 0 0; }
-.tool-args .label { font: 400 var(--fs-xs) var(--mono); color: var(--ink-3); }
-.tool-args code { padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: var(--fs-xs); color: var(--ink-2); }
-.tool-empty, .tool-writes { margin: 16px 0 0; color: var(--ink-2); font-size: var(--fs-sm); }
-.tool-writes code { color: var(--ink); }
-.links { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.links li { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; }
-.links a { display: block; font-weight: 600; color: var(--ink); text-decoration: none; min-height: 24px; }
-.links a::after { content: " →"; color: var(--ink-3); font-weight: 400; }
-.links a:hover { color: var(--path-ink); }
-.links span { display: block; margin-top: 2px; font-size: var(--fs-sm); color: var(--ink-3); }
+/* The catalogue in one line, then every tool's name as a pill: two rows at most, the README has the rest. */
+.catalogue-panel { margin: 32px 0 0; }
+.tool-line { margin: 0 0 14px; color: var(--ink-2); font-size: var(--fs-md); }
+.tool-line b { font: 600 var(--fs-base) var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.tool-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; max-height: 58px; overflow: hidden; }
+.tool-pills li { display: inline-flex; align-items: center; height: 26px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); line-height: 1; scroll-margin-top: calc(var(--header) + 24px); }
+.tool-pills code { font-size: var(--fs-xs); color: var(--ink-2); }
+/* A proof row's edge count links here; the pill it lands on is lit. */
+.tool-pills li:target { border-color: var(--path); box-shadow: 0 0 0 3px var(--glow); }
+.tool-pills li:target code { color: var(--path-ink); }
+/* These set a display, which would beat the hidden attribute the no-script state uses. */
+.arch-routes[hidden], .qs-tabs[hidden] { display: none; }
 
 /* --- Team pages ------------------------------------------------------------------------------------ */
 
@@ -834,9 +822,9 @@ footer.site p { margin: 6px 0; max-width: 62em; }
 footer.site a { color: var(--ink-2); }
 .foot-links { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 14px !important; }
 .foot-links a { display: inline-flex; align-items: center; min-height: 32px; }
+.foot-name { display: inline-flex; align-items: center; min-height: 32px; color: var(--ink-2); font-weight: 500; }
 
-.proof-more { margin: 18px 0 0; color: var(--ink-2); font-size: var(--fs-sm); }
-.proof-more a, #proof-table td.name a { color: var(--path-ink); }
+#proof-table td.name a { color: var(--path-ink); }
 #proof-table td.name a { text-decoration: none; }
 #proof-table td.name a:hover code { text-decoration: underline; text-underline-offset: 3px; }
 
@@ -844,7 +832,7 @@ footer.site a { color: var(--ink-2); }
 
 section.block.band-dark {
   --bg: #07081a; --surface: #0f1126; --surface-2: #15182e; --surface-3: #1c2036; --ink: #eef0fb; --ink-2: #aab0cf; --ink-3: #8288ab;
-  --line: rgba(200, 205, 255, 0.10); --line-2: rgba(200, 205, 255, 0.18); --path: #2dd4e6; --path-ink: #2dd4e6;
+  --line: rgba(200, 205, 255, 0.10); --line-2: rgba(200, 205, 255, 0.18); --path: #2dd4e6; --path-ink: #2dd4e6; --danger: #f2b8b5;
   position: relative; isolation: isolate; color: var(--ink);
   /* Soft ends: a 48 px fade, so no hard line shows at the sides where the waves curve away. */
   background: linear-gradient(180deg, transparent, var(--bg) 48px, var(--bg) calc(100% - 48px), transparent);
@@ -870,11 +858,6 @@ section.block.band-dark {
 
 @media (max-width: 1080px) {
   .team-more { grid-template-columns: minmax(0, 1fr); }
-  .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .flow li:nth-child(3) { padding-left: 0; border-left: 0; }
-  .flow li:nth-child(n + 3) { border-top: 1px solid var(--line); margin-top: 16px; }
   .bento .card, .bento .card:nth-child(4), .bento .card:nth-child(5) { grid-column: span 3; }
   .bento .card:nth-child(1) { grid-column: span 6; }
 }
@@ -884,8 +867,16 @@ section.block.band-dark {
   /* The path head wraps here; the buttons start their row like the replay button. */
   .depths, .path-head h3 + .copy-link { margin-left: 0; }
   .top nav { display: none; }
+  .top .nav-toggle { display: inline-flex; }
+  .top[data-nav-open] nav {
+    display: flex; position: absolute; top: var(--header); left: 0; right: 0; flex-direction: column; align-items: stretch; gap: 0;
+    padding: 6px var(--gutter) 12px; background: var(--bg); border-bottom: 1px solid var(--line); box-shadow: 0 18px 32px -18px rgba(0, 0, 0, 0.45);
+  }
+  .top[data-nav-open] nav a, :root[data-over-hero] .top[data-nav-open] nav a { color: var(--ink-2); padding: 14px 4px; font-size: var(--fs-sm); }
+  .top[data-nav-open] nav a + a { border-top: 1px solid var(--line); }
   .hero {
-    min-height: max(600px, 100svh); padding: calc(var(--header) + 48px) var(--gutter) 40px; place-items: start center;
+    /* No foot line under the chips any more, so the hero ends a little under the tour link. */
+    min-height: 0; padding: calc(var(--header) + 48px) var(--gutter) 88px; place-items: start center;
     background:
       linear-gradient(180deg, transparent 82%, var(--bg)),
       radial-gradient(180% 116% at 50% 112%, var(--hz-0) 0%, var(--hz-1) 37%, var(--hz-2) 52%, var(--hz-3) 60%, var(--hz-4) 66%, var(--hz-5) 72%, var(--hz-6) 79%, var(--hz-7) 88%);
@@ -895,25 +886,19 @@ section.block.band-dark {
   .askbar { min-height: 112px; }
   .ask-tools { flex-wrap: wrap; }
   .send { width: 44px; height: 44px; }
-  .hero-foot { position: static; width: 100%; margin-top: 28px; flex-direction: column; align-items: start; gap: 14px; }
-  .hero #chips { min-height: 148px; }
+  .hero #chips { min-height: 112px; }
+  /* The counts take their own line under the graph's name, without a leading dot. */
+  .stats { flex-basis: 100%; }
+  .stat:first-child::after { content: none; }
   .eyebrow { font-size: var(--fs-xs); letter-spacing: 0.04em; margin-bottom: 14px; }
   .live-stage { aspect-ratio: 1 / 1; }
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stat:nth-child(3) { padding-left: 0; border-left: 0; }
-  .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
-  .stat dd { font-size: var(--fs-xl); }
   .ticker { text-align: left; flex-basis: 100%; }
   section.block { padding-top: 64px; }
   section.block p.sub { font-size: var(--fs-base); }
   .answer-body { padding: 16px 14px; }
-  .flow { grid-template-columns: minmax(0, 1fr); }
-  .flow li, .flow li + li { padding: 16px 0 0; border-left: 0; }
-  .flow li + li { border-top: 1px solid var(--line); margin-top: 16px; }
+  .how { margin-top: 64px; }
   .bento { grid-template-columns: minmax(0, 1fr); }
   .bento .card, .bento .card:nth-child(1), .bento .card:nth-child(4), .bento .card:nth-child(5) { grid-column: auto; }
-  .links, .tool-grid { grid-template-columns: minmax(0, 1fr); }
-  .tool-filter, .tool-filter input { width: 100%; }
   .snippet pre { padding-right: 16px; padding-top: 52px; }
   .panel { padding: 18px 16px; }
   /* The proof table becomes one card per question. */
@@ -927,11 +912,13 @@ section.block.band-dark {
   table.proof td.q::before { display: none; }
   table.proof tr.sk-row { height: 186px; }
   table.proof tr.sk-row td::before { content: ""; }
+  /* The cell label stays; the tint alone marks a collapsed row here. */
+  table.proof tr.gone td.verdict::before { content: attr(data-label); }
   footer.site { margin-top: 80px; }
 }
 
 @media (max-width: 420px) {
-  /* The sample line keeps its node count; the edge count is in the stats right below. */
+  /* The sample line keeps its node count; the edge count is in the graph line above. */
   .live-bar .count-edges { display: none; }
   .askbar { padding-left: 16px; }
   .chip { min-height: 44px; }
@@ -939,3 +926,4 @@ section.block.band-dark {
   .replay, .copy-link { min-height: 44px; }
   .depths button { min-height: 38px; }
 }
+

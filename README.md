@@ -19,7 +19,7 @@ Graph Hacks 2026: track 03, Company Brain; also tracks 01 and 02.
 | 1 | Open [brain.noobsurd.space](https://brain.noobsurd.space) and click an example | The answer and its path |
 | 2 | [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves) | Who is next if one person leaves |
 | 3 | [`who knows the payments gateway`](https://brain.noobsurd.space/?q=who%20knows%20the%20payments%20gateway) | A refusal, with the nearest names |
-| 4 | [Take FalkorDB out](https://brain.noobsurd.space/#proof) | 5 of 6 answers fail without the graph |
+| 4 | [Take FalkorDB out](https://brain.noobsurd.space/#proof) | 5 of 6 answers disappear without the graph |
 | 5 | [/team/payments](https://brain.noobsurd.space/team/payments), [/explore](https://brain.noobsurd.space/explore?node=billing-service) | A team's risk; any node's neighbours |
 | 6 | `claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp` | The same tools over MCP |
 | 7 | `python scripts/replay_workspace.py --graph company_demo` | The whole demo locally, no Slack, no model key |

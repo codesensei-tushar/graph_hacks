@@ -380,22 +380,26 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
 # A second question joined to the first: "..., and what breaks if auth goes down", "...; who knows X",
 # "... also who to contact". One about the first part's thing ("and who owns it") is split and asked
 # about that thing. One about more people ("and who else has worked on it") is the same question.
-_COMPOUND = re.compile(
-    r"^(?P<first>\S+(?:\s+\S+)+?)\s*(?:,?\s+and\s+(?:also\s+)?|;\s*|\?\s+(?:and\s+|also\s+)?|,\s+(?:also\s+)?|\s+also\s+)"
-    r"(?P<rest>(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should)\b.+)$",
-    re.IGNORECASE,
-)
+_QUESTION_WORD = r"(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should)\b"
+_SEPARATOR = re.compile(r"\s*(?:,?\s+and\s+(?:also\s+)?|;\s*|\?\s+(?:and\s+|also\s+)?|,\s+(?:also\s+)?|\s+also\s+)" rf"(?={_QUESTION_WORD}.)", re.IGNORECASE)
 _QUESTION_START = re.compile(r"^\s*(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should|list|show|tell|explain|explore)\b", re.IGNORECASE)
 _REFERS_BACK = re.compile(r"\b(?:they|them|their|those|these|else|there|he|she|him|her)\b", re.IGNORECASE)
 
 
 def split_compound(question: str) -> tuple[str, str | None]:
-    """The first question and the one joined after it, or the question and None."""
-    match = _COMPOUND.match((question or "").strip())
-    if match is None or _REFERS_BACK.search(match.group("rest")) or not _QUESTION_START.match(match.group("first")):
+    """The first question and the one joined after it, or the question and None.
+
+    The earliest join that leaves a question on each side wins, so "what breaks if auth goes down,
+    who owns it and who should know" splits at the comma and its rest splits again."""
+    text = (question or "").strip()
+    if not _QUESTION_START.match(text):
         # "billing is failing, what changed" is one question with its context first.
         return question, None
-    return match.group("first").strip().rstrip(",;?"), match.group("rest").strip()
+    for join in _SEPARATOR.finditer(text):
+        first, rest = text[: join.start()].strip(), text[join.end() :].strip()
+        if len(first.split()) >= 2 and not _REFERS_BACK.search(rest):
+            return first.rstrip(",;?"), rest
+    return question, None
 
 
 def ask(question: str, scopes: list[str]) -> ToolResult:
