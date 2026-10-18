@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import kinds, resolve
+from src.domain.knowledge import kinds, people, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import SCOPED, Entity, join_names
 
@@ -50,14 +50,14 @@ _EDGE_X_S = "[x.id, x.name, labels(x)[0], type(r), s.id, s.name, 'Service']"
 _EDGE_T_S = "[t.id, t.name, 'Team', 'RUNS', s.id, s.name, 'Service']"
 _EDGE_P_X = "[p.id, p.name, 'Person', type(r), x.id, x.name, labels(x)[0]]"
 # A person named through their GitHub account: $accounts holds the person's id and every account linked to them.
-_EDGE_WHO_X = "[$value, $value_name, 'Person', type(r), x.id, x.name, labels(x)[0]]"
+_EDGE_WHO_X = "[$value, $value_name, $value_label, type(r), x.id, x.name, labels(x)[0]]"
 
 # Each label's filters, each with its one query. ``x`` is what is listed.
 FILTERS: dict[str, dict[str, Filter]] = {
     "Service": {
         "kind": Filter("kind"),
         "team": Filter("team", "Team", _q("MATCH (t:Team {id: $value})-[r:RUNS]->(x:Service) WHERE {scoped_x} RETURN x.id, [[t.id, t.name, 'Team', type(r), x.id, x.name, 'Service']]"), "run by the {value} team"),
-        "owner": Filter("owner", "Person", _q(f"MATCH (p:Person {{id: $value}})-[r:OWNS]->(x:Service) WHERE {{scoped_x}} RETURN x.id, [{_EDGE_P_X}]"), "owned by {value}"),
+        "owner": Filter("owner", "Person", _q(f"MATCH (a)-[r:OWNS]->(x:Service) WHERE a.id IN $accounts AND {{scoped_x}} RETURN x.id, [{_EDGE_WHO_X}]"), "owned by {value}"),
     },
     "Ticket": {
         "state": Filter("state"),
@@ -68,6 +68,7 @@ FILTERS: dict[str, dict[str, Filter]] = {
             "about what the {value} team runs",
         ),
         "person": Filter("person", "Person", _q(f"MATCH (a)-[r:WORKED_ON|ASSIGNED]->(x:Ticket) WHERE a.id IN $accounts AND {{scoped_x}} RETURN x.id, [{_EDGE_WHO_X}]"), "worked on by or assigned to {value}"),
+        "blocked": Filter("blocked"),
     },
     "Decision": {
         "about": Filter("about", "Service", _q(f"MATCH (x:Decision)-[r:ABOUT]->(s:Service {{id: $value}}) WHERE {{scoped_x}} RETURN x.id, [{_EDGE_X_S}]"), "about {value}"),
@@ -124,7 +125,15 @@ _ROWS = _q(
     RETURN x.id, x.name, coalesce(x.title, ''), x.kind, x.state, x.merged, x.decided_at, coalesce(x.role, '')
     """
 )
-_ACCOUNTS_OF = "MATCH (a)-[:IS]->(p:Person {id: $id}) RETURN a.id"
+# The open tickets that block each of $ids, as cited edges.
+_BLOCKERS = _q(
+    """
+    MATCH (b:Ticket)-[r:BLOCKS]->(x:Ticket)
+    WHERE x.id IN $ids AND coalesce(b.scope, 'org_shared') IN $scopes AND coalesce(b.state, 'open') <> 'closed'
+    RETURN x.id, collect([b.id, b.name, 'Ticket', type(r), x.id, x.name, 'Ticket'])
+    """
+)
+_ACCOUNTS_OF ="MATCH (a)-[:IS]->(p:Person {id: $id}) RETURN a.id"
 
 _NOUNS = {
     "Service": ("service", "services"), "Ticket": ("ticket", "tickets"), "Decision": ("decision", "decisions"),
@@ -180,7 +189,11 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
         spec = allowed[key]
         if spec.target is None:
             continue
-        resolution = resolve.resolve_name(str(value), (spec.target,), scopes, graph=graph)
+        if spec.target == "Person":
+            # A person, or someone a connected tool knows (Jira, HubSpot), within the asker's scopes.
+            resolution = people.resolve_person(str(value), scopes, graph)
+        else:
+            resolution = resolve.resolve_name(str(value), (spec.target,), scopes, graph=graph)
         if not resolution.found:
             what = {"Service": "service", "Team": "team", "Person": "person"}[spec.target]
             return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, what), found=False, candidates=resolution.candidate_names())
@@ -191,13 +204,23 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
     edges: dict[str, list[list]] = {}
     for key, entity in named.items():
         passing: dict[str, list[list]] = {}
-        params = {"value": entity.id, "value_name": entity.name, "scopes": scopes, "accounts": _accounts(graph, entity) if entity.label == "Person" else []}
+        params = {
+            "value": entity.id, "value_name": entity.name, "value_label": entity.label, "scopes": scopes,
+            "accounts": _accounts(graph, entity) if entity.label in ("Person", people.ACCOUNT) else [],
+        }
         for node_id, cited in graph.ro_query(allowed[key].query, params).result_set:
             passing.setdefault(node_id, []).extend(cited)
         rows = {node_id: row for node_id, row in rows.items() if node_id in passing}
         for node_id, cited in passing.items():
             edges.setdefault(node_id, []).extend(cited)
     rows = _apply_enums(graph, chosen, rows, enums, scopes)
+    if "blocked" in enums:
+        # Blocked: an open ticket the asker can read BLOCKS it. Each blocker's edge is cited.
+        blockers = {node_id: cited for node_id, cited in graph.ro_query(_BLOCKERS, {"ids": list(rows), "scopes": scopes}).result_set}
+        rows = {node_id: row for node_id, row in rows.items() if (node_id in blockers) == enums["blocked"]}
+        for node_id, cited in blockers.items():
+            if node_id in rows:
+                edges.setdefault(node_id, []).extend(cited)
 
     ordered = sorted(rows.values(), key=lambda row: (-(row.decided_at or 0), row.name.lower()) if chosen == "Decision" else (row.name.lower(),))
     listed = ordered[:MAX_ROWS]
@@ -213,13 +236,15 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
     replaced = _replaced(graph, [row.id for row in listed], scopes) if chosen == "Decision" else set()
     qualified = ", ".join(allowed[key].words.format(value=_named(entity)) for key, entity in named.items())
     described = " ".join(part for part in (_noun(chosen, enums, len(ordered)), qualified) if part)
+    hints = "".join(f" {people.unlinked_hint(entity)}" for entity in named.values() if people.is_account(entity))
     if not ordered:
-        result.answer = f"No {described}."
+        result.answer = f"No {described}.{hints}"
         return result
-    items = [_item(chosen, row, row.id in replaced) for row in listed]
+    # "3 accounts: Acme and Initech": an account is a company, and "Acme account" reads as something else.
+    items = [row.name if enums.get("kind") == "account" else _item(chosen, row, row.id in replaced) for row in listed]
     if len(ordered) > len(listed):
         items.append(f"{len(ordered) - len(listed)} more")
-    result.answer = f"{len(ordered)} {described}: {join_names(items)}."
+    result.answer = f"{len(ordered)} {described}: {join_names(items)}.{hints}"
     return result
 
 
@@ -244,12 +269,14 @@ def _enum(label: str, key: str, value):
             noun = _NOUNS[label][0]
             return ToolResult(tool=TOOL, answer=f"“{value}” is not a state. A {noun} is {join_names(list(states)).replace(' and ', ' or ')}.", found=False)
         return state
-    # standing: a yes or no, from the model as a boolean or as text.
+    # standing or blocked: a yes or no, from the model as a boolean or as text.
     if isinstance(value, bool):
         return value
     text = str(value).strip().lower()
     if text in _TRUE or text in _FALSE:
         return text in _TRUE
+    if key == "blocked":
+        return ToolResult(tool=TOOL, answer=f"blocked is true (tickets an open ticket blocks) or false (the rest); “{value}” is neither.", found=False)
     return ToolResult(tool=TOOL, answer=f"standing is true (the decisions that stand today) or false (the ones replaced); “{value}” is neither.", found=False)
 
 
@@ -295,6 +322,8 @@ def _noun(label: str, enums: dict, count: int) -> str:
         adjectives.append(enums["state"])
     if "standing" in enums:
         adjectives.append("standing" if enums["standing"] else "replaced")
+    if "blocked" in enums:
+        adjectives.append("blocked" if enums["blocked"] else "unblocked")
     return " ".join([*adjectives, word])
 
 
@@ -330,6 +359,7 @@ _LIST_NOUNS = (
     (re.compile(r"\b(?:documents?|docs?|runbooks?)\b", re.IGNORECASE), "Document", None),
     (re.compile(r"\bpeople\b", re.IGNORECASE), "Person", None),
     (re.compile(r"\bteams\b", re.IGNORECASE), "Team", None),
+    (re.compile(r"\baccounts\b", re.IGNORECASE), "Service", "account"),
     (re.compile(r"\bservices\b", re.IGNORECASE), "Service", None),
     (re.compile(r"\bsystems\b", re.IGNORECASE), "Service", "system"),
     (re.compile(r"\bprocesses\b", re.IGNORECASE), "Service", "process"),
@@ -337,8 +367,14 @@ _LIST_NOUNS = (
 )
 _STATE = re.compile(r"\b(open|closed|merged)\b", re.IGNORECASE)
 _STANDING = re.compile(r"\b(?:standing|current)\b", re.IGNORECASE)
+_BLOCKED = re.compile(r"\bblocked\b", re.IGNORECASE)
 _ABOUT = re.compile(r"\b(?:about|for|on|touching|describing)\s+(.+?)\s*\??\s*$", re.IGNORECASE)
 _IN_TEAM = re.compile(r"\bin\s+(?:the\s+)?(.+?)(?:\s+team)?\s*\??\s*$", re.IGNORECASE)
+# Whose list it is: "tickets assigned to Om Sherikar", "accounts owned by Yash", "which accounts does Yash own".
+_BY_PERSON = re.compile(r"\b(?:assigned to|worked on by|owned by|opened by|held by)\s+(.+?)\s*\??\s*$", re.IGNORECASE)
+_DOES_PERSON = re.compile(r"\b(?:does|do)\s+(.+?)\s+(?:own|have|hold|handle|work on)\b", re.IGNORECASE)
+# The filter a person fills, per label.
+_PERSON_FILTER = {"Ticket": "person", "Service": "owner", "Document": "author", "PullRequest": "author"}
 # The filter "about X" fills, per label. Services and teams have none.
 _ABOUT_FILTER = {"Ticket": "about", "Decision": "about", "PullRequest": "touches", "Document": "describes", "Person": "holds"}
 
@@ -360,7 +396,16 @@ def parse(question: str) -> dict:
             args["state"] = value
     if "standing" in allowed and _STANDING.search(text):
         args["standing"] = True
-    if (about := _ABOUT.search(text)) and label in _ABOUT_FILTER:
+    if "blocked" in allowed and _BLOCKED.search(text):
+        args["blocked"] = True
+    who = _BY_PERSON.search(text) or _DOES_PERSON.search(text)
+    person_filter = _PERSON_FILTER.get(label)
+    if who and re.search(r"\bteam$", who.group(1), re.IGNORECASE) and "team" in allowed:
+        # "which services does the payments team own": the team, not a person.
+        args["team"] = who.group(1)
+    elif who and person_filter in allowed:
+        args[person_filter] = who.group(1)
+    elif (about := _ABOUT.search(text)) and label in _ABOUT_FILTER:
         args[_ABOUT_FILTER[label]] = about.group(1)
     elif (team := _IN_TEAM.search(text)) and "team" in allowed:
         args["team"] = team.group(1)

@@ -48,7 +48,7 @@ HIDDEN_RELS = ("IS", "CAN_READ", "IN_SCOPE", "HAS_TAG", "FILED_UNDER", "PARENT",
 RELATIONS = (
     "OWNS", "WORKED_ON", "KNOWS", "MEMBER_OF", "RUNS", "DEPENDS_ON", "AUTHORED", "REVIEWED", "DESCRIBES", "ABOUT",
     "BASED_ON", "CITES", "SUPERSEDES", "PROPOSED", "APPROVED", "TOUCHES", "CLOSES", "MENTIONS", "DECIDED_IN",
-    "OPENED", "ASSIGNED", "IN_REPO",
+    "OPENED", "ASSIGNED", "IN_REPO", "BLOCKS", "REFERENCES",
 )
 OUT, IN, BOTH = "out", "in", "both"
 DIRECTIONS = (OUT, IN, BOTH)
@@ -112,7 +112,12 @@ PHRASES = {
     ("DEPENDS_ON", True): "depends on", ("DEPENDS_ON", False): "depended on by",
     ("DESCRIBES", True): "describes", ("DESCRIBES", False): "described by",
     ("AUTHORED", True): "wrote", ("AUTHORED", False): "written by",
-    ("ABOUT", True): "about",
+    ("ABOUT", True): "about", ("ABOUT", False): "what is about it:",
+    # BLOCKS points from the blocker to the blocked: PAY-13 -[BLOCKS]-> PAY-11 reads "blocks PAY-11"
+    # from PAY-13 and "blocked by PAY-13" from PAY-11, never the same words both ways.
+    ("BLOCKS", True): "blocks", ("BLOCKS", False): "blocked by",
+    ("REFERENCES", True): "references", ("REFERENCES", False): "referenced by",
+    ("IN_CONTAINER", True): "in", ("IN_CONTAINER", False): "holds",
     ("TOUCHES", True): "changes", ("TOUCHES", False): "changed by",
     ("PROPOSED", True): "proposed", ("PROPOSED", False): "proposed by",
     ("APPROVED", True): "approved", ("APPROVED", False): "approved by",
@@ -134,7 +139,7 @@ PHRASES = {
 _ORDER = (
     "OWNS", "RUNS", "MEMBER_OF", "WORKED_ON", "KNOWS", "DEPENDS_ON", "DESCRIBES", "AUTHORED", "ABOUT", "TOUCHES",
     "PROPOSED", "APPROVED", "SUPERSEDES", "BASED_ON", "CITES", "DECIDED_IN", "REVIEWED", "REVIEW_REQUESTED",
-    "OPENED", "ASSIGNED", "CLOSES", "IN_REPO", "RECORDED_FROM", "SAID", "MENTIONS",
+    "OPENED", "ASSIGNED", "BLOCKS", "CLOSES", "REFERENCES", "IN_REPO", "IN_CONTAINER", "RECORDED_FROM", "SAID", "MENTIONS",
 )
 _NOUNS = {
     "Service": ("service", "services"), "Person": ("person", "people"), "Team": ("team", "teams"),

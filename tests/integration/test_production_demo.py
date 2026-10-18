@@ -178,7 +178,8 @@ class ProductionDemoTest(unittest.TestCase):
         ]
         result, choice = agent.run_choice(agent.choose_with_keywords("who should look at it"), "who should look at it", ORG, thread, BOT)
         self.assertEqual((choice.tool, choice.via), ("who_knows", "thread"))
-        self.assertEqual(result.answer, f"{ticket} is about Scheduler. Ask first: Tushar (owns Scheduler).")
+        # A ticket leads with what its tracker shows: title, status and assignee.
+        self.assertEqual(result.answer, f"{ticket} is “{title}”: open, assigned to no one. About Scheduler. Ask first: Tushar (owns Scheduler).")
         self.assertIn(f"{ticket} -[ABOUT]-> Scheduler", _cites(result))
         self.assertIn("Tushar -[OWNS]-> Scheduler", _cites(result))
 
