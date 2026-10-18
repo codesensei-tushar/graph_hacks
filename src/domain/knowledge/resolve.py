@@ -256,6 +256,22 @@ def _forms(word: str) -> set[str]:
     return forms
 
 
+def _match_positions(rows: "Rows", words: list[str]) -> list[int]:
+    """The keys that can match the question, in key order: only a key whose first word is the
+    same (``same_word``) as one of the question's. A superset; the caller checks each."""
+    return _lookup(rows.by_first_word(), set(words))
+
+
+def _fuzzy_positions(rows: "Rows", named_words: list[str]) -> list[int]:
+    """The keys that can be a near miss, in key order: those sharing a word with what was named
+    (``same_word``), or holding one of the same first letter and nearly the same length
+    (``near_word``). A superset; the caller checks each."""
+    near = rows.by_first_letter_and_length()
+    possible = set(_lookup(rows.by_real_word(), named_words))
+    possible.update(position for word in named_words for size in range(len(word) - 2, len(word) + 3) for position in near.get((word[0], size), ()))
+    return sorted(possible)
+
+
 def _lookup(index: dict[str, list[int]], words) -> list[int]:
     """Positions of the keys whose indexed word may be the same as one of ``words``, in key order."""
     return sorted({position for word in words for form in _forms(word) for position in index.get(form, ())})
@@ -546,8 +562,7 @@ def _kept_matches(text: str, rows: list[EntityRow], labels: tuple[str, ...]) -> 
     found: list[_Match] = []
     held = rows if isinstance(rows, Rows) else Rows(rows)
     keys = held.keys()
-    # Only a key whose first word is the same as one of the question's can match.
-    for position in _lookup(held.by_first_word(), set(words)):
+    for position in _match_positions(held, words):
         entity, key, key_words, kind = keys[position]
         size = len(key_words)
         for start in range(len(words) - size + 1):
@@ -584,12 +599,7 @@ def _fuzzy_candidates(text: str, rows: list[EntityRow]) -> list[Candidate]:
     scored: list[tuple[float, Candidate]] = []
     held = rows if isinstance(rows, Rows) else Rows(rows)
     keys = held.keys()
-    # Only keys sharing a word with what was named (same_word), or holding one of the same first
-    # letter and nearly the same length (near_word), can qualify.
-    near = held.by_first_letter_and_length()
-    possible = set(_lookup(held.by_real_word(), named_words))
-    possible.update(position for word in named_words for size in range(len(word) - 2, len(word) + 3) for position in near.get((word[0], size), ()))
-    for position in sorted(possible):
+    for position in _fuzzy_positions(held, named_words):
         entity, key, key_words, kind = keys[position]
         real_words = [word for word in key_words if len(word) >= 4 and word not in STOPWORDS]
         # A shared word, or a misspelt one: "biling" is one edit from "billing", "invoce" from "invoice".
