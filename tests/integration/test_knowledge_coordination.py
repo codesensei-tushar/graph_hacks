@@ -262,6 +262,14 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertEqual(result.answer, "Nothing in the graph matches “claude api”. Nearest: API Gateway (known as “api”).")
         self.assertTrue(_ask("who should know if the api changes").answer.startswith("API Gateway is owned by Maya Ortiz."))
 
+    def test_a_word_that_only_says_which_version_still_resolves(self):
+        self.assertEqual(
+            _ask("who should know about the old billing runbook").answer,
+            "Billing runbook is a document, not a change. Name the pull request or service that changes, or ask who knows Billing runbook.",
+        )
+        self.assertTrue(_ask("who should know if the current auth service changes").answer.startswith("Auth Service is owned by Maya Ortiz."))
+        self.assertEqual(_ask("who should know if the old claude api changes").candidates, ["API Gateway"])
+
     # --- in a thread ------------------------------------------------------------------------
 
     def test_a_follow_up_takes_the_pull_request_the_thread_named(self):

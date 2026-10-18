@@ -79,6 +79,25 @@ class ResolveRowsTest(unittest.TestCase):
         # Without a vocabulary (classification by best_match), the match stands as before.
         self.assertEqual(resolve_rows("what breaks if the claude api goes down", ROWS, SERVICES).entity.id, "api-gateway")
 
+    def test_a_word_that_only_says_which_version_is_not_a_missing_name(self):
+        nothing = lambda _word: False  # noqa: E731
+        for question in (
+            "who owns the current billing service",
+            "who owns the old billing",
+            "what breaks if the new billing service goes down",
+            "who maintains the legacy billing",
+            "who owns the whole existing billing service",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(resolve_rows(question, ROWS, SERVICES, known=nothing).entity.id, "billing-service")
+        # Beside a word the graph does not know, the match is still refused, and "new" is walked past.
+        for question, named in (("what breaks if the old claude api goes down", "old claude api"), ("what breaks if the new claude api goes down", "new claude api")):
+            with self.subTest(question=question):
+                found = resolve_rows(question, ROWS, SERVICES, known=nothing)
+                self.assertEqual((found.entity, found.reason, found.query), (None, "partial", named))
+        # A generic word the graph happens to know does not vouch for the unknown one beside it.
+        self.assertEqual(resolve_rows("what breaks if the old claude api goes down", ROWS, SERVICES, known=lambda word: word == "old").reason, "partial")
+
     def test_names_apart_in_the_sentence_pick_the_strongest_and_keep_the_rest(self):
         found = _resolve("the invoice worker and billing")
         self.assertEqual(found.entity.name, "Invoice Worker")

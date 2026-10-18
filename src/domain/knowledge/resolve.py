@@ -7,7 +7,8 @@ known as "payments" and an API Gateway known as "gateway"), nothing resolves and
 come back as candidates, so the reply can say what the graph does know. Nor does a
 name resolve when it is only the end of what was named: in "if the claude api goes
 down", where the graph knows API Gateway as "api" and nothing as "claude", "api" is not
-the thing asked about, so it comes back as the nearest candidate. Ingestion code that only
+the thing asked about, so it comes back as the nearest candidate. A word that only says
+which version, as in "the current billing service", does not count. Ingestion code that only
 needs a best guess for classification uses ``best_match`` instead.
 """
 
@@ -44,6 +45,9 @@ STOPWORDS = frozenset(
 )
 # Words that open a noun phrase. The words between one and a match describe the thing named.
 DETERMINERS = frozenset({"the", "a", "an", "our", "my", "your", "their", "this"})
+# Words that say which version or how much of a thing, not which thing: "the current billing
+# service" is Billing Service. They sit inside a noun phrase but never make a match partial.
+GENERIC_MODIFIERS = frozenset({"old", "new", "legacy", "current", "existing", "latest", "main", "whole", "entire"})
 
 FUZZY_FLOOR = 0.6
 MAX_CANDIDATES = 3
@@ -248,7 +252,8 @@ def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEF
     best = min(kept, key=lambda match: (-(match.end - match.start), match.kind, match.start))
     words = tokens(text)
     modifiers = _modifiers(words, best)
-    if known is not None and modifiers and not any(known(word) for word in modifiers):
+    named = [word for word in modifiers if word not in GENERIC_MODIFIERS]
+    if known is not None and named and not any(known(word) for word in named):
         # "the claude api": the graph knows "api" and nothing called "claude". Name what was asked, offer the match.
         resolution.query = " ".join(words[best.start - len(modifiers) : best.end])
         resolution.reason = "partial"
@@ -263,10 +268,12 @@ def _modifiers(words: list[str], match: _Match) -> list[str]:
     """The words between a determiner and the match ("claude" in "the claude api"), or none.
 
     Only a determiner opens the phrase: in "who maintains billing" or "why did we cut vector
-    recall" the word before the match is a verb, not part of the name.
+    recall" the word before the match is a verb, not part of the name. A generic word such as
+    "new" is walked past even though it is a stopword, so "the new claude api" still reaches
+    "claude".
     """
     start = match.start
-    while start > 0 and words[start - 1] not in STOPWORDS:
+    while start > 0 and (words[start - 1] not in STOPWORDS or words[start - 1] in GENERIC_MODIFIERS):
         start -= 1
     if start == match.start or start == 0 or words[start - 1] not in DETERMINERS:
         return []
