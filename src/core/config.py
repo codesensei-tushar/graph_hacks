@@ -69,7 +69,9 @@ class Settings:
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
     llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "") or "claude-haiku-5-5")
 
-    # GitHub App (Settings -> Developer settings -> GitHub Apps). See docs/GITHUB.md.
+    # GitHub App (Settings -> Developer settings -> GitHub Apps). See docs/GITHUB.md. When these are unset,
+    # the app registered from the operator page (stored in the control graph) is used instead
+    # (src/integrations/github/app_config.py); when set, they win.
     github_app_id: str = field(default_factory=lambda: os.getenv("GITHUB_APP_ID", ""))
     github_webhook_secret: str = field(default_factory=lambda: os.getenv("GITHUB_WEBHOOK_SECRET", ""))
     # The app's private key: a path to the .pem locally, or the PEM text itself in production.
@@ -78,6 +80,11 @@ class Settings:
     # OAuth credentials of the same app, used only to verify `link github` in Slack.
     github_client_id: str = field(default_factory=lambda: os.getenv("GITHUB_CLIENT_ID", ""))
     github_client_secret: str = field(default_factory=lambda: os.getenv("GITHUB_CLIENT_SECRET", ""))
+    # The app's URL name (github.com/apps/<slug>), for the console's Connect button. Optional: read from GitHub when unset.
+    github_app_slug: str = field(default_factory=lambda: os.getenv("GITHUB_APP_SLUG", ""))
+    # Optional: a token used only to read public repos added by name (5,000 requests an hour instead of 60).
+    # A fine-grained token with public-repository read access is enough. See docs/GITHUB.md.
+    github_public_repo_token: str = field(default_factory=lambda: os.getenv("GITHUB_PUBLIC_REPO_TOKEN", ""), repr=False)
 
     # Connectors (docs/CONNECTORS.md): every CONNECTOR_<SOURCE>_<FIELD> variable, secrets included.
     # src/connectors/registry.py turns them into installs; kept out of repr so they never print.

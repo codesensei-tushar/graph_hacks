@@ -83,7 +83,8 @@ class PrExplainTest(unittest.TestCase):
         tool, result = _ask("what did PR #207 do")
         self.assertEqual((tool, result.tool, result.found), ("pr_explain", "pr_explain", True))
         self.assertTrue(
-            result.answer.startswith("graph_hacks#207 “I1: batched connector writes, content-hash skip, one generation bump per page” is merged."),
+            # merged_at from the fixture (2026-10-18T17:15:37Z), now that ingest stores it.
+            result.answer.startswith("graph_hacks#207 “I1: batched connector writes, content-hash skip, one generation bump per page” is merged 18 Oct 2026, 17:15 UTC."),
             result.answer,
         )
         self.assertIn("Written by Yash Patil (@noobsurd11).", result.answer)

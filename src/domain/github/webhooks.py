@@ -1,20 +1,25 @@
-"""What each GitHub webhook does to the graph.
+"""What each GitHub webhook does to the graph. It runs in the org the installation is bound to
+(``installations.route``, called by the route before this), so it writes that org's graph only.
 
-| Event                     | Actions handled                         | Effect                               |
-|---------------------------|-----------------------------------------|--------------------------------------|
-| installation              | created / deleted                       | backfill the repos / drop them       |
-| installation_repositories | added / removed                         | backfill / drop those repos          |
-| pull_request              | any                                     | upsert, with changed files on change |
-| pull_request              | opened / reopened / ready_for_review    | then the Slack heads-up (alerts.py)  |
-| pull_request_review       | submitted / edited / dismissed          | upsert the review                    |
-| issues                    | deleted / anything else                 | delete / upsert the ticket           |
+| Event                     | Actions handled                         | Effect                                         |
+|---------------------------|-----------------------------------------|------------------------------------------------|
+| installation              | created / deleted                       | queue the backfill / remove its data, forget it |
+| installation              | suspend / unsuspend                     | mark the binding                               |
+| installation_repositories | added / removed                         | queue their backfill / remove their data       |
+| repository                | deleted / anything else                 | remove its data / upsert (a visibility change rescopes) |
+| member                    | any                                     | read the repo's collaborators again            |
+| pull_request              | any                                     | upsert, with changed files on change           |
+| pull_request              | opened / reopened / ready_for_review    | then the Slack heads-up (alerts.py)            |
+| pull_request_review       | submitted / edited / dismissed          | upsert the review                              |
+| issues                    | deleted / anything else                 | delete / upsert the ticket                     |
 
-Anything else is acknowledged and ignored.
+Backfills and removals are scheduler jobs (``connections``, ``backfill``). Anything else is
+acknowledged and ignored.
 """
 
 import logging
 
-from src.domain.github import alerts, backfill, ingest, repos
+from src.domain.github import alerts, backfill, connections, ingest, installations, repos
 from src.integrations.github.client import client_for
 
 log = logging.getLogger(__name__)
@@ -32,31 +37,46 @@ def handle_github_event(event: str, payload: dict) -> str:
 
     if event == "installation":
         if action == "created":
-            backfill.backfill_installation(int(installation_id))
-            return "backfilled"
+            connections.start_backfill(int(installation_id))
+            return "backfill_queued"
         if action == "deleted":
-            for row in repos.list_repos(int(installation_id)):
-                repos.remove_repo(row["id"])
-            return "removed"
+            connections.disconnect(int(installation_id), forget=True)
+            return "removal_queued"
+        if action in ("suspend", "unsuspend"):
+            installations.set_suspended(int(installation_id), action == "suspend")
+            return action
         return "ignored"
 
     if event == "installation_repositories":
         if action == "added":
-            client = client_for(int(installation_id))
-            added = {item["id"] for item in payload.get("repositories_added") or []}
-            # The webhook's repo stubs lack visibility details; read the full objects.
-            full = [repo for repo in client.list_repositories() if repo["id"] in added]
-            backfill.backfill_installation(int(installation_id), only=full)
-            return "backfilled"
+            # The webhook's repo stubs lack visibility details; the job reads the full objects.
+            added = [item["id"] for item in payload.get("repositories_added") or []]
+            if added:
+                connections.start_backfill(int(installation_id), only=added)
+            return "backfill_queued"
         if action == "removed":
-            for item in payload.get("repositories_removed") or []:
-                repos.remove_repo(item["id"])
-            return "removed"
+            removed = [item["id"] for item in payload.get("repositories_removed") or []]
+            if removed:
+                backfill.start_removal(removed, orphans=False)
+            return "removal_queued"
         return "ignored"
 
     if not repo or installation_id is None:
         return "ignored"
+
+    if event == "repository":
+        if action == "deleted":
+            backfill.start_removal([repo["id"]], orphans=False)
+            return "removal_queued"
+        # Renamed, transferred, archived, made public or private: a visibility change moves its data's scope.
+        repos.upsert_repo(repo, int(installation_id))
+        return "repository"
+
     repos.upsert_repo(repo, int(installation_id))
+
+    if event == "member":
+        backfill.sync_collaborators(client_for(int(installation_id)), repo)
+        return "collaborators"
 
     if event == "pull_request":
         pr = payload["pull_request"]

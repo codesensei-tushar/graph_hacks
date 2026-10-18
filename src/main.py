@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
-from src.api.v1 import auth, connectors, console_connectors, console_oauth, console_people, console_teams, github, health, org_ops, proof, slack, slack_install
+from src.api.v1 import auth, connectors, console_connectors, console_github, console_oauth, console_people, console_teams, github, github_app, github_installations, github_repos, health, org_ops, proof, slack, slack_install
 from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
 from src.connectors import store as connector_store
@@ -15,6 +15,7 @@ from src.core import scheduler, tenancy
 from src.core.config import settings
 from src.db.falkordb_client import connect
 from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
+from src.integrations.github import app_config as github_app_config
 from src.domain.knowledge.search import ensure_search_indexes
 from src.domain import orgs
 from src.domain.memory.memory_service import ensure_indexes
@@ -117,8 +118,19 @@ def _start() -> None:
     channel_reset.register()
     token_install.register()
     scheduler.start()
-    if settings.github_enabled and not scheduler.exists(github_backfill.COLLABORATOR_REFRESH_JOB_ID):
+    if github_app_config.enabled() and not scheduler.exists(github_backfill.COLLABORATOR_REFRESH_JOB_ID):
         github_backfill.schedule_collaborator_refresh()
+    # Every other org with a connected GitHub installation keeps its own hourly collaborator refresh.
+    try:
+        from src.domain.github import connections as github_connections
+        from src.domain.github import installations as github_installations
+
+        for org_id in github_installations.orgs_with_installations():
+            if org_id != tenancy.LEGACY_ORG_ID:
+                with tenancy.org_context(org_id):
+                    github_connections.ensure_collaborator_refresh()
+    except Exception:
+        log.exception("arming the GitHub collaborator refresh failed")
     # Connectors with CONNECTOR_<SOURCE>_* set: configure each install and arm its sync.
     connector_registry.load(settings.connector_env)
     # Installs made in the console, stored in each org's graph (the legacy org's too).
@@ -148,6 +160,12 @@ app = FastAPI(
 app.include_router(slack.router)
 app.include_router(slack_install.router)
 app.include_router(github.router)
+app.include_router(github_app.router)
+app.include_router(github_installations.router)
+app.include_router(console_github.api)
+app.include_router(console_github.callbacks)
+app.include_router(github_repos.ops_router)
+app.include_router(github_repos.console_router)
 app.include_router(connectors.router)
 app.include_router(console_oauth.router)
 app.include_router(health.router)
