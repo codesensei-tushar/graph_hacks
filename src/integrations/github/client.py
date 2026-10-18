@@ -3,6 +3,10 @@
 The app signs a short JWT with its private key, trades it for an installation token
 (cached until shortly before it expires), and reads with that token. Everything here
 is read-only. ``GitHubClient`` is the seam tests replace with a fake.
+
+A refusal is ``GitHubError``; when GitHub says to wait (a 429, or a 403 with
+``X-RateLimit-Remaining: 0`` or ``Retry-After``), ``retry_after`` holds the seconds to wait.
+``PublicClient`` reads public repos with no installation (``public_repos``).
 """
 
 import calendar
@@ -31,9 +35,30 @@ _TOKEN_MARGIN_SECONDS = 300
 
 
 class GitHubError(RuntimeError):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, retry_after: float | None = None):
         super().__init__(f"GitHub {status}: {message}")
         self.status = status
+        # Seconds GitHub asked us to wait (rate limits), or None.
+        self.retry_after = retry_after
+
+
+def _retry_after(status: int, headers) -> float | None:
+    """The wait a rate-limited answer asks for: ``Retry-After``, else until ``X-RateLimit-Reset``
+    (https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)."""
+    if status not in (403, 429) or headers is None:
+        return None
+    after = headers.get("Retry-After")
+    if after:
+        try:
+            return max(1.0, float(after))
+        except ValueError:
+            pass
+    if headers.get("X-RateLimit-Remaining") == "0" and headers.get("X-RateLimit-Reset"):
+        try:
+            return max(1.0, float(headers["X-RateLimit-Reset"]) - time.time() + 1)
+        except ValueError:
+            return 60.0
+    return 60.0 if status == 429 else None
 
 
 @dataclass(frozen=True)
@@ -57,7 +82,7 @@ def _request(method: str, url: str, token: str | None = None, body: dict | None 
             return (json.loads(raw) if raw else None), dict(response.headers)
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")[:300]
-        raise GitHubError(error.code, detail) from error
+        raise GitHubError(error.code, detail, _retry_after(error.code, error.headers)) from error
 
 
 def _next_link(headers: dict) -> str | None:
@@ -83,20 +108,41 @@ class GitHubClient:
     def _token(self) -> str:
         return _installation_token(self.installation_id)
 
+    def _call(self, url: str) -> tuple[object, dict]:
+        return _request("GET", url, self._token())
+
     def _get(self, path: str, params: dict | None = None) -> object:
         query = f"?{urllib.parse.urlencode(params)}" if params else ""
-        data, _ = _request("GET", f"{API}{path}{query}", self._token())
+        data, _ = self._call(f"{API}{path}{query}")
         return data
 
     def _get_all(self, path: str, params: dict | None = None, limit: int = 300, key: str | None = None) -> list[dict]:
         url: str | None = f"{API}{path}?{urllib.parse.urlencode({'per_page': 100, **(params or {})})}"
         items: list[dict] = []
         while url and len(items) < limit:
-            data, headers = _request("GET", url, self._token())
+            data, headers = self._call(url)
             page = (data or {}).get(key, []) if key else (data or [])
             items.extend(page)
             url = _next_link(headers)
         return items[:limit]
+
+    def _page(self, path: str, params: dict, page: int, per_page: int) -> tuple[list[dict], bool]:
+        """One page of a list, and whether GitHub has another after it."""
+        query = urllib.parse.urlencode({**params, "per_page": per_page, "page": page})
+        data, headers = self._call(f"{API}{path}?{query}")
+        return list(data or []), _next_link(headers) is not None
+
+    def get_repo(self, full_name: str) -> dict:
+        return self._get(f"/repos/{full_name}") or {}
+
+    def pull_requests_page(self, full_name: str, page: int, per_page: int, sort: str = "created") -> tuple[list[dict], bool]:
+        return self._page(f"/repos/{full_name}/pulls", {"state": "all", "sort": sort, "direction": "desc"}, page, per_page)
+
+    def issues_page(self, full_name: str, page: int, per_page: int, since: str | None = None) -> tuple[list[dict], bool]:
+        params = {"state": "all", "sort": "updated" if since else "created", "direction": "desc"}
+        if since:
+            params["since"] = since
+        return self._page(f"/repos/{full_name}/issues", params, page, per_page)
 
     def list_repositories(self) -> list[dict]:
         return self._get_all("/installation/repositories", key="repositories")
@@ -148,6 +194,38 @@ def forget_installation_token(installation_id: int) -> None:
 
 def client_for(installation_id: int) -> GitHubClient:
     return GitHubClient(installation_id)
+
+
+class PublicClient(GitHubClient):
+    """Reads a public repo without an installation. GitHub answers public data to any caller; what
+    differs is the rate limit: with ``GITHUB_PUBLIC_REPO_TOKEN`` (a fine-grained token with public
+    read access only) 5,000 requests an hour, without it 60
+    (https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api). A token
+    GitHub refuses (401) is dropped and the read goes on unauthenticated. Only GETs of public data
+    go out this way; collaborators are never read (a public repo is ``org_shared``)."""
+
+    def __init__(self):
+        super().__init__(0)
+        self._token_refused = False
+
+    @property
+    def mode(self) -> str:
+        return "token" if settings.github_public_repo_token and not self._token_refused else "anonymous"
+
+    def _call(self, url: str) -> tuple[object, dict]:
+        if self.mode == "token":
+            try:
+                return _request("GET", url, settings.github_public_repo_token)
+            except GitHubError as error:
+                if error.status != 401:
+                    raise
+                log.warning("[github] GITHUB_PUBLIC_REPO_TOKEN was refused; reading public repos unauthenticated")
+                self._token_refused = True
+        return _request("GET", url, None)
+
+
+def public_client() -> PublicClient:
+    return PublicClient()
 
 
 # --- user sign-in, only to confirm who someone is on GitHub --------------------------------
