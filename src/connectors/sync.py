@@ -142,8 +142,21 @@ def run_sync(payload: dict) -> None:
         log.exception("[connectors] %s sync step failed", source)
     finally:
         _connector, install = resolve(source, install_id)
-        if install is not None:
+        if install is not None and not _removing(install):
             schedule(source, delay, install)
+
+
+def _removing(install: Install) -> bool:
+    """Whether a stored install is being disconnected: its job must not be re-armed."""
+    if install.auth == "env":
+        return False
+    from src.connectors import store
+
+    try:
+        stored = store.get(install.key)
+    except Exception:
+        return False
+    return stored is None or stored.status == "removing"
 
 
 def _error(error: BaseException) -> str:
@@ -181,12 +194,14 @@ def _record_status(install: Install, report: dict) -> None:
 
     status = report.get("status")
     try:
+        # Compare-and-set: a DELETE may have marked the install removing while this step ran.
         if status == "credentials_rejected":
-            store.set_status(install.key, "error", "The credentials were rejected. Reconnect to fix it.")
+            store.set_status(install.key, "error", "The credentials were rejected. Reconnect to fix it.", only_from=("active", "error", "connecting"))
         elif status in ("synced", "idle", "no_containers"):
             current = store.get(install.key)
-            if current is not None and (current.status != "active" or current.last_error):
-                store.set_status(install.key, "active")
+            stale = current is not None and (current.status in ("error", "connecting") or (current.status == "active" and current.last_error))
+            if stale:
+                store.set_status(install.key, "active", only_from=("active", "error", "connecting"))
     except Exception:
         log.exception("[connectors] status of %s not recorded", install.key)
 

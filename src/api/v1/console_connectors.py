@@ -245,9 +245,16 @@ async def select_containers(install_key: str, request: Request, session=Depends(
         return JSONResponse({"error": "some selected ids are not available", "unknown": unknown[:20]}, status_code=400)
     with tenancy.org_context(org):
         updated = store.update_config(install_key, {connector.container_field: ",".join(by_id[item].key for item in selected)})
-        if updated.status == "connecting":
-            store.set_status(install_key, "active")
-        registry.put(store.to_install(store.get(install_key)))
+        if updated is None:
+            return JSONResponse({"error": "no such connection"}, status_code=404)
+        store.set_status(install_key, "active", only_from=("connecting",))
+        registry.put(store.to_install(store.get(install_key) or updated))
+        # A DELETE may have run since the check above: re-read after the put, and undo it if so.
+        current = store.get(install_key)
+        if current is None or current.status == "removing":
+            registry.drop(org.id, updated.source, updated.install)
+            sync.cancel(Install(source=updated.source, id=updated.install, org=org.id, auth=updated.auth))
+            return JSONResponse({"error": "this connection is being removed"}, status_code=409)
         sync.sync_now(updated.source, full=False, install_id=updated.install)
         _audit(org.id, session, "connector.containers", install_key)
     return {"ok": True, "selected": len(selected)}

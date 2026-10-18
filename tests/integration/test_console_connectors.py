@@ -172,6 +172,44 @@ class ConsoleConnectorsTest(unittest.TestCase):
         self.assertIsNone(orgs.external_account_org(self.account))
         self.assertIn("connector.disconnect", [call.args[2] for call in audit.call_args_list])
 
+    def test_a_step_finishing_after_disconnect_does_not_cancel_the_removal(self):
+        key = self.install.key
+        self.client.put(f"/console/api/connections/{key}/containers", json={"selected": ["10"]}, headers=self.headers)
+        self._run_scheduler(3)
+        # A sync step is already running on the scheduler thread when DELETE arrives...
+        self.assertEqual(self.client.delete(f"/console/api/connections/{key}", headers=self.headers).status_code, 202)
+        with tenancy.org_context(self.x.id):
+            # ...and that step ends by recording its outcome, and by trying to re-arm itself.
+            sync._record_status(self.install, {"status": "synced"})
+            sync._record_status(self.install, {"status": "credentials_rejected"})
+            self.assertEqual(store.get(key).status, "removing")
+            sync.run_sync({"source": "consolefake", "install": self.install.id})
+            self.assertFalse(scheduler.exists(f"connector:sync:{self.x.id}:consolefake:{self.install.id}"))
+        self._run_scheduler(4)
+        with tenancy.org_context(self.x.id):
+            self.assertIsNone(store.get(key))
+        self.assertEqual(self._count_in(self.x, "MATCH (n {install: $k}) RETURN count(n)", {"k": key}), 0)
+
+    def test_selecting_projects_while_a_disconnect_lands_does_not_bring_the_install_back(self):
+        key = self.install.key
+        real_put = registry.put
+
+        def put_then_disconnect(install):
+            real_put(install)
+            # DELETE lands between the containers route's checks and its registry.put.
+            with tenancy.org_context(self.x.id):
+                sync.remove_install(key, actor="p-ada")
+            return install
+
+        with mock.patch.object(registry, "put", side_effect=put_then_disconnect):
+            response = self.client.put(f"/console/api/connections/{key}/containers", json={"selected": ["10"]}, headers=self.headers)
+        self.assertEqual(response.status_code, 409)
+        self.assertIsNone(registry.get_install(self.x.id, "consolefake", self.install.id))
+        with tenancy.org_context(self.x.id):
+            self.assertEqual(store.get(key).status, "removing")
+            self.assertFalse(scheduler.exists(f"connector:sync:{self.x.id}:consolefake:{self.install.id}"))
+            self.assertFalse(store.set_status(key, "active"))
+
     def test_bodies_must_be_json(self):
         # CSRF (Origin, X-CSRF-Token) is checked by console_user/console_admin themselves.
         key = self.install.key
