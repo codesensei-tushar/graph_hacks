@@ -90,6 +90,18 @@ class KnowledgeCatalogueTest(unittest.TestCase):
         self.assertFalse(routed["found"])
         self.assertEqual(routed["candidates"], ["Billing Service", "API Gateway"])
 
+    def test_a_name_that_is_only_the_end_of_what_was_named_is_refused(self):
+        # Quillfern knows API Gateway as "api" and nothing as "claude": "the claude api" is not API Gateway.
+        result = ask_service.ask("what breaks if the claude api goes down, one hop", ORG)
+        self.assertEqual(result.tool, "blast_radius")
+        self.assertFalse(result.found)
+        self.assertEqual(result.path, [])
+        self.assertEqual(result.candidates, ["API Gateway"])
+        self.assertEqual(result.answer, "Nothing in the graph matches “claude api”. Nearest: API Gateway (known as “api”).")
+        # Named without the extra word, or with one the graph knows, it still resolves.
+        self.assertTrue(ask_service.ask("what breaks if the api goes down", ORG).found)
+        self.assertTrue(ask_service.ask("who maintains billing", ORG).found)
+
     def test_a_typo_still_offers_the_nearest_name(self):
         result = _run("who_owns", {"name": "invoce worker"})
         self.assertFalse(result.found)
@@ -172,6 +184,14 @@ class ProductionSeedTicketTest(unittest.TestCase):
         text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Office plants need watering"}, "org_shared")
         self.assertIn("Filed *TKT-", text)
         self.assertIn("not linked to a service", text)
+
+    def test_the_claude_api_resolves_here_and_an_unknown_database_does_not(self):
+        # The production seed has a Claude API node, so step 4 of the demo still answers.
+        self.assertTrue(ask_service.ask("what breaks if the claude api goes down, one hop", ORG).answer.startswith("If Claude API goes down"))
+        # "database" is FalkorDB's alias, and nothing here is called "stripe".
+        stripe = ask_service.ask("what breaks if the stripe database goes down", ORG)
+        self.assertFalse(stripe.found)
+        self.assertEqual(stripe.answer, "Nothing in the graph matches “stripe database”. Nearest: FalkorDB (known as “database”).")
 
     def test_matched_title_links_to_the_seeded_service(self):
         text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": "Memory layer recall misses DM notes"}, "org_shared")

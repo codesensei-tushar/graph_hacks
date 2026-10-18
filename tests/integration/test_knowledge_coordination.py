@@ -254,6 +254,14 @@ class WhoShouldKnowTest(unittest.TestCase):
         ticket = _ask("who should know about TKT-101")
         self.assertEqual(ticket.answer, "TKT-101 is a ticket, not a change. Name the pull request or service that changes, or ask who knows TKT-101.")
 
+    def test_a_service_named_only_by_the_end_of_an_unknown_name_is_refused(self):
+        # The graph knows API Gateway as "api" and nothing as "claude".
+        result = _ask("who should know if the claude api changes")
+        self.assertFalse(result.found)
+        self.assertEqual(result.candidates, ["API Gateway"])
+        self.assertEqual(result.answer, "Nothing in the graph matches “claude api”. Nearest: API Gateway (known as “api”).")
+        self.assertTrue(_ask("who should know if the api changes").answer.startswith("API Gateway is owned by Maya Ortiz."))
+
     # --- in a thread ------------------------------------------------------------------------
 
     def test_a_follow_up_takes_the_pull_request_the_thread_named(self):
