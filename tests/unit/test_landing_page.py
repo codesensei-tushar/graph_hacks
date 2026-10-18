@@ -6,6 +6,7 @@ the page asks only for its own routes and vendored files; and ``/team/{id}`` sti
 
 import re
 import unittest
+from unittest import mock
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -165,16 +166,35 @@ class WeightTest(unittest.TestCase):
 
 
 class TeamPageTest(unittest.TestCase):
-    def test_a_team_page_still_renders_with_the_shared_shell(self):
+    def setUp(self):
         app = FastAPI()
         web.install(app)
-        http = TestClient(app)
-        page = http.get("/team/sales")
+        self.http = TestClient(app)
+
+    def test_a_team_page_still_renders_with_the_shared_shell(self):
+        http = self.http
+        with mock.patch.object(web.team_page, "public_team_page", return_value=object()):
+            page = http.get("/team/sales")
         self.assertEqual(page.status_code, 200)
         for asset in ("/static/style.css", "/static/shell.js", "/static/graph.js", "/static/team.js"):
             self.assertIn(asset, page.text)
             self.assertEqual(http.get(asset).status_code, 200, asset)
         self.assertIn('id="theme-toggle"', page.text)
+
+    def test_an_unknown_team_is_the_same_page_with_a_404(self):
+        with mock.patch.object(web.team_page, "public_team_page", return_value=None) as lookup:
+            page = self.http.get("/team/nope")
+            too_long = self.http.get("/team/" + "x" * (web.team_page.MAX_TEAM_ID + 1))
+        self.assertEqual((page.status_code, too_long.status_code), (404, 404))
+        self.assertIn("/static/team.js", page.text)
+        lookup.assert_called_once_with("nope")
+
+    def test_a_failed_lookup_still_serves_the_page(self):
+        with mock.patch.object(web.team_page, "public_team_page", side_effect=RuntimeError("graph down")):
+            with self.assertLogs("src.api.web", "ERROR"):
+                page = self.http.get("/team/sales")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("/static/team.js", page.text)
 
 
 def _js_regex(text: str, name: str) -> re.Pattern:

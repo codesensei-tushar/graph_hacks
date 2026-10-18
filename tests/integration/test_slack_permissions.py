@@ -210,6 +210,7 @@ class SlackPermissionsTest(unittest.TestCase):
 
     def test_dm_memory_is_personal(self):
         self.say(self.alice, f"D{self.alice}", f"remember: my billing service on-call swap is with {self.run}", "im")
+        self.assertEqual(self.slack.posts[-1][1], "Saved. Only you can recall it, in your DMs with me.")
         self.assertIn(self.run, self.ask_dm(self.alice, "billing service on-call swap"))
         self.assertNotIn(self.run, self.ask_dm(self.bob, "billing service on-call swap"))
         self.assertNotIn(self.run, self.ask_in(self.bob, self.public, "channel", "billing service on-call swap"))
