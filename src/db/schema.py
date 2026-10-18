@@ -1,0 +1,148 @@
+"""Every index a company graph needs, and the numbered migrations that bring an old graph up to date.
+
+``ensure(graph)`` is the one call: startup runs it for every org's graph, org creation for a new
+one, and a seed after it writes. It is idempotent and safe to run concurrently:
+
+1. Each range index in ``INDEXES`` and each full-text index (``FULLTEXT``, and ``search.INDEXED``)
+   is created if missing. A new entry here reaches every graph on the next start.
+2. Each migration in ``MIGRATIONS`` newer than the graph's ``SchemaVersion`` runs once, in order,
+   and the version is recorded after each, so a crash resumes where it stopped. A migration must
+   be idempotent and batched (a large graph never takes one long write).
+
+Range indexes are what make ``(n:Label {id: $id})`` an index seek instead of a label scan.
+"""
+
+import logging
+import time
+from collections.abc import Callable
+
+from src.db.falkordb_client import DarkGraph, connect
+
+log = logging.getLogger(__name__)
+
+# (label, property) range indexes. Lookups by id for every label a query anchors on; the
+# connector's install and email lookups; the memory layer's.
+INDEXES: tuple[tuple[str, str], ...] = (
+    # Knowledge graph
+    ("Company", "id"),
+    ("Person", "id"),
+    ("Team", "id"),
+    ("Service", "id"),
+    ("Document", "id"),
+    ("Ticket", "id"),
+    ("Decision", "id"),
+    ("PullRequest", "id"),
+    ("GitHubUser", "id"),
+    ("Repo", "id"),
+    ("Chat", "id"),
+    # Connectors
+    ("Container", "id"),
+    ("Container", "install"),
+    ("ExternalUser", "id"),
+    ("ExternalUser", "email"),
+    ("ConnectorState", "id"),
+    ("ConnectorInstall", "id"),
+    # Memory layer
+    ("Memory", "id"),
+    ("Memory", "scope"),
+    ("Memory", "custom_id"),
+    ("Tag", "id"),
+    ("Tag", "container"),
+    ("Scope", "id"),
+    ("SlackUser", "id"),
+    ("Channel", "id"),
+    # This module's own bookkeeping
+    ("SchemaVersion", "id"),
+)
+# (label, property) full-text indexes besides the ones ``search`` reads (``search.INDEXED``).
+FULLTEXT: tuple[tuple[str, str], ...] = (("Memory", "text"),)
+
+# Labels whose nodes read a missing ``scope`` as org_shared (``resolve.SCOPED``); migration 1
+# writes it down. Memories are left alone: a memory's scope is never defaulted.
+SCOPED_LABELS = ("Company", "Person", "Team", "Service", "Document", "Ticket", "Decision", "PullRequest", "GitHubUser", "Repo", "Chat")
+BATCH = 5000
+VERSION_ID = "schema"
+
+
+def _backfill_scope(graph) -> None:
+    for label in SCOPED_LABELS:
+        while True:
+            done = graph.query(
+                f"MATCH (n:{label}) WHERE n.scope IS NULL WITH n LIMIT {BATCH} SET n.scope = 'org_shared' RETURN count(n)"
+            ).result_set[0][0]
+            if done < BATCH:
+                break
+
+
+def _range_indexes(graph) -> None:
+    present = indexes(graph)
+    for label, prop in INDEXES:
+        if "RANGE" in present.get(label, {}).get(prop, set()):
+            continue
+        try:
+            graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.{prop})")
+        except Exception as error:  # a concurrent ensure() made it first
+            if "already" not in str(error).lower():
+                raise
+
+
+# (version, what it does, the step). Append only; never renumber or edit one that shipped.
+MIGRATIONS: tuple[tuple[int, str, Callable], ...] = (
+    (1, "a missing scope on knowledge nodes is written as org_shared", _backfill_scope),
+    (2, "range indexes on every anchored label", _range_indexes),
+)
+LATEST = MIGRATIONS[-1][0]
+
+
+def indexes(graph) -> dict[str, dict[str, set[str]]]:
+    """The graph's indexes: label -> property -> kinds ("RANGE", "FULLTEXT", ...)."""
+    rows = graph.ro_query("CALL db.indexes() YIELD label, types RETURN label, types").result_set
+    out: dict[str, dict[str, set[str]]] = {}
+    for label, types in rows:
+        for prop, kinds in (types or {}).items():
+            out.setdefault(label, {}).setdefault(prop, set()).update(kinds or [])
+    return out
+
+
+def version(graph) -> int:
+    rows = graph.ro_query("MATCH (v:SchemaVersion {id: $id}) RETURN v.version", {"id": VERSION_ID}).result_set
+    return int(rows[0][0] or 0) if rows else 0
+
+
+def ensure(graph=None) -> int:
+    """Bring ``graph`` (the org in context's when None) to the latest schema; returns its version."""
+    if graph is None:
+        _, graph = connect()
+    if isinstance(graph, DarkGraph):
+        return 0
+    _range_indexes(graph)
+    _fulltext_indexes(graph)
+    current = version(graph)
+    for number, what, step in MIGRATIONS:
+        if number <= current:
+            continue
+        started = time.monotonic()
+        step(graph)
+        graph.query(
+            "MERGE (v:SchemaVersion {id: $id}) SET v.version = $version, v.migrated_at = timestamp()",
+            {"id": VERSION_ID, "version": number},
+        )
+        log.info("[schema] %s: migration %d (%s) in %.1fs", getattr(graph, "name", "?"), number, what, time.monotonic() - started)
+        current = number
+    return current
+
+
+def _fulltext_indexes(graph) -> None:
+    from src.domain.knowledge.search import ensure_search_indexes
+
+    present = indexes(graph)
+    for label, prop in FULLTEXT:
+        if "FULLTEXT" in present.get(label, {}).get(prop, set()):
+            continue
+        try:
+            graph.query("CALL db.idx.fulltext.createNodeIndex($label, $field)", {"label": label, "field": prop})
+        except Exception as error:
+            if "already" not in str(error).lower():
+                raise
+    # Never raises: a failure is logged and the tools that would search keep their refusal.
+    ensure_search_indexes(graph)

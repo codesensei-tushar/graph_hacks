@@ -7,17 +7,14 @@ from fastapi import FastAPI
 from src.api import mcp as mcp_api
 from src.api import console_web, ops, web
 from src.api.v1 import auth, connectors, console_connectors, console_oauth, console_people, console_teams, github, health, org_ops, proof, slack, slack_install
-from src.connectors import graph as connector_graph
 from src.connectors import registry as connector_registry
-from src.connectors import store as connector_store
 from src.connectors import sync as connector_sync  # registers the connector sync job
 from src.core import scheduler, tenancy
 from src.core.config import settings
+from src.db import schema
 from src.db.falkordb_client import connect
 from src.domain.github import backfill as github_backfill  # registers the collaborator refresh job
-from src.domain.knowledge.search import ensure_search_indexes
 from src.domain import orgs
-from src.domain.memory.memory_service import ensure_indexes
 from src.domain.slack import team_invite  # noqa: F401  registers team invite jobs
 from src.domain.slack import token_install
 from src.domain.slack.agent_turn import answer_turn
@@ -41,13 +38,10 @@ def _seed_if_empty() -> None:
         if nodes == 0:
             log.info("graph is empty; seeding %s (SEED_ON_STARTUP)", settings.seed_company)
             reset_and_seed(company_module(settings.seed_company))
-    ensure_indexes()
-    connector_graph.ensure_indexes()
-    connector_store.ensure_indexes()
-    # Never raises: a failure is logged and the tools that would search keep their refusal.
-    ensure_search_indexes()
-    # The other orgs' graphs got their indexes and Company node when they were created; this adds
-    # any index added since, and the Company node to orgs made before create_org wrote one.
+    # Every index and migration (src/db/schema.py) in the legacy org's graph.
+    schema.ensure()
+    # The other orgs' graphs got theirs when they were created; this adds any index or migration
+    # added since, and the Company node to orgs made before create_org wrote one.
     for org in _other_orgs():
         try:
             orgs.build_org_indexes(org)
