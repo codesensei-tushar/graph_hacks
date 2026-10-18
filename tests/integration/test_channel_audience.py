@@ -87,9 +87,27 @@ class ChannelAudienceTest(unittest.TestCase):
         self.slack.ext_shared.add(self.public)
         self.assertFalse(self.internal())
         self.slack.ext_shared.clear()
-        kv().delete(f"brain:slack:audience:{self.team}:{self.public}", f"brain:slack:directory:{self.team}")
+        channel_audience.forget(self.team, self.public)
         self.slack.add(self.guest, guest=True)  # the team has outsiders, so members are checked
         self.slack.members[self.public].append("USTRANGER")  # not in this team's directory
+        self.assertFalse(self.internal())
+
+    def test_someone_becoming_a_guest_drops_every_cached_verdict_of_the_team(self):
+        other = f"COTHER{self.run}"
+        self.slack.members[other] = ["UBOT", self.alice]
+        self.assertTrue(self.internal())
+        self.assertTrue(self.internal(other))
+        # Alice becomes a guest (user_change): neither channel may keep its cached "internal".
+        self.slack.add(self.alice, guest=True)
+        self.assertTrue(self.internal(other, asker="UBOT"))  # still cached
+        channel_audience.forget(self.team)
+        self.assertFalse(self.internal(asker="UBOT"))
+        self.assertFalse(self.internal(other, asker="UBOT"))
+
+    def test_a_channel_shared_with_another_company_is_asked_again(self):
+        self.assertTrue(self.internal())
+        self.slack.ext_shared.add(self.public)
+        channel_audience.forget(self.team, self.public)  # what channel_shared does
         self.assertFalse(self.internal())
 
     def test_a_guest_asking_is_external_even_in_a_dm(self):
