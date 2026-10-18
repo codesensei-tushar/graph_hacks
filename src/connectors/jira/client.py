@@ -14,7 +14,7 @@ import re
 import urllib.parse
 from collections.abc import Iterable, Iterator
 
-from src.connectors.http import HttpError, JsonClient, basic_auth
+from src.connectors.http import HttpError, JsonClient, basic_auth, bearer
 
 # A project key as Jira allows it. Keys reach JQL only after this check.
 PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9_]{1,9}$")
@@ -51,6 +51,14 @@ class JiraClient:
     @classmethod
     def for_install(cls, install) -> "JiraClient":
         return cls(install.get("base_url"), install.get("email"), install.get("api_token"))
+
+    @classmethod
+    def with_bearer(cls, api_base: str, access_token: str) -> "JiraClient":
+        """OAuth (3LO): ``https://api.atlassian.com/ex/jira/<cloudId>`` with an access token."""
+        client = cls.__new__(cls)
+        client.base_url = api_base.rstrip("/")
+        client.http = JsonClient(client.base_url, headers=bearer(access_token))
+        return client
 
     def __repr__(self) -> str:
         return f"JiraClient({self.base_url!r})"
