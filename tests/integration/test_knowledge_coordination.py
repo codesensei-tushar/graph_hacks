@@ -300,6 +300,23 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertEqual(result.answer, _ask("notebook#45").answer)
         self.assertNotIn("Arjun", result.answer)
 
+    def test_a_bare_number_in_a_thread_is_not_a_pull_request_but_a_model_filled_one_is(self):
+        # notebook#52 is the only pull request numbered 52, so a loose match would find it.
+        thread = [{"user": "UMAYA", "text": "52"}]
+        question = "who should know about it"
+        choice = agent.ToolChoice("who_should_know", {"name": question}, "keywords")
+        result, used = agent.run_choice(choice, question, ORG, thread=thread)
+        self.assertFalse(result.found)
+        self.assertEqual(used.args, {"name": question})
+        self.assertNotIn("notebook#52", result.answer)
+        self.assertIsNone(coordination.pull_request_in("52", ORG))
+        # The same number filled in by a model, or written as a pull request in the thread, still finds it.
+        self.assertEqual(_ask("52").answer, _ask("notebook#52").answer)
+        self.assertEqual(coordination.pr_reference("52"), (None, 52))
+        named = [{"user": "UMAYA", "text": "see PR 52"}]
+        result, used = agent.run_choice(choice, question, ORG, thread=named)
+        self.assertEqual(used.args, {"name": "notebook#52"})
+
     def test_a_pull_request_that_is_not_there_is_never_swapped_for_the_thread_subject(self):
         thread = [{"user": "UTOMAS", "text": "who owns billing"}]
         for question in ("who should know about #999", "who should know about notebook#999"):
