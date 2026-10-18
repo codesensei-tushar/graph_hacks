@@ -129,11 +129,13 @@ class GraphExplorerTest(unittest.TestCase):
         self.assertEqual(starters[0], {"id": "billing-service", "name": "Billing Service", "label": "Service", "kind": "service"})
         self.assertEqual([node["label"] for node in starters], ["Service", "Service", "Team", "Team", "Person", "Person", "Decision", "Decision"])
 
-    def test_routes_share_the_public_rate_limit_and_cache(self):
+    def test_walks_share_the_public_rate_limit_and_cache_and_the_starters_are_not_counted(self):
         with mock.patch.object(ask_api, "LIMITER", ask_api.RateLimiter(limit=2, window=60)):
             headers = {"X-Real-IP": "203.0.113.9"}
             self.assertEqual(self.http.get("/api/explore?node=billing", headers=headers).status_code, 200)
-            self.assertEqual(self.http.get("/api/explore/start", headers=headers).status_code, 200)
+            for _ in range(3):
+                self.assertEqual(self.http.get("/api/explore/start", headers=headers).headers["cache-control"], ask_api.CACHE_CONTROL)
+            self.assertEqual(self.http.get("/api/explore/neighbors?node=billing&relation=OWNS", headers=headers).status_code, 200)
             throttled = self.http.get("/api/explore/neighbors?node=billing&relation=OWNS", headers=headers)
             self.assertEqual(throttled.status_code, 429)
             self.assertIn("Retry-After", throttled.headers)

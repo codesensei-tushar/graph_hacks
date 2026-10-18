@@ -44,7 +44,7 @@ Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/paym
 
 Or wander the graph at [/explore](https://brain.noobsurd.space/explore?node=billing-service). Type any name, or start from one of the best-connected nodes; the view is the `explore` tool's answer and its cited edges, drawn as the ask page draws them. Click a node to step to it, follow one relationship type ("depended on by", "owned by") up to three hops with `neighbors`, or look two hops out. Every step has its own address (`/explore?node=auth-service&rel=DEPENDS_ON&dir=in&hops=2`), Back walks back, and each node offers questions that open on the ask page. The page reads three public GET routes, `/api/explore?node=&depth=`, `/api/explore/neighbors?node=&relation=&direction=&depth=` and `/api/explore/start`, which call the same domain tools in the company-wide scope and share the ask page's rate limit and one-minute cache.
 
-**Over MCP.** The same read-only tools, with the same cited results, from any MCP client. No token needed: read-only, the company-wide scope, 30 calls a minute per address, shared with the ask page. A token, where one was issued, lifts the limit.
+**Over MCP.** The same read-only tools, with the same cited results, from any MCP client. No token needed: read-only, the company-wide scope, about 60 calls a minute per address with bursts of 30, shared with the ask page's questions. A token, where one was issued, lifts the limit.
 
 ```bash
 claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp
@@ -705,10 +705,12 @@ MCP callers read the company-wide `org_shared` scope only. There is no Slack ide
 
 `/mcp` is public, like the ask page. Each request is gated four ways:
 
-- No bearer token: allowed, and counted against the address's 30 calls a minute, the same budget as the ask page. Over it, 429 with `Retry-After`.
+- No bearer token: allowed, and counted against the address's budget of about 60 calls a minute (bursts of 30), the same budget as the ask page's questions and explorer walks. Over it, 429 with `Retry-After`.
 - A bearer token while `MCP_TOKEN` is unset: treated as no token.
 - `MCP_TOKEN` as the bearer token: allowed, never counted.
 - Any other bearer token while `MCP_TOKEN` is set: 403.
+
+Every call is a POST. The server is stateless, so a GET (there is no event stream to hold open) and a DELETE (there is no session to end) answer 405 at once. A string argument longer than 300 characters is refused, like a question that long on the ask page.
 
 ```python
 from mcp.client.session import ClientSession
