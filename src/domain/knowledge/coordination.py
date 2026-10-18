@@ -209,24 +209,32 @@ def _report(graph, entity: Entity, candidates: list[str], scopes: list[str]) -> 
     return result, missing
 
 
-def pr_reference(text: str) -> tuple[str | None, int] | None:
+def pr_reference(text: str, bare_number: bool = True) -> tuple[str | None, int] | None:
     """The pull request a text names, as (repo, number); the repo is None for "#45" or "PR 45". None when it names none.
 
-    "PR#45" names no repo, and "issue #12" names an issue, not pull request 12.
+    "PR#45" names no repo, and "issue #12" names an issue, not pull request 12. A text that is
+    only a number ("45") is the argument a model filled in; ``bare_number=False`` refuses it, for
+    a person's message in a thread, where "45" is an answer to something else.
     """
     text = text or ""
     for match in _IN_REPO.finditer(text):
         if match.group(1).lower() not in _NOT_A_REPO:
             return match.group(1), int(match.group(2))
     for match in _NUMBER.finditer(text):
+        if match.group(2) is not None and not bare_number:
+            continue
         if not _ISSUE_BEFORE.search(text[: match.start()]):
             return None, int(match.group(1) or match.group(2))
     return None
 
 
 def pull_request_in(text: str, scopes: list[str], graph=None) -> Entity | None:
-    """The one readable pull request a text names, or None. For a thread follow-up to find its subject."""
-    reference = pr_reference(text)
+    """The one readable pull request a text names, or None. For a thread follow-up to find its subject.
+
+    A message that is only a number names no pull request: a teammate answering "45" in a thread
+    is not pointing at notebook#45.
+    """
+    reference = pr_reference(text, bare_number=False)
     if reference is None:
         return None
     if graph is None:
