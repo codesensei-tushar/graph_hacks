@@ -571,11 +571,11 @@ def _now_millis() -> int:
     return now_millis()
 
 
-def what_changed(question: str, scopes: list[str], days=None, only=None) -> ToolResult:
+def what_changed(question: str, scopes: list[str], days=None, only=None, person=None) -> ToolResult:
     """Lives in ``what_changed.py``, which follows decisions forward (and so imports the catalogue). Kept here for the keyword router."""
     from src.domain.knowledge import what_changed as changed
 
-    return changed.what_changed(question, scopes, days, only)
+    return changed.what_changed(question, scopes, days, only, person)
 
 
 def reading_list(question: str, scopes: list[str]) -> ToolResult:
@@ -606,7 +606,7 @@ _ROUTED = {
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "reading_list": lambda args, scopes: reading_list(args["name"], scopes),
-    "what_changed": lambda args, scopes: what_changed(args.get("name") or "", scopes, args.get("days"), args.get("only")),
+    "what_changed": lambda args, scopes: what_changed(args.get("name") or "", scopes, args.get("days"), args.get("only"), args.get("person")),
     "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth"), args.get("direction")),
     "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),

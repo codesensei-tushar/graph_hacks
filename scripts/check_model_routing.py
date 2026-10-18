@@ -1,7 +1,7 @@
 """Check the model's tool routing on the demo questions, once, by hand.
 
 The only place this project spends model calls on purpose: one structured call per
-question (41 in all, fast profile), printing the tool and arguments the model chose
+question (45 in all, fast profile), printing the tool and arguments the model chose
 next to what the keyword router would do and what the recording script expects. Run
 it after changing a tool description or the routing prompt, read the table, and paste
 it into the pull request. It is not a test and must never run in CI.
@@ -106,6 +106,19 @@ QUESTIONS = [
     ("changed 2", "what's new in payments", "what_changed", None),
     ("changed 3", "billing is failing, what changed", "what_changed", None),
     ("changed 4", "what did the sales team decide recently", ("what_changed", {"only": ("decisions",)}), None),
+    # The chain over a thread: a search, then what changed around the service it found.
+    (
+        "chain 1",
+        "what changed there this month?",
+        "what_changed",
+        [
+            {"user": "ULENA", "text": f"{BOT} who knows about refunds"},
+            {"user": "UBOT", "bot_id": "B1", "text": "“refunds” comes up in the Billing runbook, about Billing Service. Ask first: Arjun Mehta (wrote the Billing runbook).\n\n*Path* (`search`, 2 edges)\n• Arjun Mehta -[AUTHORED]-> Billing runbook\n• Billing runbook -[DESCRIBES]-> Billing Service\n\n_Tool `search`, picked by the model. Read from: public channels_"},
+        ],
+    ),
+    ("chain 2", "what's around the billing service", "explore", None),
+    ("chain 3", "catch me up on what I missed this week", "what_changed", None),
+    ("chain 4", "which tickets are open", "find", None),
 ]
 
 
