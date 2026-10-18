@@ -61,9 +61,15 @@ scheduler step; otherwise the next fetch is `poll_seconds` away. `retry_after` i
 before the next fetch either way. A container keeps at most `sync.MAX_ITEMS_PER_CONTAINER`
 items; past that, new items are dropped and existing ones still update.
 
-**Pull requests.** `graph.link_references(pull_request_id, handles, source)` links a pull
-request `-[:REFERENCES]->` the tickets of `source` named by `handles` (`["PAY-12"]`) and keeps
-the handles on the pull request, so a ticket synced later links back.
+**Pull requests.** `graph.link_references(pull_request_id, handles, source, rel="REFERENCES")`
+links a pull request `-[:REFERENCES]->` (or, with `rel="CLOSES"`, `-[:CLOSES]->`) the tickets
+of `source` named by `handles` (`["PAY-12"]`, any case), replacing that pull request's earlier
+links of that source and relationship. The handles are kept on the pull request
+(`ticket_references`, `ticket_closes`), so a ticket synced later links back when it is written.
+
+**Reserved properties.** `props` may not use a name graph.py writes itself, nor `number`:
+`who_should_know` looks tickets and pull requests up by `#12`, and a Jira ticket must not answer
+for a GitHub issue.
 
 **Scopes.** Connector data is `org_internal`: every Slack asker reads it, in channels and DMs.
 The public ask page, the team pages and MCP read `org_shared` only, so they never see it.
