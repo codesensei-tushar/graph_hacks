@@ -120,6 +120,18 @@ class DemoReplayTest(unittest.TestCase):
         private = graph.query("MATCH (m:Memory {channel_id: $c}) RETURN DISTINCT m.scope", {"c": script.PAYMENTS}).result_set
         self.assertEqual(private, [[f"slack_channel_{script.PAYMENTS}"]])
 
+    def test_the_seeded_memories_are_kept_once_and_said_by_the_replayed_users(self):
+        _, graph = falkordb_client.connect()
+        slack_ids = {user.person_id: user.id for user in script.USERS}
+        replayed = {message.text for message in script.HISTORY}
+        for memory in quillfern.MEMORIES:
+            with self.subTest(memory=memory["id"]):
+                self.assertEqual(memory["slack_user"], slack_ids[memory["author"]])
+                self.assertNotIn(memory["text"], replayed)
+                rows = graph.query("MATCH (u:SlackUser)-[:SAID]->(m:Memory {text: $text}) RETURN m.id, u.id", {"text": memory["text"]}).result_set
+                self.assertEqual(rows, [[memory["id"], memory["slack_user"]]])
+        self.assertEqual(graph.query("MATCH (u:SlackUser {id: 'UKOFI'}) RETURN count(u)").result_set, [[1]], "one Slack user, seeded and replayed")
+
     def test_repos_landed_on_the_right_services(self):
         _, graph = falkordb_client.connect()
         rows = graph.query(

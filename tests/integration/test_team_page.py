@@ -67,7 +67,14 @@ class TeamPageTest(unittest.TestCase):
             ("Move the memory layer off Postgres", "15 Sep 2026", ["Kofi Mensah"], "Keep notebook links in Postgres join tables", "1 Jun 2026"),
         )
         self.assertEqual(page["tickets"], [{"id": "TKT-101", "title": "Memory queries time out on large workspaces", "about": "Memory Layer"}])
-        self.assertEqual(page["memories"], [])
+        # The seed's public memories about what Data runs, newest first, each about the first such service it names.
+        self.assertEqual(
+            [(memory["text"], memory["author"], memory["about"], memory["learned_at"]) for memory in page["memories"]],
+            [
+                ("signed off on moving the memory layer to the graph store, Kofi owns the migration", "Tomas Reyes", "Graph Store", "2026-09-15"),
+                ("I'll run the graph store for the memory layer, same box as search", "Sara Lindqvist", "Graph Store", "2026-09-11"),
+            ],
+        )
         self.assertIn({"from": "Kofi Mensah", "rel": "MEMBER_OF", "to": "Data"}, page["path"])
         self.assertIn({"from": "Data", "rel": "RUNS", "to": "Graph Store"}, page["path"])
         self.assertIn({"from": "Sara Lindqvist", "rel": "OWNS", "to": "Graph Store"}, page["path"])
@@ -105,6 +112,8 @@ class TeamPageTest(unittest.TestCase):
         self.assertEqual([decision.name for decision in team_page.team_page("payments").decisions], ["Retry renewal webhooks inside the billing service"])
 
     def test_memories_about_what_the_team_runs_show_in_public_scope_only(self):
+        # Only these three: the seed's own memory about billing would join the list.
+        self.graph.query("MATCH (n) WHERE n:Memory OR n:SlackUser DETACH DELETE n")
         self.graph.query(
             """
             MATCH (s:Service {id: 'billing-service'})

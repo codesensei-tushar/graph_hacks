@@ -1,3 +1,4 @@
+import json
 import re
 from dataclasses import dataclass
 from types import ModuleType
@@ -183,6 +184,9 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         _link(graph, "Person", chat["author"], "AUTHORED", "Chat", chat["id"])
         _link(graph, "Chat", chat["id"], "ABOUT", "Decision", chat["about"])
 
+    # Last, so a memory can mention anything above.
+    _merge_memories(graph, real_graph, company)
+
     try:
         from src.domain.memory.memory_service import ensure_indexes
     except ImportError:
@@ -192,3 +196,53 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
 
     report.nodes = int(real_graph.query("MATCH (n) RETURN count(n)").result_set[0][0])
     return report
+
+
+def _merge_memories(graph, real_graph, company: ModuleType) -> None:
+    """A seed's ``MEMORIES`` as Slack ingest writes a kept public message: a ``Memory`` in
+    ``org_shared`` (IN_SCOPE its Scope), SAID by the speaker's ``SlackUser``, MENTIONS
+    whatever its text names, matched the way ingest matches it. Dated by ``said_at``, and
+    without a channel id, since the channel is not in the workspace the graph serves.
+
+    Merged by id, so a second run creates nothing. Only the wording is written back; a
+    memory forgotten since keeps its flag, and a Slack user keeps the name Slack gave it."""
+    from src.domain.memory.memory_service import mentioned_ids
+    from src.domain.memory.writeback import SHARED_TEAM_BRAIN_CONTAINER_TAG as SHARED
+
+    names = {person["id"]: person["name"] for person in company.PEOPLE}
+    metadata = json.dumps({"source": "company-brain", "source_type": "slack-message"})
+    for memory in getattr(company, "MEMORIES", ()):
+        text = memory["text"]
+        graph.query(
+            """
+            MERGE (scope:Scope {id: $scope})
+            MERGE (m:Memory {id: $id})
+            ON CREATE SET m.custom_id = $id, m.scope = $scope, m.metadata = $metadata, m.source_type = 'slack-message',
+                          m.brain_tags = [], m.brain_tag_labels = [], m.buckets = [], m.ts = $ts, m.is_forgotten = false,
+                          m.created_at = $at, m.updated_at = $at, m.source_count = 1
+            SET m.content = $text, m.text = $text, m.name = $name
+            MERGE (m)-[:IN_SCOPE]->(scope)
+            MERGE (u:SlackUser {id: $user})
+            ON CREATE SET u.name = $speaker
+            MERGE (u)-[:SAID]->(m)
+            """,
+            {
+                "scope": SHARED,
+                "id": memory["id"],
+                "metadata": metadata,
+                "ts": f"{memory['said_at'] / 1000:.6f}",
+                "at": memory["said_at"],
+                "text": text,
+                "name": _memory_name(text),
+                "user": memory["slack_user"],
+                "speaker": names[memory["author"]],
+            },
+        )
+        for node_id in mentioned_ids(real_graph, text, [SHARED]):
+            graph.query("MATCH (m:Memory {id: $m}), (n {id: $n}) MERGE (m)-[:MENTIONS]->(n)", {"m": memory["id"], "n": node_id})
+
+
+def _memory_name(text: str, size: int = 60) -> str:
+    """A memory's short name, as ingest names one (``documents._short``)."""
+    text = " ".join(text.split())
+    return text if len(text) <= size else text[: size - 1] + "…"

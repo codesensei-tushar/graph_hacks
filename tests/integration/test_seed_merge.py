@@ -17,6 +17,7 @@ from src.api import ops  # noqa: E402
 from src.api.v1 import slack_install  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
+from src.domain.memory import memory_service  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
 
 GRAPH = f"company_seed_merge_test{tests.TEST_GRAPH_SUFFIX}"
@@ -78,8 +79,40 @@ class SeedMergeTest(unittest.TestCase):
 
     def test_reset_drops_history(self):
         seed.reset_and_seed(quillfern)
-        self.assertEqual(_count("MATCH (m:Memory) RETURN count(m)"), 0)
+        self.assertEqual(_count("MATCH (m:Memory {id: 'mem-1'}) RETURN count(m)"), 0)
+        self.assertEqual(_count("MATCH (m:Memory) RETURN count(m)"), len(quillfern.MEMORIES), "only the seed's own memories")
         self.assertEqual(_count("MATCH (d:Decision {id: 'decision-live'}) RETURN count(d)"), 0)
+
+    def test_seeded_memories_are_written_the_way_slack_ingest_writes_them(self):
+        _, graph = falkordb_client.connect()
+        names = {person["id"]: person["name"] for person in quillfern.PEOPLE}
+        for memory in quillfern.MEMORIES:
+            with self.subTest(memory=memory["id"]):
+                rows = graph.query(
+                    """
+                    MATCH (u:SlackUser)-[:SAID]->(m:Memory {id: $id})-[:IN_SCOPE]->(s:Scope)
+                    RETURN m.text, m.scope, s.id, m.created_at, m.ts, m.channel_id, m.is_forgotten, u.id, u.name
+                    """,
+                    {"id": memory["id"]},
+                ).result_set
+                self.assertEqual(
+                    rows,
+                    [[memory["text"], "org_shared", "org_shared", memory["said_at"], f"{memory['said_at'] / 1000:.6f}", None, False, memory["slack_user"], names[memory["author"]]]],
+                )
+                mentioned = graph.query("MATCH (:Memory {id: $id})-[:MENTIONS]->(n) RETURN n.id", {"id": memory["id"]}).result_set
+                expected = memory_service.mentioned_ids(graph, memory["text"], ["org_shared"])
+                self.assertTrue(expected, "every seeded memory names something in the graph")
+                self.assertEqual(sorted(row[0] for row in mentioned), sorted(expected))
+
+    def test_a_merge_creates_no_memory_twice_and_keeps_what_slack_changed(self):
+        _, graph = falkordb_client.connect()
+        graph.query("MATCH (m:Memory {id: 'memory-auth-token-rotation'}) SET m.is_forgotten = true")
+        graph.query("MATCH (u:SlackUser {id: 'UMAYA'}) SET u.name = 'maya.o'")
+        report = seed.seed_company(quillfern)
+        self.assertEqual((report.nodes_created, report.edges_created, report.properties_set), (0, 0, 1), "only Arjun's seeded name")
+        self.assertEqual(_count("MATCH (m:Memory {id: 'memory-auth-token-rotation', is_forgotten: true}) RETURN count(m)"), 1)
+        self.assertEqual(_count("MATCH (u:SlackUser {id: 'UMAYA', name: 'maya.o'}) RETURN count(u)"), 1)
+        self.assertEqual(_count("MATCH (u:SlackUser) RETURN count(u)"), len({memory["slack_user"] for memory in quillfern.MEMORIES}))
 
     def test_ops_seed_route_merges_behind_the_admin_token(self):
         app = FastAPI()

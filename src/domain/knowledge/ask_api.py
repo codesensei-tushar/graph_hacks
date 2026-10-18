@@ -14,7 +14,7 @@ than ``MAX_QUESTION_CHARS`` is refused with ``QuestionTooLong``; keyword answers
 proof report are kept for ``CACHE_TTL_SECONDS`` per graph, so a chip clicked twice walks the
 graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``.
 
-The page offers an example chip only when it answers on the graph in use, so a chip whose
+The page offers an example chip only when it answers with a path on the graph in use, so a chip whose
 data the live graph lacks stays hidden until a seed refresh brings it back.
 """
 
@@ -39,7 +39,7 @@ DEFAULT_SCOPES = ("org_shared",)
 
 # Questions the page offers, per seeded company, in the order the demo asks them. Each
 # exercises one tool; the last names something the graph does not have. ``examples()``
-# offers only the ones that answer on the graph in use.
+# offers only the ones that answer with a path on the graph in use.
 EXAMPLES: dict[str, list[str]] = {
     "quillfern": [
         "who owns billing, and who else has worked on it",
@@ -50,6 +50,7 @@ EXAMPLES: dict[str, list[str]] = {
         "who actually works together",
         "is the billing retries decision still the last word",
         "who should know if postgres changes",
+        "what have we said about billing",
         "who knows the payments gateway",
     ],
     "company-brain": [
@@ -301,8 +302,10 @@ def examples() -> Examples:
     """The seeded company and the questions to offer for it. An unknown company gets the Quillfern set.
 
     Chips are offered only when they answer: every question but the last is asked here and
-    dropped unless it is ``found``, so a graph missing a chip's data never offers it. The
-    last is the deliberate refusal and is always kept, unasked, as the last. Asking goes
+    dropped unless it is ``found`` and walks a path, so a graph missing a chip's data never
+    offers it. The path matters for the memory tools, which find the thing named and still
+    answer "no memory mentions it" on a graph with no memories. The last is the deliberate
+    refusal and is always kept, unasked, as the last. Asking goes
     through ``answer_question``'s cache, so each chip runs its tool at most once per cache
     period and the click that follows is already answered.
     """
@@ -314,9 +317,10 @@ def examples() -> Examples:
 
 
 def _answers(question: str) -> bool:
-    """Whether an example chip answers on the graph in use. A chip that raises is dropped and logged."""
+    """Whether an example chip answers with a path on the graph in use. A chip that raises is dropped and logged."""
     try:
-        return answer_question(question).found
+        answer = answer_question(question)
+        return answer.found and bool(answer.path)
     except Exception as error:
         log.warning("[ask] example chip dropped (%s): %s", error, question)
         return False

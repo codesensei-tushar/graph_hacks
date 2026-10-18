@@ -81,6 +81,9 @@ class WebAskTest(unittest.TestCase):
         self.assertEqual({node["label"] for node in blast["nodes"]}, {"Service"})
 
     def test_the_memory_tools_answer_with_no_memories_yet(self):
+        # A graph seeded before the seed had memories, as production was on 18 Oct.
+        falkordb_client.connect()[1].query("MATCH (m:Memory) DETACH DELETE m")
+        self.addCleanup(seed.seed_company, quillfern)
         related = self.ask("what have people said about billing")
         self.assertEqual((related["tool"], related["found"], related["edges"]), ("related_memories", True, []))
         self.assertIn("No memory you can read mentions Billing Service", related["answer"])

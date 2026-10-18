@@ -117,11 +117,9 @@ CHANNELS = (
 )
 
 # Plain channel talk the bot has already kept as memories (no model: raw messages are retained).
+# The public #engineering talk is in the seed (quillfern.MEMORIES), dated, so production has
+# it too; replaying it here would keep each line twice. Only the private channel is replayed.
 HISTORY = (
-    WorkspaceMessage(ENGINEERING, "UKOFI", "TKT-101 timings: linked-note lookups over five hops take more than 8 seconds on Postgres"),
-    WorkspaceMessage(ENGINEERING, "USARA", "I'll run the graph store for the memory layer, same box as search"),
-    WorkspaceMessage(ENGINEERING, "UTOMAS", "signed off on moving the memory layer to the graph store, Kofi owns the migration"),
-    WorkspaceMessage(ENGINEERING, "UMAYA", "auth session refresh rotates tokens every hour now, see notebook#45"),
     WorkspaceMessage(PAYMENTS, "UARJUN", "renewal webhooks that retry are charging twice, TKT-102 tracks it, refunds go out monday"),
     WorkspaceMessage(PAYMENTS, "ULENA", "invoice worker retries will move to a queue once billing retries land there"),
 )
