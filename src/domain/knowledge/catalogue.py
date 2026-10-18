@@ -183,6 +183,7 @@ def _find_schema() -> dict:
         "project": ("A synced tracker project, by its key (PLAT) or name.", {}),
         "status": ("An account's CRM lifecycle stage: customer, opportunity, lead, ...", {}),
         "stage": ("A deal stage on the account (contract sent, qualified to buy, ...), or open for any deal not closed.", {}),
+        "industry": ("An account's industry as its CRM names it (healthcare, logistics).", {}),
         "standing": ("true for the decisions that stand today, false for the ones replaced.", {}),
         "proposer": ("The person who proposed the decisions.", {}),
         "approver": ("The person who approved the decisions.", {}),

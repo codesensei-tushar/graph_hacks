@@ -122,13 +122,18 @@ class HubSpotSyncTest(unittest.TestCase):
 
     def test_slack_askers_get_the_owner_and_who_to_ask(self):
         owner = _ask("who owns Larkspur Freightways")
-        self.assertEqual(owner.answer, "The Larkspur Freightways account is owned by Dev Patel.")
+        # The account's place in the CRM follows the owner: its lifecycle stage and the stage of each deal.
+        self.assertEqual(owner.answer, "The Larkspur Freightways account is owned by Dev Patel. HubSpot lifecycle stage: customer, open. Deals: Closed Won (Dev Patel) and Contract Sent (Priya Shah).")
         self.assertEqual(_cites(owner), ["Dev Patel -[OWNS]-> Larkspur Freightways"])
         knows = _ask("who knows Larkspur Freightways")
-        self.assertEqual(knows.answer, "The Larkspur Freightways account is owned by Dev Patel. Ask first: Dev Patel (owns it, worked on it), then Priya Shah (worked on it).")
+        self.assertEqual(
+            knows.answer,
+            "The Larkspur Freightways account is owned by Dev Patel. HubSpot lifecycle stage: customer, open. Deals: Closed Won (Dev Patel) and Contract Sent (Priya Shah)."
+            " Ask first: Dev Patel (owns it, worked on it), then Priya Shah (worked on it).",
+        )
         self.assertIn("Priya Shah -[WORKED_ON]-> Larkspur Freightways", _cites(knows))
         # A HubSpot user with no Person is named with its tool, so it is never taken for a namesake.
-        self.assertEqual(_ask("who owns Bramblecote Analytics").answer, "The Bramblecote Analytics account is owned by Riley Chen (HubSpot).")
+        self.assertTrue(_ask("who owns Bramblecote Analytics").answer.startswith("The Bramblecote Analytics account is owned by Riley Chen (HubSpot)."), _ask("who owns Bramblecote Analytics").answer)
         self.assertIn("Riley Chen (HubSpot) (owns it, worked on it)", _ask("who knows Bramblecote Analytics").answer)
 
     def test_the_public_page_never_sees_hubspot(self):
@@ -149,7 +154,7 @@ class HubSpotSyncTest(unittest.TestCase):
         self.assertTrue(sync.sync_now("hubspot"))
         reports = self._drain()
         self.assertEqual([report.get("items") for report in reports if report["status"] == "synced"], [1, 0])
-        self.assertEqual(_ask("who owns Larkspur Freightways").answer, "The Larkspur Freightways account is owned by Priya Shah.")
+        self.assertTrue(_ask("who owns Larkspur Freightways").answer.startswith("The Larkspur Freightways account is owned by Priya Shah."), _ask("who owns Larkspur Freightways").answer)
         self.assertEqual(_rows("MATCH (:Person {id: 'dev'})-[r]->(:Service {name: 'Larkspur Freightways'}) RETURN type(r)"), [["WORKED_ON"]])
 
     def test_an_admin_mapping_links_an_owner_whose_login_is_another_email(self):
@@ -158,7 +163,7 @@ class HubSpotSyncTest(unittest.TestCase):
         sync.sync_now("hubspot", full=True)
         self._drain()
         self.assertEqual(_rows("MATCH (:ExternalUser {external_id: '104'})-[:IS]->(p:Person) RETURN p.id"), [["noor"]])
-        self.assertEqual(_ask("who owns Bramblecote Analytics").answer, "The Bramblecote Analytics account is owned by Noor Haddad.")
+        self.assertTrue(_ask("who owns Bramblecote Analytics").answer.startswith("The Bramblecote Analytics account is owned by Noor Haddad."), _ask("who owns Bramblecote Analytics").answer)
 
     def test_an_owner_who_joins_the_brain_later_is_linked_by_the_next_poll(self):
         _rows("CREATE (:Person {id: 'riley', name: 'Riley Chen', email: 'riley@partner.example.org'})")
@@ -166,7 +171,7 @@ class HubSpotSyncTest(unittest.TestCase):
         self._drain()
         self.assertEqual(_rows("MATCH (:ExternalUser {external_id: '104'})-[:IS]->(p:Person) RETURN p.id"), [["riley"]])
         owner = _ask("who owns Bramblecote Analytics")
-        self.assertEqual(owner.answer, "The Bramblecote Analytics account is owned by Riley Chen.")
+        self.assertTrue(owner.answer.startswith("The Bramblecote Analytics account is owned by Riley Chen."), owner.answer)
         self.assertEqual(_cites(owner), ["Riley Chen -[OWNS]-> Bramblecote Analytics"])
 
     def test_a_deactivated_owner_loses_their_accounts_at_the_next_poll(self):
@@ -175,7 +180,7 @@ class HubSpotSyncTest(unittest.TestCase):
         sync.sync_now("hubspot")
         self._drain()
         self.assertEqual(_rows("MATCH (:Person {id: 'dev'})-[r]->(s:Service {source: 'hubspot'}) RETURN type(r), s.name"), [])
-        self.assertEqual(_ask("who owns Saltwick Outfitters").answer, "The Saltwick Outfitters account is in the graph, and no owner or team is recorded for it.")
+        self.assertTrue(_ask("who owns Saltwick Outfitters").answer.startswith("The Saltwick Outfitters account is in the graph, and no owner or team is recorded for it."), _ask("who owns Saltwick Outfitters").answer)
 
     def test_a_second_full_sync_changes_nothing(self):
         def counts():
