@@ -289,5 +289,5 @@
     container.append(list);
   }
 
-  window.BrainGraph = { el, renderPath, SCOPE_LABEL };
+  window.BrainGraph = { el, svgEl, renderPath, familyOf, kindOf, FAMILY_COLOR, SCOPE_LABEL };
 })();
