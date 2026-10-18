@@ -68,7 +68,10 @@ The answer counts what the file holds and what the import changed:
 Importing the same file again is safe. Every write merges by id and nothing is ever
 deleted, so a second import of an unchanged file creates nothing and sets nothing; an edited
 file updates what changed. The other side of that: taking a block out of the file does not
-take it out of Company Brain. The team joins the company the instance runs (`SEED_COMPANY`).
+take it out of Company Brain. The team joins its org's company: an org made in the console
+gets a Company node named after it when it is created (orgs made earlier get one at the next
+startup), and the legacy org's is the seeded one (`SEED_COMPANY`). `/ops/import` writes to the
+legacy org only.
 
 ## The file
 

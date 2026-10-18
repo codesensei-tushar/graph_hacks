@@ -46,12 +46,17 @@ def _seed_if_empty() -> None:
     connector_store.ensure_indexes()
     # Never raises: a failure is logged and the tools that would search keep their refusal.
     ensure_search_indexes()
-    # The other orgs' graphs got their indexes when they were created; this adds any added since.
+    # The other orgs' graphs got their indexes and Company node when they were created; this adds
+    # any index added since, and the Company node to orgs made before create_org wrote one.
     for org in _other_orgs():
         try:
             orgs.build_org_indexes(org)
         except Exception:
             log.exception("index build failed org=%s", org.id)
+        try:
+            orgs.ensure_company(org)
+        except Exception:
+            log.exception("company node migration failed org=%s", org.id)
 
 
 def _other_orgs() -> list[tenancy.OrgRef]:

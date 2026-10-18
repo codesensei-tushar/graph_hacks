@@ -277,7 +277,7 @@ class GraphReferenceTest(unittest.TestCase):
     def test_a_company_the_graph_lacks_is_refused(self):
         self.assertEqual(
             problems(MINIMAL, FakeLookup(companies=())),
-            ["the graph has no company 'quillfern' to add the team to; check SEED_COMPANY"],
+            ["Your company isn't set up in Company Brain yet; an admin can finish setup in the console."],
         )
 
     def test_reimporting_a_team_over_its_own_things_is_allowed(self):
