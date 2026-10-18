@@ -139,9 +139,9 @@ class TenancyTest(unittest.TestCase):
             scheduler.schedule(0, name, {"n": "y"}, job_id=job)
         # The legacy org's ids are not prefixed, and its jobs carry no org: queued jobs keep working.
         scheduler.schedule(0, name, {"n": "legacy"}, job_id=job)
-        self.assertIsNotNone(kv().zscore("brain:schedule", job))
-        self.assertIsNotNone(kv().zscore("brain:schedule", f"{self.x.id}:{job}"))
-        self.assertNotIn("org", json.loads(kv().hget("brain:schedule:payload", job)))
+        self.assertIsNotNone(kv().zscore(scheduler.QUEUE, job))
+        self.assertIsNotNone(kv().zscore(scheduler.QUEUE, f"{self.x.id}:{job}"))
+        self.assertNotIn("org", json.loads(kv().hget(scheduler.PAYLOADS, job)))
         scheduler.run_due(now=time.time() + 1)
         self.assertEqual(
             sorted(ran),
@@ -164,11 +164,11 @@ class TenancyTest(unittest.TestCase):
         ran = []
         name = f"tenancyGone{uuid.uuid4().hex[:6]}"
         scheduler.register(name, ran.append)
-        kv().hset("brain:schedule:payload", "gone:j", json.dumps({"name": name, "payload": {}, "org": "01gone"}))
-        kv().zadd("brain:schedule", {"gone:j": time.time() - 1})
+        kv().hset(scheduler.PAYLOADS, "gone:j", json.dumps({"name": name, "payload": {}, "org": "01gone"}))
+        kv().zadd(scheduler.QUEUE, {"gone:j": time.time() - 1})
         scheduler.run_due()
         self.assertEqual(ran, [])
-        self.assertIsNone(kv().zscore("brain:schedule", "gone:j"))
+        self.assertIsNone(kv().zscore(scheduler.QUEUE, "gone:j"))
 
     # --- Slack routing -----------------------------------------------------------------------
 
