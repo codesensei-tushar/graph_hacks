@@ -15,6 +15,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from src.api import web  # noqa: E402
+from src.domain.knowledge.algorithms import depth_in  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
@@ -167,3 +168,63 @@ class TeamPageTest(unittest.TestCase):
             self.assertIn(asset, page.text)
             self.assertEqual(http.get(asset).status_code, 200, asset)
         self.assertIn('id="theme-toggle"', page.text)
+
+
+def _js_regex(text: str, name: str) -> re.Pattern:
+    """A regex literal from a page script, compiled the way the page runs it (only ``/i`` is used)."""
+    source = re.search(rf"const {name} = /(.+)/i;", text).group(1)
+    return re.compile(source, re.IGNORECASE)
+
+
+class DepthButtonsTest(unittest.TestCase):
+    """The "1 hop / 2 hops / all" buttons on a blast_radius answer ask what the server reads as that depth."""
+
+    def setUp(self):
+        self.app_js = (STATIC / "app.js").read_text()
+        self.hop_phrase = _js_regex(self.app_js, "HOP_PHRASE")
+        self.names_depth = _js_regex(self.app_js, "NAMES_DEPTH")
+        depths = re.search(r"const DEPTHS = \[(.+)\];", self.app_js).group(1)
+        self.depths = [(label, phrase, None if hops == "null" else int(hops)) for label, phrase, hops in re.findall(r'\["([^"]+)", "([^"]*)", (\d+|null)\]', depths)]
+
+    def base(self, question: str) -> str:
+        return self.hop_phrase.sub("", question, count=1)
+
+    def test_three_buttons_on_found_blast_radius_answers_only(self):
+        self.assertEqual([label for label, _, _ in self.depths], ["1 hop", "2 hops", "all"])
+        self.assertEqual(len(re.findall(r"addDepthButtons\(", self.app_js)), 2, "defined once, called once")
+        self.assertIn('if (data.tool === "blast_radius" && data.found) addDepthButtons(question, data.depth);', self.app_js)
+
+    def test_the_buttons_ask_the_pinned_phrasings(self):
+        self.assertEqual([phrase for _, phrase, _ in self.depths], [", one hop", ", two hops out", ""])
+
+    def test_a_trailing_hop_phrase_is_dropped_to_find_the_base(self):
+        for question in (
+            "what breaks if auth goes down, two hops out",
+            "what breaks if auth goes down, one hop",
+            "what breaks if auth goes down, 3 hops",
+            "What breaks if auth goes down, Two Hops Out?",
+            "what breaks if auth goes down?",
+            "what breaks if auth goes down",
+        ):
+            self.assertEqual(self.base(question).lower(), "what breaks if auth goes down", question)
+
+    def test_each_button_asks_the_depth_the_server_reads(self):
+        base = self.base("what breaks if auth goes down, one hop")
+        self.assertIsNone(depth_in(base))
+        for label, phrase, hops in self.depths:
+            self.assertEqual(depth_in(f"{base}{phrase}"), hops, label)
+
+    def test_the_pressed_button_follows_the_servers_reading_of_the_question(self):
+        for question in (
+            "what breaks if auth goes down",
+            "what breaks if auth goes down, one hop",
+            "what breaks if auth goes down, two hops out",
+            "what breaks if auth goes down, 4 hops",
+            "what breaks at depth 3 if auth goes down",
+            "what directly breaks if auth goes down",
+            "who are the direct dependents of auth",
+            "what is immediately affected if auth goes down",
+            "what breaks on the first hop from auth",
+            "what breaks if the hop service goes down",
+        ):
+            self.assertEqual(bool(self.names_depth.search(question)), depth_in(question) is not None, question)

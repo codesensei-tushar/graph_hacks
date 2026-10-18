@@ -410,6 +410,14 @@ h3 { letter-spacing: -0.01em; }
 }
 .replay::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--path); box-shadow: 0 0 0 3px var(--glow); }
 .replay:hover { color: var(--ink); border-color: var(--line-2); }
+/* The depth buttons on a blast_radius answer (app.js), beside "Replay the walk" and as tall. */
+.depths { display: inline-flex; gap: 2px; margin-left: auto; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.depths button {
+  min-height: 28px; padding: 0 11px; border: 0; border-radius: 999px; cursor: pointer; background: transparent;
+  font: 500 0.8rem/1 var(--mono); color: var(--ink-2); transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.depths button:hover { color: var(--ink); background: var(--surface-2); }
+.depths button[aria-pressed="true"] { color: var(--path-ink); background: color-mix(in oklab, var(--path) 16%, var(--surface)); }
 
 /* --- The path drawing (graph.js) and its walk ------------------------------------------------- */
 
@@ -669,6 +677,8 @@ footer.site a { color: var(--ink-2); }
 
 @media (max-width: 760px) {
   :root { --gutter: 16px; --header: 56px; }
+  /* The path head wraps here; the depth buttons start their row like the replay button. */
+  .depths { margin-left: 0; }
   .top nav { display: none; }
   .hero { padding: 24px 0 8px; }
   .hero h1 { font-size: clamp(2.15rem, 9.4vw, 2.5rem); }
