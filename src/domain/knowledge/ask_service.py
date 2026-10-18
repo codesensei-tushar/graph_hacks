@@ -181,7 +181,11 @@ _FIND = re.compile(
     r"|^\s*(?:what|which) (?:tickets|issues) are (?:still )?blocked\b|\bblocked (?:tickets|issues)\b"
     # Whose list: "what tickets are assigned to Om Sherikar", "which accounts does Yash Patil own".
     rf"|^\s*(?:what|which|list|show(?: me)?) (?:all |the )?(?:open |closed )?{_LISTED} (?:are |is )?(?:assigned to|worked on by|owned by|opened by)\b"
-    rf"|^\s*(?:what|which) {_LISTED} (?:does|do) .+ (?:own|have|hold|handle|work on)\b",
+    rf"|^\s*(?:what|which) {_LISTED} (?:does|do) .+ (?:own|have|hold|handle|work on)\b"
+    # The CRM: "show me our customers", "open opportunities", "deals in contract sent", "the pipeline".
+    r"|^\s*(?:(?:show|list|give)(?: me)?|who are|what are|which are|which|what)?\s*(?:all |the |our |my )?(?:open |closed |current )?"
+    r"(?:customers|opportunities|accounts|deals|(?:sales )?pipeline)\b"
+    r"|\bdeals? (?:are )?(?:in|at) (?:the )?\w",
     re.IGNORECASE,
 )
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:

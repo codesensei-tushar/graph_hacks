@@ -58,6 +58,10 @@ FILTERS: dict[str, dict[str, Filter]] = {
         "kind": Filter("kind"),
         "team": Filter("team", "Team", _q("MATCH (t:Team {id: $value})-[r:RUNS]->(x:Service) WHERE {scoped_x} RETURN x.id, [[t.id, t.name, 'Team', type(r), x.id, x.name, 'Service']]"), "run by the {value} team"),
         "owner": Filter("owner", "Person", _q(f"MATCH (a)-[r:OWNS]->(x:Service) WHERE a.id IN $accounts AND {{scoped_x}} RETURN x.id, [{_EDGE_WHO_X}]"), "owned by {value}"),
+        # An account's state (open or closed), its CRM lifecycle stage, and the stage of a deal on it.
+        "state": Filter("state"),
+        "status": Filter("status"),
+        "stage": Filter("stage"),
     },
     "Ticket": {
         "state": Filter("state"),
@@ -122,7 +126,15 @@ _ROWS = _q(
     """
     MATCH (x)
     WHERE labels(x)[0] = $label AND x.name IS NOT NULL AND {scoped_x}
-    RETURN x.id, x.name, coalesce(x.title, ''), x.kind, x.state, x.merged, x.decided_at, coalesce(x.role, '')
+    RETURN x.id, x.name, coalesce(x.title, ''), x.kind, x.state, x.merged, x.decided_at, coalesce(x.role, ''), coalesce(x.status, '')
+    """
+)
+# The deals on each of $ids: who works each one, and its stage.
+_DEALS = _q(
+    """
+    MATCH (who)-[r:WORKED_ON]->(x:Service)
+    WHERE x.id IN $ids AND r.evidence = 'deal' AND labels(who)[0] IN ['Person', 'ExternalUser'] AND coalesce(who.scope, 'org_shared') IN $scopes
+    RETURN x.id, coalesce(r.stage, ''), who.id, who.name, labels(who)[0], who.source, x.name
     """
 )
 # The open tickets that block each of $ids, as cited edges.
@@ -154,6 +166,8 @@ class Row:
     state: str
     decided_at: int | None
     role: str
+    # A connector item's own status: a ticket's tracker status, an account's lifecycle stage.
+    status: str = ""
 
 
 def find(label, filters: dict, scopes: list[str]) -> ToolResult:
@@ -200,7 +214,7 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
         named[key] = resolution.entity
         candidates.extend(name for name in resolution.candidate_names() if name not in candidates)
 
-    rows = {row[0]: Row(row[0], row[1], row[2], row[3], _state(row[4], row[5]), row[6], row[7]) for row in graph.ro_query(_ROWS, {"label": chosen, "scopes": scopes}).result_set}
+    rows = {row[0]: Row(row[0], row[1], row[2], row[3], _state(row[4], row[5]), row[6], row[7], row[8]) for row in graph.ro_query(_ROWS, {"label": chosen, "scopes": scopes}).result_set}
     edges: dict[str, list[list]] = {}
     for key, entity in named.items():
         passing: dict[str, list[list]] = {}
@@ -222,6 +236,18 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
             if node_id in rows:
                 edges.setdefault(node_id, []).extend(cited)
 
+    if "stage" in enums:
+        # A deal is a WORKED_ON edge from its owner to the account, with the deal's stage; "open" is any stage not closed.
+        deals: dict[str, list[list]] = {}
+        for node_id, stage, who_id, who, who_label, source, name in graph.ro_query(_DEALS, {"ids": list(rows), "scopes": scopes}).result_set:
+            key = stage_key(stage)
+            if key == enums["stage"] or (enums["stage"] == "open" and not key.startswith("closed")):
+                shown = people.account_label(who, source) if who_label == people.ACCOUNT else who
+                deals.setdefault(node_id, []).append([who_id, shown, who_label, "WORKED_ON", node_id, name, "Service"])
+        rows = {node_id: row for node_id, row in rows.items() if node_id in deals}
+        for node_id, cited in deals.items():
+            edges.setdefault(node_id, []).extend(cited)
+
     ordered = sorted(rows.values(), key=lambda row: (-(row.decided_at or 0), row.name.lower()) if chosen == "Decision" else (row.name.lower(),))
     listed = ordered[:MAX_ROWS]
     result = ToolResult(tool=TOOL, answer="", candidates=candidates)
@@ -235,7 +261,7 @@ def find(label, filters: dict, scopes: list[str]) -> ToolResult:
 
     replaced = _replaced(graph, [row.id for row in listed], scopes) if chosen == "Decision" else set()
     qualified = ", ".join(allowed[key].words.format(value=_named(entity)) for key, entity in named.items())
-    described = " ".join(part for part in (_noun(chosen, enums, len(ordered)), qualified) if part)
+    described = " ".join(part for part in (_noun(chosen, enums, len(ordered)), _deal_words(enums, filters), qualified) if part)
     hints = "".join(f" {people.unlinked_hint(entity)}" for entity in named.values() if people.is_account(entity))
     if not ordered:
         result.answer = f"No {described}.{hints}"
@@ -262,6 +288,12 @@ def _enum(label: str, key: str, value):
         if kind not in kinds.SERVICE_KINDS:
             return ToolResult(tool=TOOL, answer=f"“{value}” is not a kind. A service's kind is one of {join_names(list(kinds.SERVICE_KINDS))}.", found=False)
         return kind
+    if key in ("status", "stage"):
+        # Free text from the CRM (a lifecycle stage, a deal stage), compared without case, spaces or plurals.
+        text = stage_key(value)
+        if not text:
+            return ToolResult(tool=TOOL, answer=f"Name a {'lifecycle stage' if key == 'status' else 'deal stage'} to filter by.", found=False)
+        return text
     if key == "state":
         states = PULL_REQUEST_STATES if label == "PullRequest" else TICKET_STATES
         state = str(value).strip().lower()
@@ -280,6 +312,18 @@ def _enum(label: str, key: str, value):
     return ToolResult(tool=TOOL, answer=f"standing is true (the decisions that stand today) or false (the ones replaced); “{value}” is neither.", found=False)
 
 
+_STAGE_WORDS = {
+    "customers": "customer", "opportunities": "opportunity", "leads": "lead", "sql": "salesqualifiedlead",
+    "mql": "marketingqualifiedlead", "won": "closedwon", "lost": "closedlost", "evangelists": "evangelist",
+}
+
+
+def stage_key(value) -> str:
+    """A CRM stage compared as HubSpot's own id: "Contract Sent", "contract sent" and "contractsent" are one."""
+    text = re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+    return _STAGE_WORDS.get(text, text)
+
+
 def _state(state, merged) -> str:
     if merged:
         return "merged"
@@ -296,6 +340,8 @@ def _apply_enums(graph, label: str, rows: dict[str, Row], enums: dict, scopes: l
         rows = {node_id: row for node_id, row in rows.items() if kinds.kind_or_default(row.kind) == enums["kind"]}
     if "state" in enums:
         rows = {node_id: row for node_id, row in rows.items() if row.state == enums["state"]}
+    if "status" in enums:
+        rows = {node_id: row for node_id, row in rows.items() if stage_key(row.status) == enums["status"]}
     if "standing" in enums:
         replaced = _replaced(graph, list(rows), scopes)
         rows = {node_id: row for node_id, row in rows.items() if (node_id not in replaced) == enums["standing"]}
@@ -324,7 +370,21 @@ def _noun(label: str, enums: dict, count: int) -> str:
         adjectives.append("standing" if enums["standing"] else "replaced")
     if "blocked" in enums:
         adjectives.append("blocked" if enums["blocked"] else "unblocked")
+    if "status" in enums:
+        adjectives.append(_STAGE_LABELS.get(enums["status"], enums["status"]))
     return " ".join([*adjectives, word])
+
+
+_STAGE_LABELS = {"salesqualifiedlead": "sales qualified lead", "marketingqualifiedlead": "marketing qualified lead", "closedwon": "closed won", "closedlost": "closed lost"}
+
+
+def _deal_words(enums: dict, filters: dict) -> str:
+    """"with an open deal", "with a deal in contract sent": what the stage filter says, in the asker's words."""
+    if "stage" not in enums:
+        return ""
+    if enums["stage"] == "open":
+        return "with an open deal"
+    return f"with a deal in {_STAGE_LABELS.get(enums['stage'], ' '.join(str(filters['stage']).lower().split()))}"
 
 
 def _named(entity: Entity) -> str:
@@ -359,7 +419,7 @@ _LIST_NOUNS = (
     (re.compile(r"\b(?:documents?|docs?|runbooks?)\b", re.IGNORECASE), "Document", None),
     (re.compile(r"\bpeople\b", re.IGNORECASE), "Person", None),
     (re.compile(r"\bteams\b", re.IGNORECASE), "Team", None),
-    (re.compile(r"\baccounts\b", re.IGNORECASE), "Service", "account"),
+    (re.compile(r"\b(?:accounts|customers?|opportunit(?:y|ies)|deals?|pipeline)\b", re.IGNORECASE), "Service", "account"),
     (re.compile(r"\bservices\b", re.IGNORECASE), "Service", None),
     (re.compile(r"\bsystems\b", re.IGNORECASE), "Service", "system"),
     (re.compile(r"\bprocesses\b", re.IGNORECASE), "Service", "process"),
@@ -368,6 +428,9 @@ _LIST_NOUNS = (
 _STATE = re.compile(r"\b(open|closed|merged)\b", re.IGNORECASE)
 _STANDING = re.compile(r"\b(?:standing|current)\b", re.IGNORECASE)
 _BLOCKED = re.compile(r"\bblocked\b", re.IGNORECASE)
+_LIFECYCLE = re.compile(r"\b(customers?|opportunit(?:y|ies)|evangelists?)\b", re.IGNORECASE)
+_DEAL_STAGE = re.compile(r"\bdeals? (?:that are |are )?(?:in|at) (?:the )?(?:stage )?(.+?)(?: stage)?\s*\??\s*$", re.IGNORECASE)
+_PIPELINE = re.compile(r"\b(?:deals?|pipeline)\b", re.IGNORECASE)
 _ABOUT = re.compile(r"\b(?:about|for|on|touching|describing)\s+(.+?)\s*\??\s*$", re.IGNORECASE)
 _IN_TEAM = re.compile(r"\bin\s+(?:the\s+)?(.+?)(?:\s+team)?\s*\??\s*$", re.IGNORECASE)
 # Whose list it is: "tickets assigned to Om Sherikar", "accounts owned by Yash", "which accounts does Yash own".
@@ -390,7 +453,8 @@ def parse(question: str) -> dict:
     allowed = FILTERS[label]
     if kind:
         args["kind"] = kind
-    if (state := _STATE.search(text)) and "state" in allowed:
+    # Only an account among services has a state ("open opportunities"); "the open services" is not a filter.
+    if (state := _STATE.search(text)) and "state" in allowed and (label != "Service" or kind == "account"):
         value = state.group(1).lower()
         if value in (PULL_REQUEST_STATES if label == "PullRequest" else TICKET_STATES):
             args["state"] = value
@@ -398,6 +462,14 @@ def parse(question: str) -> dict:
         args["standing"] = True
     if "blocked" in allowed and _BLOCKED.search(text):
         args["blocked"] = True
+    if kind == "account":
+        # The CRM's words: a lifecycle stage ("customers", "opportunities"), a deal stage, or the open pipeline.
+        if (lifecycle := _LIFECYCLE.search(text)) is not None:
+            args["status"] = stage_key(lifecycle.group(1))
+        if (stage := _DEAL_STAGE.search(text)) is not None:
+            args["stage"] = stage.group(1)
+        elif _PIPELINE.search(text):
+            args["stage"] = "open"
     who = _BY_PERSON.search(text) or _DOES_PERSON.search(text)
     person_filter = _PERSON_FILTER.get(label)
     if who and re.search(r"\bteam$", who.group(1), re.IGNORECASE) and "team" in allowed:
@@ -407,6 +479,6 @@ def parse(question: str) -> dict:
         args[person_filter] = who.group(1)
     elif (about := _ABOUT.search(text)) and label in _ABOUT_FILTER:
         args[_ABOUT_FILTER[label]] = about.group(1)
-    elif (team := _IN_TEAM.search(text)) and "team" in allowed:
+    elif (team := _IN_TEAM.search(text)) and "team" in allowed and "stage" not in args:
         args["team"] = team.group(1)
     return args

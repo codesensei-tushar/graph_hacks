@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 from src.db import falkordb_client
 from src.db.falkordb_client import connect
-from src.domain.knowledge import kinds
+from src.domain.knowledge import kinds, people
 from src.domain.knowledge.ask_api import ANSWERS, graph_of
 from src.domain.knowledge.decisions import format_date, to_millis
 from src.domain.knowledge.dto import PathStep, day_from
@@ -179,6 +179,12 @@ class TeamPage:
     # Accounts members own that the team does not run (a synced CRM's), the first few, and how many.
     accounts: list[OwnedThing] = field(default_factory=list)
     accounts_total: int = 0
+    # Accounts a connected CRM syncs, tied to the team because it runs that system (HubSpot), beyond
+    # the ones its members own: the first few, how many, the systems, and the owners' OWNS edges.
+    synced: list[OwnedThing] = field(default_factory=list)
+    synced_total: int = 0
+    synced_via: list[str] = field(default_factory=list)
+    synced_path: list[PathStep] = field(default_factory=list)
     # Teams whose things this team's things depend on, and teams whose things depend on this team's.
     depends_on: list[TeamLink] = field(default_factory=list)
     depended_on_by: list[TeamLink] = field(default_factory=list)
@@ -200,7 +206,7 @@ class TeamPage:
         return [label for section, label in OPTIONAL_SECTIONS if not getattr(self, section)]
 
     def to_dict(self) -> dict:
-        nodes, edges = graph_of(self.path, {thing.id: thing.kind for thing in [thing for group in self.owns for thing in group.items] + self.accounts})
+        nodes, edges = graph_of(self.path, {thing.id: thing.kind for thing in [thing for group in self.owns for thing in group.items] + self.accounts + self.synced})
         return {
             "id": self.id,
             "name": self.name,
@@ -212,6 +218,9 @@ class TeamPage:
             "tickets": [ticket.to_dict() for ticket in self.tickets],
             "accounts": [account.to_dict() for account in self.accounts],
             "accounts_total": self.accounts_total,
+            "synced": [account.to_dict() for account in self.synced],
+            "synced_total": self.synced_total,
+            "synced_via": list(self.synced_via),
             "memories": [memory.to_dict() for memory in self.memories],
             "depends_on": [link.to_dict() for link in self.depends_on],
             "depended_on_by": [link.to_dict() for link in self.depended_on_by],
@@ -314,6 +323,7 @@ def team_page(team_id: str, scopes=DEFAULT_SCOPES) -> TeamPage | None:
         page.members.append(Member(person_id, person_name, role, owned_by.get(person_id, [])))
 
     page.accounts, page.accounts_total = _member_accounts(graph, params)
+    page.synced, page.synced_total, page.synced_via, page.synced_path = _synced_accounts(graph, params, {account.id for account in page.accounts})
     page.decisions = _standing_decisions(graph, params)
     page.tickets = [
         OpenTicket(ticket_id, title, about)
@@ -332,7 +342,7 @@ def team_page(team_id: str, scopes=DEFAULT_SCOPES) -> TeamPage | None:
         from src.domain.knowledge import risk_map  # risk_map reaches the catalogue, which reaches this module
 
         page.risk = risk_map.grid(risk_map.rows(graph, list(scopes), [thing.id for thing in things]))
-    page.path = team_path(page)
+    page.path = _unique([*team_path(page), *page.synced_path])
     page.questions = team_questions(page)
     page.glance = team_glance(page)
     return page
@@ -401,6 +411,58 @@ def _member_accounts(graph, params: dict) -> tuple[list[OwnedThing], int]:
         params,
     ).result_set
     return [OwnedThing(account_id, name, "account", summary, sorted(owners)) for account_id, name, summary, owners in rows], int(total[0][0])
+
+
+# The connectors whose synced accounts belong with the team that runs the system: a team that runs
+# a Service named (or known as) "HubSpot" is the team those HubSpot accounts are tied to.
+CRM_SOURCES = ("hubspot",)
+
+
+def _synced_accounts(graph, params: dict, skip: set[str]) -> tuple[list[OwnedThing], int, list[str], list[PathStep]]:
+    """Accounts a CRM the team runs syncs, beyond ``skip`` (the ones its members own): the first
+    ``ACCOUNT_LIMIT`` by name with their owners, how many, the systems' names, and each owner's OWNS edge.
+
+    The tie is the team's RUNS edge to the system and the account's ``source``; the account's own
+    owner (a person, or an unlinked account named with its tool) is cited by its OWNS edge."""
+    systems = graph.ro_query(
+        f"""
+        MATCH (:Team {{id: $id}})-[:RUNS]->(h:Service)
+        WHERE {SCOPED.format(var="h")}
+        WITH h, [alias IN split(toLower(coalesce(h.aliases, '')), ',') | trim(alias)] + [toLower(h.name)] AS names
+        UNWIND names AS name
+        WITH h, name WHERE name IN $sources
+        RETURN DISTINCT h.name, name
+        ORDER BY h.name
+        """,
+        {**params, "sources": list(CRM_SOURCES)},
+    ).result_set
+    if not systems:
+        return [], 0, [], []
+    rows = graph.ro_query(
+        f"""
+        MATCH (s:Service)
+        WHERE s.source IN $sources AND {kinds.KIND_OF.format(var="s")} = 'account' AND {SCOPED.format(var="s")}
+          AND NOT s.id IN $skip AND NOT (:Team {{id: $id}})-[:RUNS]->(s)
+        OPTIONAL MATCH (o)-[:OWNS]->(s)
+        WHERE labels(o)[0] IN ['Person', 'ExternalUser'] AND {SCOPED.format(var="o")}
+        RETURN s.id, s.name, coalesce(s.summary, ''), collect(DISTINCT [o.id, o.name, labels(o)[0], o.source])
+        ORDER BY s.name
+        """,
+        {**params, "sources": sorted({source for _name, source in systems}), "skip": sorted(skip)},
+    ).result_set
+    things: list[OwnedThing] = []
+    path: list[PathStep] = []
+
+    for account_id, name, summary, owners in rows[:ACCOUNT_LIMIT]:
+        named = []
+        for owner_id, owner, label, source in owners:
+            if owner_id is None:
+                continue
+            shown = people.account_label(owner, source) if label == people.ACCOUNT else owner
+            named.append(shown)
+            path.append(PathStep(shown, "OWNS", name, from_id=owner_id, to_id=account_id, from_label=label, to_label="Service"))
+        things.append(OwnedThing(account_id, name, "account", summary, sorted(named)))
+    return things, len(rows), list(dict.fromkeys(name for name, _source in systems)), path
 
 
 def team_questions(page: TeamPage) -> list[str]:

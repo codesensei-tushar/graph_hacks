@@ -353,6 +353,25 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
             with self.subTest(question=question):
                 self.assertEqual(ask_service.route(question), ("ticket_status", {"name": question}))
 
+    def test_crm_questions_go_to_find_on_accounts(self):
+        account = {"label": "Service", "kind": "account"}
+        cases = {
+            "show me our customers": {**account, "status": "customer"},
+            "who are our customers": {**account, "status": "customer"},
+            "open opportunities": {**account, "state": "open", "status": "opportunity"},
+            "deals in contract sent": {**account, "stage": "contract sent"},
+            "which deals are in contract sent?": {**account, "stage": "contract sent"},
+            "show me the pipeline": {**account, "stage": "open"},
+            "list accounts": account,
+            "which accounts are closed": {**account, "state": "closed"},
+        }
+        for question, args in cases.items():
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("find", args))
+        # Named things stay where they were.
+        self.assertEqual(ask_service.route("who owns the enterprise accounts")[0], "who_owns")
+        self.assertEqual(ask_service.route("list the services in payments"), ("find", {"label": "Service", "team": "payments"}))
+
     def test_other_ticket_questions_keep_their_tools(self):
         cases = {
             "who knows about TKT-102": "who_knows",

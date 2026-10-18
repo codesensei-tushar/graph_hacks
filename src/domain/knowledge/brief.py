@@ -45,6 +45,8 @@ def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
         parts.append(f"{page.name} runs nothing in the graph yet.")
     if page.accounts_total:
         parts.append(_member_accounts(page))
+    if page.synced_total:
+        parts.append(_synced_accounts(page))
     if page.decisions:
         parts.append(_decisions(page.decisions[:MAX_DECISIONS], len(page.decisions), things, result))
     ask = _ask_first(graph, list(things.values()), scopes, result)
@@ -88,6 +90,16 @@ def _member_accounts(page: team_page.TeamPage) -> str:
     if total > len(named):
         named.append(f"{total - len(named)} more")
     return f"Its members also own {total} account{'s' if total != 1 else ''}: {join_names(named)}."
+
+
+def _synced_accounts(page: team_page.TeamPage) -> str:
+    """"Through HubSpot, which it runs, it also has 15 accounts: Acme (owned by Yash Patil (HubSpot)), ... and 11 more."."""
+    total = page.synced_total
+    named = [f"{account.name} (owned by {join_names(account.owners)})" if account.owners else account.name for account in page.synced[:MAX_PER_KIND]]
+    if total > len(named):
+        named.append(f"{total - len(named)} more")
+    also = "more " if page.accounts_total else ""
+    return f"Through {join_names(page.synced_via)}, which it runs, it has {total} {also}account{'s' if total != 1 else ''}: {join_names(named)}."
 
 
 def _decisions(shown: list[team_page.StandingDecision], total: int, things: dict, result: ToolResult) -> str:

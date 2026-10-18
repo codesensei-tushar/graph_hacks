@@ -128,6 +128,10 @@ QUESTIONS = [
     ("ticket 3", "who is working on PAY-11", "ticket_status", None),
     ("ticket 4", "what blocks PAY-11", "ticket_status", None),
     ("ticket 5", "which tickets are blocked", "find", None),
+    # The CRM.
+    ("crm 1", "show me our customers", "find", None),
+    ("crm 2", "open opportunities", "find", None),
+    ("crm 3", "deals in contract sent", "find", None),
 ]
 
 
