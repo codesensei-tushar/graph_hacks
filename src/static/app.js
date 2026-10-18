@@ -423,6 +423,28 @@
     return `${plural(kept.length, "question answers", "questions answer")} the same without the graph: ${kept.map((row) => row.question).join("; ")}.`;
   }
 
+  // While the hero's dark top is under the header, the header goes transparent with light ink;
+  // once it leaves, the header is solid again. A deep link pins the answer, so it lands solid.
+  function watchHero() {
+    const sky = $(".hero-sky");
+    if (!sky || !("IntersectionObserver" in window)) return;
+    const root = document.documentElement;
+    const header = () => parseFloat(getComputedStyle(root).getPropertyValue("--header")) || 64;
+    let observer = null;
+    const watch = () => {
+      if (observer) observer.disconnect();
+      observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) root.dataset.overHero = "";
+          else delete root.dataset.overHero;
+        }
+      }, { rootMargin: `-${header()}px 0px 0px 0px` });
+      observer.observe(sky);
+    };
+    watch();
+    window.matchMedia("(max-width: 760px)").addEventListener("change", watch);
+  }
+
   function watchProof() {
     if (!("IntersectionObserver" in window)) { loadProof(); return; }
     const observer = new IntersectionObserver((entries) => {
@@ -441,6 +463,7 @@
   loadSample();
   loadTeams();
   watchProof();
+  watchHero();
   const initial = new URLSearchParams(location.search).get("q");
   if (initial) { input.value = initial; ask(initial, true); }
 })();
