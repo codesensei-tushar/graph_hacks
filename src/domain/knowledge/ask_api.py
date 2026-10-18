@@ -326,9 +326,11 @@ class AskAnswer:
     notice: str = ""
     # The table a ranking tool returns (risk_map); None for every other tool.
     grid: dict | None = None
+    # Each part of a question in two parts, in order; empty, and left out of the reply, for one part.
+    parts: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
+        reply = {
             "notice": self.notice,
             "question": self.question,
             "tool": self.tool,
@@ -344,6 +346,9 @@ class AskAnswer:
             "scopes": list(self.scopes),
             "grid": self.grid,
         }
+        if self.parts:
+            reply["parts"] = [dict(part) for part in self.parts]
+        return reply
 
 
 def read_tools() -> list[ToolSummary]:
@@ -458,6 +463,7 @@ def shape(question: str, result: ToolResult, picked_by: str, scopes: list[str]) 
         memories=[memory.to_dict() for memory in result.memories],
         scopes=list(scopes),
         grid=result.grid,
+        parts=[dict(part) for part in result.parts],
     )
 
 

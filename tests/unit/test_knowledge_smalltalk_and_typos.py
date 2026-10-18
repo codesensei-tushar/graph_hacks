@@ -21,16 +21,25 @@ class CompoundRouteTest(unittest.TestCase):
         )
         self.assertEqual(ask_service.split_compound("who owns billing; who knows auth?")[1], "who knows auth?")
 
-    def test_one_question_that_refers_back_or_has_context_first_is_not_split(self):
+    def test_one_question_about_more_people_or_with_context_first_is_not_split(self):
         for question in (
             "who owns billing, and who else has worked on it",
-            "what does the invoice worker depend on and what depends on it",
             "billing is failing, what changed",
             "what breaks if auth goes down, two hops out",
         ):
             with self.subTest(question=question):
                 self.assertIsNone(ask_service.split_compound(question)[1])
         self.assertEqual(ask_service.route("billing is failing, what changed")[0], "what_changed")
+
+    def test_a_rest_about_the_first_parts_thing_is_split(self):
+        # It used to stay one question; the agent now asks the rest about what the first part named.
+        self.assertEqual(
+            ask_service.split_compound("what does the invoice worker depend on and what depends on it"),
+            ("what does the invoice worker depend on", "what depends on it"),
+        )
+        self.assertEqual(ask_service.split_compound("who owns billing and what breaks if it goes down")[1], "what breaks if it goes down")
+        self.assertEqual(ask_service.split_compound("what if auth breaks? also who to contact"), ("what if auth breaks", "who to contact"))
+        self.assertEqual(ask_service.split_compound("who owns billing also who to contact"), ("who owns billing", "who to contact"))
 
     def test_who_should_i_talk_to_beats_i_am_new(self):
         question = "I am new on payments and need to fix a bug, who should I talk to about the invoice worker"

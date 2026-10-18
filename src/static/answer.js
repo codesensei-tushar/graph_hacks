@@ -211,7 +211,10 @@
     const onAsk = opts.onAsk;
     out.replaceChildren();
     if (data.notice) out.append(el("p", { class: "notice" }, data.notice));
-    out.append(el("p", { class: data.found ? "text" : "text refused" }, data.answer));
+    // A question in two parts answers each in its own paragraph, in order.
+    for (const part of data.parts && data.parts.length ? data.parts : [data]) {
+      out.append(el("p", { class: part.found ? "text" : "text refused" }, part.answer));
+    }
     // risk_map and person_profile return the same grid shape; one table draws both.
     if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: onAsk });
 
