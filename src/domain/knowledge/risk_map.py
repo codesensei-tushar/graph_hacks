@@ -18,7 +18,7 @@ names the rest; the grid carries every row for a page to draw as a table.
 from dataclasses import dataclass, field
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, ask_service, bus_factor, kinds
+from src.domain.knowledge import algorithms, ask_service, bus_factor, kinds, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
 from src.domain.knowledge.resolve import SCOPED, Entity, join_names
 
@@ -85,26 +85,30 @@ class RiskRow:
         }
 
 
-def risk_map(scopes: list[str]) -> ToolResult:
-    """Every visible owned thing with its gaps, the riskiest first."""
+def risk_map(scopes: list[str], team: str | None = None) -> ToolResult:
+    """Every visible owned thing with its gaps, the riskiest first; only what a team runs when the
+    question names one ("the biggest risks for the payments team"). A team that does not resolve
+    leaves the company view: this tool never refuses."""
     _, graph = connect()
-    ranked = rows(graph, scopes)
+    named = _team(graph, team, scopes)
+    ranked = rows(graph, scopes, _runs(graph, named, scopes) if named else None)
     result = ToolResult(tool=TOOL, answer="")
     if not ranked:
-        result.answer = "The graph has no owned things yet, so there is nothing to rank."
+        result.answer = f"{named.name} runs nothing in the graph yet, so there is nothing to rank." if named else "The graph has no owned things yet, so there is nothing to rank."
         return result
     result.grid = grid(ranked)
 
     flagged = [row for row in ranked if row.score]
+    within = f" in {named.name}" if named else ""
     if not flagged:
         each = "the one thing in the graph" if len(ranked) == 1 else f"each of the {len(ranked)} things"
         result.answer = (
-            f"No gaps: {each} has more than one person who knows it, "
+            f"No gaps{within}: {each} has more than one person who knows it, "
             "a document where one applies, and an owner on the team that runs it."
         )
         return result
     listed, rest = flagged[:MAX_LISTED], flagged[MAX_LISTED:]
-    parts = [f"Risk sits with {len(flagged)} of {len(ranked)} things, ranked by how much depends on each and how many gaps it has."]
+    parts = [f"Risk{within} sits with {len(flagged)} of {len(ranked)} things, ranked by how much depends on each and how many gaps it has."]
     for row in listed:
         parts.append(_sentence(row))
         result.extend(_steps(graph, row, scopes))
@@ -114,6 +118,26 @@ def risk_map(scopes: list[str]) -> ToolResult:
         parts.append(f"And {len(rest)} more: {join_names([kinds.listed(row.name, row.kind) for row in rest])}.")
     result.answer = " ".join(parts)
     return result
+
+
+def _team(graph, team: str | None, scopes: list[str]) -> Entity | None:
+    """The team the question names, or None: the company view."""
+    if not (team or "").strip():
+        return None
+    resolution = resolve.resolve_name(team, ("Team",), scopes, graph=graph)
+    return resolution.entity if resolution.found else None
+
+
+def _runs(graph, team: Entity, scopes: list[str]) -> list[str]:
+    rows_run = graph.ro_query(
+        f"""
+        MATCH (:Team {{id: $id}})-[:RUNS]->(s:Service)
+        WHERE {SCOPED.format(var="s")}
+        RETURN s.id
+        """,
+        {"id": team.id, "scopes": scopes},
+    ).result_set
+    return [row[0] for row in rows_run]
 
 
 def rows(graph, scopes: list[str], ids: list[str] | None = None) -> list[RiskRow]:

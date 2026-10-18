@@ -102,8 +102,21 @@ def _run_load_bearing(args: dict, scopes: list[str]) -> ToolResult:
     return algorithms.load_bearing(args.get("limit", algorithms.DEFAULT_LOAD_BEARING), scopes)
 
 
-def _run_risk_map(_args: dict, scopes: list[str]) -> ToolResult:
-    return risk_map.risk_map(scopes)
+def _run_risk_map(args: dict, scopes: list[str]) -> ToolResult:
+    return risk_map.risk_map(scopes, args.get("team"))
+
+
+def _run_people_ranking(args: dict, scopes: list[str]) -> ToolResult:
+    # people_insights reads decisions, which registers into this catalogue on import.
+    from src.domain.knowledge import people_insights
+
+    return people_insights.people_ranking(args.get("measure"), scopes, args.get("team"), args.get("limit"))
+
+
+def _run_go_to(args: dict, scopes: list[str]) -> ToolResult:
+    from src.domain.knowledge import people_insights
+
+    return people_insights.go_to(args["name"], scopes)
 
 
 def _run_team_dependencies(args: dict, scopes: list[str]) -> ToolResult:
@@ -162,7 +175,7 @@ def _find_schema() -> dict:
     words = {
         "kind": ("What kind of service.", {"enum": list(SERVICE_KINDS)}),
         "team": ("The team, copied from the question: the services it runs, the tickets, decisions and documents about them, or its members.", {}),
-        "owner": ("The person who owns the services or accounts listed, or a Jira or HubSpot user by name.", {}),
+        "owner": ("The person who owns the services or accounts listed, a Jira or HubSpot user by name, or none for the services nobody owns.", {}),
         "state": ("open or closed for tickets and accounts; open, closed or merged for pull requests.", {"enum": ["open", "closed", "merged"]}),
         "about": ("The service the tickets or decisions are about.", {}),
         "person": ("The person who worked on or is assigned the tickets, or a Jira user by name.", {}),
@@ -189,6 +202,10 @@ def _find_schema() -> dict:
     for name in find.FILTER_NAMES:
         text, extra = words[name]
         properties[name] = {"type": "boolean" if name in ("standing", "blocked") else "string", **extra, "description": f"{text} For {', '.join(by_filter[name])}."}
+    properties["limit"] = {
+        "type": "integer", "minimum": 1, "maximum": find.MAX_ROWS,
+        "description": "How many to name; decisions come newest first, so 1 is the newest decision.",
+    }
     return _schema(properties, ["label"])
 
 
@@ -451,7 +468,10 @@ register(
             "the company, knowledge gaps or what is undocumented. For one person leaving use if_person_leaves; for what "
             "one service takes down, blast_radius; for dependency weight alone, load_bearing."
         ),
-        args_schema=_schema({}, []),
+        args_schema=_schema(
+            {"team": {"type": "string", "description": "A team to narrow the map to what it runs, copied from the question. Leave it out for the whole company."}},
+            [],
+        ),
         run=_run_risk_map,
     )
 )
@@ -506,6 +526,40 @@ register(
             [],
         ),
         run=_run_decision_health,
+    )
+)
+register(
+    ToolSpec(
+        name="people_ranking",
+        description=(
+            "Who leads on one measure across the company, or within a team: holds (things they own, work on or know), "
+            "owns, reviews, authored (pull requests and documents), decisions (proposed or approved), load (things "
+            "owned, open tickets and open pull requests now) or bridges (other teams whose things they hold). Use for "
+            "'who reviewed the most', 'who is the busiest', 'who owns the most', 'top contributors'. For one person, "
+            "use person_profile."
+        ),
+        args_schema=_schema(
+            {
+                "measure": {"type": "string", "enum": ["holds", "owns", "reviews", "authored", "decisions", "load", "bridges"], "description": "What to count per person."},
+                "team": {"type": "string", "description": "A team to narrow the field to its members, copied from the question. Leave it out for everyone."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 10, "description": "How many people to name (3 by default)."},
+            },
+            ["measure"],
+        ),
+        run=_run_people_ranking,
+    )
+)
+register(
+    ToolSpec(
+        name="go_to",
+        description=(
+            "Who to ask about a service, document or ticket now, with dates: who_knows' ranking, each person with their "
+            "last dated touch on it (a pull request, something they said, a decision, a ticket), and the most recent "
+            "touch by anyone. Use for 'who is the go-to for X right now', 'who last worked on X', 'when did we last "
+            "touch X'. For everyone linked to it without dates, use who_knows."
+        ),
+        args_schema=_schema({"name": _NAME}, ["name"]),
+        run=_run_go_to,
     )
 )
 register(
