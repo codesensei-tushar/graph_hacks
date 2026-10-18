@@ -56,7 +56,7 @@ class ProductionDemoTest(unittest.TestCase):
         _, graph = falkordb_client.connect()
         graph.query(
             """
-            MATCH (tushar:Person {id: 'tushar'}), (memory:Service {id: 'memory-layer'}), (github:Service {id: 'github-ingest'})
+            MATCH (tushar:Person {id: 'tushar'}), (memory:Service {id: 'cb-memory'}), (github:Service {id: 'github-ingest'})
             CREATE (me:GitHubUser {id: 'gh-tushar', login: 'codesensei-tushar', name: 'codesensei-tushar'})-[:IS]->(tushar),
                    (ext:GitHubUser {id: 'gh-ext', login: 'ext-dev', name: 'ext-dev'}),
                    (public:PullRequest {id: 'pr-public-1', name: 'graph_hacks#1', scope: 'org_shared'})-[:TOUCHES]->(memory),
@@ -91,11 +91,11 @@ class ProductionDemoTest(unittest.TestCase):
 
     def test_1_owner_then_the_pull_requests_that_touched_the_code(self):
         _, result = _ask(STEPS[1])
-        self.assertTrue(result.answer.startswith("Memory layer is owned by Tushar. Ask first: Tushar (owns it, wrote graph_hacks#1)"), result.answer)
+        self.assertTrue(result.answer.startswith("Slack memory layer is owned by Tushar Umbarkar. Ask first: Tushar Umbarkar (owns it, wrote graph_hacks#1)"), result.answer)
         cites = _cites(result)
-        self.assertEqual(cites[0], "Tushar -[OWNS]-> Memory layer")
-        self.assertIn("Tushar -[AUTHORED]-> graph_hacks#1", cites)
-        self.assertIn("graph_hacks#1 -[TOUCHES]-> Memory layer", cites)
+        self.assertEqual(cites[0], "Tushar Umbarkar -[OWNS]-> Slack memory layer")
+        self.assertIn("Tushar Umbarkar -[AUTHORED]-> graph_hacks#1", cites)
+        self.assertIn("graph_hacks#1 -[TOUCHES]-> Slack memory layer", cites)
         self.assertIn("@ext-dev -[REVIEWED]-> graph_hacks#1", cites)
         self.assertEqual(result.candidates, [], "a question about the memory layer names nothing else")
 
@@ -104,13 +104,13 @@ class ProductionDemoTest(unittest.TestCase):
         decision = "Store memory in FalkorDB instead of a hosted memory API"
         self.assertTrue(result.answer.startswith(decision), result.answer)
         self.assertIn("Decided 15 Oct 2026.", result.answer)
-        self.assertIn("Proposed by Tushar.", result.answer)
+        self.assertIn("Proposed by Tushar Umbarkar.", result.answer)
         cites = _cites(result)
         for cite in (
-            f"Tushar -[PROPOSED]-> {decision}",
+            f"Tushar Umbarkar -[PROPOSED]-> {decision}",
             f"{decision} -[BASED_ON]-> Problem statement",
             f"{decision} -[BASED_ON]-> Slack guide",
-            f"{decision} -[ABOUT]-> Memory layer",
+            f"{decision} -[ABOUT]-> Slack memory layer",
         ):
             self.assertIn(cite, cites)
         self.assertTrue(any(cite.endswith(f"-[ABOUT]-> {decision}") and "chat" in cite.lower() for cite in cites), cites)
@@ -133,8 +133,9 @@ class ProductionDemoTest(unittest.TestCase):
         self.assertTrue(
             one.answer.startswith(
                 "If Claude API goes down, these stop with it: LLM gateway (1 hop). "
-                "4 more break further out (Memory layer at depth 2, Slack workspace at depth 2, Turn engine at depth 2 "
-                "and Slack events API at depth 3); ask with more hops."
+                "10 more break further out (Knowledge tools at depth 2, Slack layer at depth 2, Slack memory layer at depth 2, "
+                "Turn engine at depth 2, Console at depth 3, GitHub ingest at depth 3, MCP server at depth 3, Public site at depth 3, "
+                "Seed data at depth 3 and Team onboarding at depth 3); ask with more hops."
             ),
             one.answer,
         )
@@ -145,13 +146,13 @@ class ProductionDemoTest(unittest.TestCase):
         affected_three = {step.from_name for step in three.path}
         self.assertLess(affected_one, affected_three)
         for cite in (
-            "Slack workspace -[DEPENDS_ON]-> LLM gateway",
+            "Slack layer -[DEPENDS_ON]-> LLM gateway",
             "Turn engine -[DEPENDS_ON]-> LLM gateway",
-            "Memory layer -[DEPENDS_ON]-> LLM gateway",
-            "Slack events API -[DEPENDS_ON]-> Slack workspace",
+            "Slack memory layer -[DEPENDS_ON]-> LLM gateway",
+            "Console -[DEPENDS_ON]-> Slack layer",
         ):
             self.assertIn(cite, _cites(three))
-        self.assertIn("Depth 3 reached 5 services; nothing new past depth 3.", three.answer)
+        self.assertIn("Depth 3 reached 11 services; nothing new past depth 3.", three.answer)
 
         # "and three hops out" in the thread, with no model, takes the subject from the first question.
         thread = [
@@ -160,7 +161,7 @@ class ProductionDemoTest(unittest.TestCase):
         ]
         result, choice = agent.run_choice(agent.choose_with_keywords("and three hops out"), "and three hops out", ORG, thread, BOT)
         self.assertEqual((choice.tool, choice.via, result.depth), ("blast_radius", "thread", 3))
-        self.assertIn("Slack events API -[DEPENDS_ON]-> Slack workspace", _cites(result))
+        self.assertIn("Console -[DEPENDS_ON]-> Slack layer", _cites(result))
 
     def test_5_the_card_names_the_service_the_write_lands_and_the_follow_up_finds_the_owner(self):
         title = "scheduler jobs run twice after a restart"
@@ -170,7 +171,7 @@ class ProductionDemoTest(unittest.TestCase):
         text = compute.execute_approved_action(compute.TICKET_TOOL_NAME, {"title": title}, "org_shared")
         ticket = re.search(r"Filed \*(TKT-\d+)\* about Scheduler", text).group(1)
         self.assertIn(f"• {ticket} -[ABOUT]-> Scheduler", text)
-        self.assertIn("• Tushar -[OWNS]-> Scheduler", text)
+        self.assertIn("• Yash Patil -[OWNS]-> Scheduler", text)
 
         thread = [
             {"user": "UKOFI", "text": f"<@UBOT> ticket: {title}", "ts": "1"},
@@ -179,9 +180,9 @@ class ProductionDemoTest(unittest.TestCase):
         result, choice = agent.run_choice(agent.choose_with_keywords("who should look at it"), "who should look at it", ORG, thread, BOT)
         self.assertEqual((choice.tool, choice.via), ("who_knows", "thread"))
         # A ticket leads with what its tracker shows: title, status and assignee.
-        self.assertEqual(result.answer, f"{ticket} is “{title}”: open, assigned to no one. About Scheduler. Ask first: Tushar (owns Scheduler).")
+        self.assertEqual(result.answer, f"{ticket} is “{title}”: open, assigned to no one. About Scheduler. Ask first: Yash Patil (owns Scheduler), then Tushar Umbarkar (worked on Scheduler).")
         self.assertIn(f"{ticket} -[ABOUT]-> Scheduler", _cites(result))
-        self.assertIn("Tushar -[OWNS]-> Scheduler", _cites(result))
+        self.assertIn("Yash Patil -[OWNS]-> Scheduler", _cites(result))
 
     def test_6_something_not_in_the_graph_refuses_with_the_nearest_names(self):
         _, result = _ask(STEPS[6])
@@ -197,7 +198,7 @@ class ProductionDemoTest(unittest.TestCase):
         self.assertTrue(outsider.found and collaborator.found)
         self.assertNotIn("brain-private#3", " ".join(_cites(outsider)) + outsider.answer)
         self.assertIn("brain-private#3 -[TOUCHES]-> GitHub ingest", _cites(collaborator))
-        self.assertIn("Tushar -[AUTHORED]-> brain-private#3", _cites(collaborator))
+        self.assertIn("Tushar Umbarkar -[AUTHORED]-> brain-private#3", _cites(collaborator))
         self.assertIn("wrote brain-private#3", collaborator.answer)
 
     def test_8_the_proof_report_on_the_production_seed(self):
