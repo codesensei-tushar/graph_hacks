@@ -276,6 +276,9 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
         # ticket itself, before the people and decision routes that would only list who knows it. A key
         # that is no readable ticket ("billing for q3-2026") falls through to the route below it.
         return "ticket_status", {"name": text}
+    if tickets and ticket_status.asks_about_a_titled_ticket(text):
+        # "what's blocking the postgres upgrade": a ticket by its title; no title match falls through.
+        return "ticket_status", {"name": text}
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
