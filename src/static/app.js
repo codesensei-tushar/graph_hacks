@@ -281,6 +281,44 @@
     head.insertBefore(group, $(".replay", head));
   }
 
+  // The answer's own address, the one a shared link opens on (/?q=...). "Copied" shows for a
+  // moment. Without the async clipboard (a plain-http host) the older copy command is tried;
+  // if that fails too the button says so, and the address bar already holds the same link.
+  function copyText(text, from) {
+    const area = el("textarea", { readonly: "", "aria-hidden": "true", style: "position:fixed;top:0;left:0;opacity:0" });
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch (error) { copied = false; }
+    area.remove();
+    from.focus();
+    return copied;
+  }
+
+  function addCopyLink(question) {
+    const head = $(".path-head", out);
+    if (!head) return;
+    const link = new URL(`/?q=${encodeURIComponent(question)}`, location.origin).href;
+    const copy = el("button", { type: "button", class: "copy-link", title: link });
+    copy.append(el("span", { class: "label" }, "Copy link"), el("span", { class: "done" }, "Copied"));
+    let shown = null;
+    copy.addEventListener("click", async () => {
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(link);
+        copied = true;
+      } catch (error) {
+        copied = copyText(link, copy);
+      }
+      copy.querySelector(".done").textContent = copied ? "Copied" : "Not copied";
+      copy.classList.add("copied");
+      clearTimeout(shown);
+      shown = setTimeout(() => copy.classList.remove("copied"), 1600);
+    });
+    head.insertBefore(copy, $(".replay", head));
+  }
+
   function render(data, question) {
     statusLine.textContent = "";
     out.replaceChildren();
@@ -289,6 +327,7 @@
 
     BrainGraph.renderPath(out, data.nodes || [], data.edges || [], { tool: data.tool, depth: data.depth });
     if (data.tool === "blast_radius" && data.found) addDepthButtons(question, data.depth);
+    addCopyLink(question);
 
     if (data.found && data.candidates && data.candidates.length) {
       out.append(el("p", { class: "note" }, `Also matched: ${data.candidates.join(", ")}. Ask again with that name to switch.`));

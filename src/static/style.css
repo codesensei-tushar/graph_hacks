@@ -403,13 +403,19 @@ h3 { letter-spacing: -0.01em; }
 .path-head h3 { margin: 0 !important; font-size: 0.95rem; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .path-head .meta { color: var(--ink-3); font: 400 0.8rem var(--mono); }
 .meta code { background: var(--surface-2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; color: var(--path-ink); }
-.replay {
+.replay, .copy-link {
   display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 999px; cursor: pointer;
   font: 500 0.8rem/1 var(--mono); color: var(--ink-2); background: var(--surface); border: 1px solid var(--line);
   transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 .replay::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--path); box-shadow: 0 0 0 3px var(--glow); }
-.replay:hover { color: var(--ink); border-color: var(--line-2); }
+.replay:hover, .copy-link:hover { color: var(--ink); border-color: var(--line-2); }
+/* "Copy link" on an answer (app.js). Both labels share one grid cell, so "Copied" keeps the width. */
+.copy-link { display: inline-grid; place-items: center; }
+.copy-link > span { grid-area: 1 / 1; }
+.copy-link .done, .copy-link.copied .label { visibility: hidden; }
+.copy-link.copied .done { visibility: visible; color: var(--path-ink); }
+.path-head h3 + .copy-link { margin-left: auto; }
 /* The depth buttons on a blast_radius answer (app.js), beside "Replay the walk" and as tall. */
 .depths { display: inline-flex; gap: 2px; margin-left: auto; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
 .depths button {
@@ -677,8 +683,8 @@ footer.site a { color: var(--ink-2); }
 
 @media (max-width: 760px) {
   :root { --gutter: 16px; --header: 56px; }
-  /* The path head wraps here; the depth buttons start their row like the replay button. */
-  .depths { margin-left: 0; }
+  /* The path head wraps here; the buttons start their row like the replay button. */
+  .depths, .path-head h3 + .copy-link { margin-left: 0; }
   .top nav { display: none; }
   .hero { padding: 24px 0 8px; }
   .hero h1 { font-size: clamp(2.15rem, 9.4vw, 2.5rem); }
@@ -725,5 +731,6 @@ footer.site a { color: var(--ink-2); }
   .askbar .btn kbd { display: none; }
   .chip { min-height: 44px; }
   #chips { min-height: 148px; }
-  .replay { min-height: 44px; }
+  .replay, .copy-link { min-height: 44px; }
+  .depths button { min-height: 36px; }
 }

@@ -228,3 +228,22 @@ class DepthButtonsTest(unittest.TestCase):
             "what breaks if the hop service goes down",
         ):
             self.assertEqual(bool(self.names_depth.search(question)), depth_in(question) is not None, question)
+
+
+class CopyLinkTest(unittest.TestCase):
+    """ "Copy link" on an answer copies the address a shared link opens on."""
+
+    def setUp(self):
+        self.app_js = (STATIC / "app.js").read_text()
+
+    def test_the_copied_link_is_the_one_the_page_reads_on_load(self):
+        self.assertIn("new URL(`/?q=${encodeURIComponent(question)}`, location.origin).href", self.app_js)
+        self.assertIn('new URLSearchParams(location.search).get("q")', self.app_js)
+        self.assertIn('history.replaceState(null, "", `?q=${encodeURIComponent(q)}`)', self.app_js)
+
+    def test_every_answer_with_a_path_gets_the_button_beside_replay(self):
+        self.assertEqual(len(re.findall(r"addCopyLink\(", self.app_js)), 2, "defined once, called once")
+        self.assertRegex(self.app_js, r"addDepthButtons\(question, data\.depth\);\n    addCopyLink\(question\);")
+        self.assertIn('head.insertBefore(copy, $(".replay", head));', self.app_js)
+        for label in ('"Copy link"', '"Copied"', '"Not copied"'):
+            self.assertIn(label, self.app_js)
