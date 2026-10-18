@@ -8,12 +8,14 @@ Ask it in Slack and it answers from the graph, then prints the edges it walked:
 
 | You ask | It walks |
 | --- | --- |
-| Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, pull requests and reviews |
+| Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, tickets and docs, and pull requests and reviews once GitHub is connected |
 | Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[BASED_ON]-> Document`, the decision it `SUPERSEDES`, and the chat it came from |
 | What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
 | Who should know about notebook#45? | `PullRequest -[TOUCHES]-> Service`, then back two `DEPENDS_ON` hops: the owners of what it changes and of what depends on it who were not on the pull request, each tagged by whether they have worked with its author |
 | A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
 | What if Priya Shah leaves? | What only they own or know, ranked by what depends on it, and who is next in line by the same edges `who_knows` ranks |
+
+Rows 4 and 6 need the demo replay's pull requests and Sales team; the live site answers the questions in [Try it in two minutes](#try-it-in-two-minutes).
 
 If the thing you named is not in the graph, it says so and offers the nearest matches. It never guesses.
 
