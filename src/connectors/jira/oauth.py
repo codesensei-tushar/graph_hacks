@@ -103,9 +103,9 @@ def choose_site(org: str, install_key: str, cloud_id: str) -> str:
     Returns the install id to continue with (``/console/connectors/<id>/projects``): this one, or,
     when the org already reads that site, its existing install, which takes these tokens while
     this one is deleted. Raises ``LookupError`` for a site the grant does not cover, and
-    ``PermissionError`` when another org has claimed it.
+    ``PermissionError`` when another org has claimed it or the org's install of it is being removed.
     """
-    from src.connectors import oauth, registry, store
+    from src.connectors import oauth, store
     from src.core.tenancy import org_context
 
     with org_context(org):
@@ -115,18 +115,28 @@ def choose_site(org: str, install_key: str, cloud_id: str) -> str:
         site = find_site(store.to_install(stored), cloud_id)
         if site is None:
             raise LookupError("the grant does not cover that site")
-        if not store.claim_external_account(site.external_account, org):
-            raise PermissionError("another org reads that site")
-        config = {"cloud_id": site.cloud_id, "site_url": site.url}
-        current = next((row for row in store.list_installs("jira") if row.external_account == site.external_account and row.id != stored.id), None)
-        if current is not None:
-            store.update_config(current.id, config, site=site.url)
-            store.set_secret(current.id, store.load_secrets(stored))
-            if current.status == "error":
-                store.set_status(current.id, "active")
-            store.delete(stored.id)
-            registry.drop(org, "jira", stored.install)
-            oauth.forget(store.to_install(store.get(current.id)))
-            return current.id
-        store.update_config(stored.id, config, site=site.url, external_account=site.external_account)
-        return stored.id
+        with oauth.account_lock(site.external_account):
+            return _claim_site(org, stored, site)
+
+
+def _claim_site(org: str, stored, site: Site) -> str:
+    """``choose_site`` under the account's lock (the same one the OAuth callback takes)."""
+    from src.connectors import oauth, registry, store
+
+    if not store.claim_external_account(site.external_account, org):
+        raise PermissionError("another org reads that site")
+    config = {"cloud_id": site.cloud_id, "site_url": site.url}
+    current = next((row for row in store.list_installs("jira") if row.external_account == site.external_account and row.id != stored.id), None)
+    if current is not None and current.status == "removing":
+        raise PermissionError("that site's connection is being disconnected; try again when it is gone")
+    if current is not None:
+        store.update_config(current.id, config, site=site.url)
+        store.set_secret(current.id, store.load_secrets(stored))
+        if current.status == "error":
+            store.set_status(current.id, "active")
+        store.delete(stored.id)
+        registry.drop(org, "jira", stored.install)
+        oauth.forget(store.to_install(store.get(current.id)))
+        return current.id
+    store.update_config(stored.id, config, site=site.url, external_account=site.external_account)
+    return stored.id

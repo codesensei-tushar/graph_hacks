@@ -195,25 +195,39 @@ def _existing(source: str, external_account: str):
 
 def _store_install(session, source: str, external_account: str | None, site: str | None, config: dict, secret: dict) -> str:
     """Claim the account, then create the install, or replace the tokens of the org's existing one.
-    Returns the install id, or raises ``_Claimed``."""
+    Returns the install id, or raises ``_Claimed`` (another org holds the account) or ``_Removing``
+    (the org's install of it is being disconnected)."""
+    from src.connectors import store
+
+    if external_account is None:
+        # Several Jira sites: no account yet. jira_oauth.choose_site claims one later, under the same lock.
+        created = store.create_install(session.org, source, None, "oauth", status="connecting", config=config, secret=secret, created_by=getattr(session, "person", None))
+        return created.key
+    with oauth.account_lock(external_account):
+        return _claim_and_store(session, source, external_account, site, config, secret)
+
+
+def _claim_and_store(session, source: str, external_account: str, site: str | None, config: dict, secret: dict) -> str:
+    """``_store_install`` under the account's lock, so a second callback for the account finds the first's install."""
     from src.connectors import store
     from src.domain import orgs
 
-    newly_claimed = False
-    if external_account:
-        newly_claimed = orgs.external_account_org(external_account) is None
-        if not store.claim_external_account(external_account, session.org):
-            raise _Claimed()
-        current = _existing(source, external_account)
-        if current is not None:
-            store.update_config(current.id, config, site=site)
-            store.set_secret(current.id, secret)
-            store.set_status(current.id, "active" if current.status in ("active", "error") else "connecting")
-            installed = store.to_install(store.get(current.id))
-            oauth.forget(installed)
-            if current.status in ("active", "error"):
-                registry.put(installed)
-            return current.id
+    newly_claimed = orgs.external_account_org(external_account) is None
+    if not store.claim_external_account(external_account, session.org):
+        raise _Claimed()
+    current = _existing(source, external_account)
+    if current is not None and current.status == "removing":
+        # Its data is being deleted and its claim released: reconnect once that is done.
+        raise _Removing()
+    if current is not None:
+        store.update_config(current.id, config, site=site)
+        store.set_secret(current.id, secret)
+        store.set_status(current.id, "active" if current.status in ("active", "error") else "connecting")
+        installed = store.to_install(store.get(current.id))
+        oauth.forget(installed)
+        if current.status in ("active", "error"):
+            registry.put(installed)
+        return current.id
     try:
         created = store.create_install(
             session.org, source, None, "oauth", status="connecting", external_account=external_account, site=site,
@@ -227,6 +241,10 @@ def _store_install(session, source: str, external_account: str | None, site: str
 
 
 class _Claimed(Exception):
+    pass
+
+
+class _Removing(Exception):
     pass
 
 

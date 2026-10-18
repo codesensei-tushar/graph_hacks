@@ -12,6 +12,8 @@ returns the session the test sets.
 
 import dataclasses
 import hashlib
+import importlib
+import time
 import logging
 import os
 import threading
@@ -41,6 +43,8 @@ from src.domain.slack import token_crypto  # noqa: E402
 from tests.fixtures.oauth_servers import CLIENT, CLOUD_ID, HUB_ID, FakeVendors  # noqa: E402
 
 PUBLIC = "https://brain.test"
+# Package A's real dependency, before the test class replaces it with a fake.
+REAL_ADMIN_SESSION = console_oauth._admin_session
 COOKIE = "__Host-brain_session"
 
 
@@ -385,6 +389,100 @@ class ConsoleOAuthTest(unittest.TestCase):
             install = store.to_install(store.get(install_id))
             with self.assertRaises(ConnectorError):
                 registry.get("hubspot").check_credentials(install)
+
+    # --- concurrency, removal, the app's own credentials ------------------------------------------
+
+    def test_overlapping_callbacks_for_one_site_make_one_install(self):
+        first = self._authorize("jira")["query"]["state"]
+        second = self._authorize("jira")["query"]["state"]
+        self.vendors.codes["jira-code-2"] = "jira"
+        real_existing = console_oauth._existing
+        arrived: list[str] = []
+
+        def slow_existing(source, account):
+            found = real_existing(source, account)
+            # Wait for the other callback to reach its own lookup too. Without the lock both get here and
+            # both find nothing; with it the other is held at the lock, so this gives up after 2 s.
+            arrived.append(account)
+            deadline = time.monotonic() + 2.0
+            while len(arrived) < 2 and time.monotonic() < deadline:
+                time.sleep(0.02)
+            return found
+
+        locations = []
+
+        def callback(code, state):
+            client = TestClient(self.client.app, base_url=PUBLIC)
+            answer = client.get("/console/oauth/jira/callback", params={"code": code, "state": state}, headers={"Cookie": f"{COOKIE}={self.cookie}"}, follow_redirects=False)
+            locations.append(answer.headers["location"])
+
+        with mock.patch.object(console_oauth, "_existing", slow_existing):
+            threads = [threading.Thread(target=callback, args=args) for args in (("jira-code", first), ("jira-code-2", second))]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(locations, ["/console?connected=jira"] * 2)
+        with tenancy.org_context(self.acme.id):
+            self.assertEqual(len(store.list_installs("jira")), 1)
+        self.assertIsNone(falkordb_client.kv().get(f"console:claim:jira:{CLOUD_ID}"))
+
+    def test_reconnecting_an_install_being_removed_is_refused(self):
+        install_id = self._connected("jira")
+        before = store.read_secret(self.acme.id, install_id)
+        with tenancy.org_context(self.acme.id):
+            store.set_status(install_id, "removing")
+        state = self._authorize("jira")["query"]["state"]
+        self.assertEqual(self._callback("jira", code="jira-code", state=state).headers["location"], "/console?error=oauth_failed")
+        with tenancy.org_context(self.acme.id):
+            rows = store.list_installs("jira")
+        self.assertEqual([(row.id, row.status) for row in rows], [(install_id, "removing")])
+        self.assertEqual(store.read_secret(self.acme.id, install_id), before)
+
+    def test_refused_app_credentials_are_the_operators_to_fix_not_a_reconnect(self):
+        install = store.get_install(self.acme.id, self._connected("jira"))
+        self._expire(self.acme.id, install)
+        with mock.patch.dict(os.environ, {"JIRA_OAUTH_CLIENT_SECRET": "rotated-by-mistake"}):
+            with self.assertRaises(ConnectorError) as raised:
+                oauth.bearer_for(install)
+        self.assertNotIsInstance(raised.exception, CredentialsRejected)
+        self.assertIn("JIRA_OAUTH_CLIENT_SECRET", str(raised.exception))
+        self.assertNotIn("rotated-by-mistake", str(raised.exception))
+        self.assertNoSecretsLogged()
+
+    # --- package A's real session ---------------------------------------------------------------
+
+    def test_connect_and_callback_with_package_a_real_session(self):
+        try:
+            session_module = importlib.import_module("src.domain.console.session")
+            csrf_module = importlib.import_module("src.domain.console.csrf")
+        except ImportError:
+            self.skipTest("package A's console session (#151) is not on this branch yet")
+        live = console_oauth.settings
+        with mock.patch.object(session_module, "settings", live), mock.patch.object(csrf_module, "settings", live), \
+                mock.patch.object(console_oauth, "_admin_session", REAL_ADMIN_SESSION):
+            sid, session = session_module.create(org=self.acme.id, person="person-maya", person_name="Maya", team="T1", slack_user="U1", role="owner")
+            self.addCleanup(session_module.destroy, sid)
+            headers = {"X-CSRF-Token": session.csrf, "Origin": PUBLIC, "Cookie": f"{COOKIE}={sid}"}
+            answer = self.client.post("/console/api/connectors/jira/connect", headers=headers)
+            self.assertEqual(answer.status_code, 200, answer.text)
+            self.vendors.codes["jira-code"] = "jira"
+            state = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(answer.json()["authorize_url"]).query))["state"]
+            # Another browser's session cannot finish it; the state is spent by the attempt.
+            other_sid, _ = session_module.create(org=self.acme.id, person="person-maya", person_name="Maya", team="T1", slack_user="U1", role="owner")
+            self.addCleanup(session_module.destroy, other_sid)
+            self.assertEqual(self._callback("jira", cookie=other_sid, code="jira-code", state=state).headers["location"], "/console?error=oauth_state")
+            answer = self.client.post("/console/api/connectors/jira/connect", headers=headers)
+            state = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(answer.json()["authorize_url"]).query))["state"]
+            self.assertEqual(self._callback("jira", cookie=sid, code="jira-code", state=state).headers["location"], "/console?connected=jira")
+            # A's own checks: a member may not connect, and a wrong CSRF token is refused before the route runs.
+            self.assertEqual(self.client.post("/console/api/connectors/jira/connect", headers={**headers, "X-CSRF-Token": "wrong"}).status_code, 403)
+            member_sid, member = session_module.create(org=self.acme.id, person="person-lena", person_name="Lena", team="T1", slack_user="U2", role="member")
+            self.addCleanup(session_module.destroy, member_sid)
+            answer = self.client.post("/console/api/connectors/jira/connect", headers={**headers, "X-CSRF-Token": member.csrf, "Cookie": f"{COOKIE}={member_sid}"})
+            self.assertEqual(answer.status_code, 403)
+        with tenancy.org_context(self.acme.id):
+            self.assertEqual([row.created_by for row in store.list_installs("jira")], ["person-maya"])
 
     # --- refusals -------------------------------------------------------------------------------
 

@@ -40,6 +40,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from src.connectors import http
@@ -287,7 +288,12 @@ def bearer_for(install: Install, spec: OAuthSpec | None = None) -> str:
         try:
             tokens = refresh(spec, refresh_token)
         except OAuthError as error:
-            if error.status in (400, 401, 403):
+            if error.code == "invalid_client" or error.status == 401:
+                # RFC 6749: the token endpoint answers 401 invalid_client for the app's own credentials. That is
+                # the operator's to fix (JIRA_OAUTH_CLIENT_SECRET, ...), and reconnecting would not help.
+                log.error("[oauth] %s refresh refused the app's client credentials (%s)", install.key, error.code)
+                raise ConnectorError(f"{install.source} OAuth app credentials were refused ({error.code}); check {spec.client_id_setting} and {spec.client_secret_setting}") from None
+            if error.status in (400, 403):
                 log.warning("[oauth] %s refresh refused (%s); the install must be reconnected", install.key, error.code)
                 raise CredentialsRejected(f"{install.key}: the authorization was revoked or expired ({error.code}); reconnect it") from None
             raise
@@ -307,6 +313,35 @@ def bearer_for(install: Install, spec: OAuthSpec | None = None) -> str:
             kv().eval(_RELEASE, 1, lock, owner)
         except Exception:
             log.warning("[oauth] %s could not release the refresh lock; it expires in %ds", install.key, LOCK_TTL_SECONDS)
+
+
+# Claiming an external account and creating (or finding) its install, one callback at a time per account.
+ACCOUNT_LOCK_TTL_SECONDS = 60
+ACCOUNT_LOCK_WAIT_SECONDS = 15.0
+
+
+class AccountBusy(ConnectorError):
+    """Another connect of the same vendor account did not finish in time."""
+
+
+@contextmanager
+def account_lock(external_account: str):
+    """Hold ``console:claim:<external_account>`` (``SET NX``) around the claim, the lookup of the org's
+    install of that account and its creation, so two overlapping callbacks for one Jira site or
+    HubSpot portal make one install, not two sharing one claim."""
+    lock, owner = f"console:claim:{external_account}", secrets.token_hex(16)
+    deadline = time.monotonic() + ACCOUNT_LOCK_WAIT_SECONDS
+    while not kv().set(lock, owner, nx=True, ex=ACCOUNT_LOCK_TTL_SECONDS):
+        if time.monotonic() > deadline:
+            raise AccountBusy(f"{external_account}: another connect is in progress")
+        _sleep(LOCK_POLL_SECONDS)
+    try:
+        yield
+    finally:
+        try:
+            kv().eval(_RELEASE, 1, lock, owner)
+        except Exception:
+            log.warning("[oauth] could not release the claim lock of %s; it expires in %ds", external_account, ACCOUNT_LOCK_TTL_SECONDS)
 
 
 def forget(install: Install) -> None:
