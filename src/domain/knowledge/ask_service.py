@@ -15,6 +15,7 @@ functions through the catalogue.
 """
 
 import re
+from dataclasses import dataclass, field
 
 from src.db.falkordb_client import connect
 from src.domain.knowledge import algorithms, bridges, coordination, coverage, fallback, find, kinds, memories, resolve, ticket_status
@@ -488,36 +489,38 @@ def who_knows(question: str, scopes: list[str], context: str | None = None) -> T
 
 def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
     """``who_knows`` for a node already resolved. ``if_person_leaves`` ranks successors with it, so both agree."""
-    result = ToolResult(tool="who_knows", answer="")
-    rows = graph.ro_query(
-        """
-        MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {id: $id})
-        RETURN person.id, person.name, type(rel), node.name
-        ORDER BY person.name, type(rel)
-        """,
-        {"id": target.id},
-    ).result_set
-    for person_id, person, rel, node in rows:
-        result.add(PathStep(person, rel, node, from_id=person_id, to_id=target.id, from_label="Person", to_label=target.label))
-    # Accounts in other tools: who opened a ticket or is assigned it (GitHub, Jira), who owns or
-    # worked on an account but is not linked to a person (HubSpot).
-    account_rows = graph.ro_query(
-        f"""
-        MATCH (account)-[rel:{ACCOUNT_RELS}]->(node {{id: $id}})
-        WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
-        OPTIONAL MATCH (account)-[:IS]->(person:Person)
-        RETURN {_ACCOUNT_ID}, {_ACCOUNT_NAME}, {_ACCOUNT_LABEL}, account.source, type(rel), node.name
-        ORDER BY type(rel)
-        """,
-        {"id": target.id, "accounts": list(ACCOUNT_LABELS), "scopes": scopes},
-    ).result_set
-    for who_id, who, who_label, source, rel, node in account_rows:
-        result.add(PathStep(account_name(who, who_label, source), rel, node, from_id=who_id, to_id=target.id, from_label=who_label, to_label=target.label))
-
     about: list[str] = []
     open_tickets: list[str] = []
     more_open = 0
-    if target.label != "Service":
+    if target.label == "Service":
+        known = knowers_many(graph, [target], scopes)[target.id]
+        result, open_tickets, more_open = known.result, known.open_tickets, known.more_open
+    else:
+        result = ToolResult(tool="who_knows", answer="")
+        rows = graph.ro_query(
+            """
+            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {id: $id})
+            RETURN person.id, person.name, type(rel), node.name
+            ORDER BY person.name, type(rel)
+            """,
+            {"id": target.id},
+        ).result_set
+        for person_id, person, rel, node in rows:
+            result.add(PathStep(person, rel, node, from_id=person_id, to_id=target.id, from_label="Person", to_label=target.label))
+        # Accounts in other tools: who opened a ticket or is assigned it (GitHub, Jira), who owns or
+        # worked on an account but is not linked to a person (HubSpot).
+        account_rows = graph.ro_query(
+            f"""
+            MATCH (account)-[rel:{ACCOUNT_RELS}]->(node {{id: $id}})
+            WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
+            OPTIONAL MATCH (account)-[:IS]->(person:Person)
+            RETURN {_ACCOUNT_ID}, {_ACCOUNT_NAME}, {_ACCOUNT_LABEL}, account.source, type(rel), node.name
+            ORDER BY type(rel)
+            """,
+            {"id": target.id, "accounts": list(ACCOUNT_LABELS), "scopes": scopes},
+        ).result_set
+        for who_id, who, who_label, source, rel, node in account_rows:
+            result.add(PathStep(account_name(who, who_label, source), rel, node, from_id=who_id, to_id=target.id, from_label=who_label, to_label=target.label))
         links = graph.ro_query(
             f"""
             MATCH (node {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
@@ -540,77 +543,6 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
         ).result_set
         for person_id, person, rel, service_id, service in via:
             result.add(PathStep(person, rel, service, from_id=person_id, to_id=service_id, from_label="Person", to_label="Service"))
-    else:
-        # A synced tracker can hold hundreds of tickets about one service: list a few, open ones first.
-        tickets = graph.ro_query(
-            f"""
-            MATCH (ticket:Ticket)-[:ABOUT]->(service:Service {{id: $id}})
-            WHERE {SCOPED.format(var="ticket")}
-            WITH ticket, service
-            ORDER BY {_TICKET_ORDER}
-            LIMIT {MAX_TICKETS}
-            OPTIONAL MATCH (person:Person)-[:WORKED_ON]->(ticket)
-            RETURN ticket.id, ticket.name, service.name, person.id, person.name, coalesce(ticket.state, 'open') <> 'closed'
-            ORDER BY ticket.name
-            """,
-            {"id": target.id, "scopes": scopes},
-        ).result_set
-        for ticket_id, ticket, service, person_id, person, is_open in tickets:
-            result.add(PathStep(ticket, "ABOUT", service, from_id=ticket_id, to_id=target.id, from_label="Ticket", to_label="Service"))
-            if is_open and ticket not in open_tickets:
-                open_tickets.append(ticket)
-            if person:
-                result.add(PathStep(person, "WORKED_ON", ticket, from_id=person_id, to_id=ticket_id, from_label="Person", to_label="Ticket"))
-        if len(open_tickets) == MAX_TICKETS:
-            total = graph.ro_query(
-                f"""
-                MATCH (ticket:Ticket)-[:ABOUT]->(:Service {{id: $id}})
-                WHERE {SCOPED.format(var="ticket")} AND coalesce(ticket.state, 'open') <> 'closed'
-                RETURN count(DISTINCT ticket)
-                """,
-                {"id": target.id, "scopes": scopes},
-            ).result_set
-            more_open = max(0, (total[0][0] if total else 0) - len(open_tickets))
-        # Who a connected tracker (Jira) has those tickets assigned to. GitHub assignees count on the ticket itself only.
-        assigned = graph.ro_query(
-            f"""
-            MATCH (account:ExternalUser)-[rel:ASSIGNED]->(ticket:Ticket)
-            WHERE ticket.id IN $tickets AND {SCOPED.format(var="account")}
-            OPTIONAL MATCH (account)-[:IS]->(person:Person)
-            RETURN {_ACCOUNT_ID}, {_ACCOUNT_NAME}, {_ACCOUNT_LABEL}, account.source, type(rel), ticket.id, ticket.name
-            ORDER BY ticket.name
-            """,
-            {"tickets": [row[0] for row in tickets], "scopes": scopes},
-        ).result_set
-        for who_id, who, who_label, source, rel, ticket_id, ticket in assigned:
-            result.add(PathStep(account_name(who, who_label, source), rel, ticket, from_id=who_id, to_id=ticket_id, from_label=who_label, to_label="Ticket"))
-        # Pull requests that changed this service's code, and who wrote or reviewed them.
-        pull_requests = graph.ro_query(
-            f"""
-            MATCH (gh:GitHubUser)-[rel:AUTHORED|REVIEWED]->(pr:PullRequest)-[:TOUCHES]->(service:Service {{id: $id}})
-            WHERE {SCOPED.format(var="pr")}
-            OPTIONAL MATCH (gh)-[:IS]->(person:Person)
-            RETURN coalesce(person.id, gh.id), coalesce(person.name, '@' + gh.login),
-                   CASE WHEN person IS NULL THEN 'GitHubUser' ELSE 'Person' END, type(rel), pr.id, pr.name, service.name
-            ORDER BY pr.name
-            """,
-            {"id": target.id, "scopes": scopes},
-        ).result_set
-        for who_id, who, who_label, rel, pr_id, pull_request, service in pull_requests:
-            # Person to code to service, top to bottom.
-            result.add(PathStep(who, rel, pull_request, from_id=who_id, to_id=pr_id, from_label=who_label, to_label="PullRequest"))
-            result.add(PathStep(pull_request, "TOUCHES", service, from_id=pr_id, to_id=target.id, from_label="PullRequest", to_label="Service"))
-        documents = graph.ro_query(
-            """
-            MATCH (person:Person)-[:AUTHORED]->(document:Document)-[:DESCRIBES]->(service:Service {id: $id})
-            RETURN person.id, person.name, document.id, document.name, service.name
-            ORDER BY document.name
-            """,
-            {"id": target.id},
-        ).result_set
-        for person_id, person, document_id, document, service in documents:
-            result.add(PathStep(person, "AUTHORED", document, from_id=person_id, to_id=document_id, from_label="Person", to_label="Document"))
-            result.add(PathStep(document, "DESCRIBES", service, from_id=document_id, to_id=target.id, from_label="Document", to_label="Service"))
 
     if not result.path:
         if target.label == "Ticket":
@@ -868,3 +800,164 @@ def _unique(items) -> list[str]:
         if item not in seen:
             seen.append(item)
     return seen
+
+
+@dataclass
+class ServiceKnowers:
+    """``knowers`` for one Service: the path, the open tickets it names, and how many more are open."""
+
+    result: ToolResult
+    open_tickets: list[str] = field(default_factory=list)
+    more_open: int = 0
+
+
+def knowers_many(graph, services: list[Entity], scopes: list[str]) -> dict[str, ServiceKnowers]:
+    """``knowers`` for many Services at once, by id: the same reads, each over every id in one round
+    trip, so ``risk_map`` over N things costs seven queries instead of seven per thing. ``knowers``
+    on one Service runs this too, so the two always agree. Each read finds its ids first and walks
+    from them (``MATCH ... WITH``): started from the other side, the planner scans every node once
+    per id."""
+    known = {service.id: ServiceKnowers(ToolResult(tool="who_knows", answer="")) for service in services}
+    if not known:
+        return known
+    params = {"ids": list(known), "scopes": scopes, "accounts": list(ACCOUNT_LABELS)}
+    rows = graph.ro_query(
+        """
+        UNWIND $ids AS id
+        MATCH (node:Service {id: id})
+        WITH id, node
+        MATCH (node)<-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]-(person:Person)
+        RETURN id, person.id, person.name, type(rel), node.name
+        ORDER BY id, person.name, type(rel)
+        """,
+        params,
+    ).result_set
+    for service_id, person_id, person, rel, node in rows:
+        known[service_id].result.add(PathStep(person, rel, node, from_id=person_id, to_id=service_id, from_label="Person", to_label="Service"))
+    # Accounts in other tools: who opened a ticket or is assigned it (GitHub, Jira), who owns or
+    # worked on an account but is not linked to a person (HubSpot).
+    account_rows = graph.ro_query(
+        f"""
+        UNWIND $ids AS id
+        MATCH (node:Service {{id: id}})
+        WITH id, node
+        MATCH (node)<-[rel:{ACCOUNT_RELS}]-(account)
+        WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
+        OPTIONAL MATCH (account)-[:IS]->(person:Person)
+        RETURN id, {_ACCOUNT_ID}, {_ACCOUNT_NAME}, {_ACCOUNT_LABEL}, account.source, type(rel), node.name
+        ORDER BY id, type(rel)
+        """,
+        params,
+    ).result_set
+    for service_id, who_id, who, who_label, source, rel, node in account_rows:
+        known[service_id].result.add(PathStep(account_name(who, who_label, source), rel, node, from_id=who_id, to_id=service_id, from_label=who_label, to_label="Service"))
+
+    # A synced tracker can hold hundreds of tickets about one service: list a few, open ones first.
+    # Every visible ticket's sort keys come back, and the first MAX_TICKETS per service are picked
+    # here: one query cannot LIMIT per group.
+    tickets: dict[str, dict[str, tuple]] = {}
+    for service_id, ticket_id, ticket, is_open, updated in graph.ro_query(
+        f"""
+        UNWIND $ids AS id
+        MATCH (service:Service {{id: id}})
+        WITH id, service
+        MATCH (service)<-[:ABOUT]-(ticket:Ticket)
+        WHERE {SCOPED.format(var="ticket")}
+        RETURN id, ticket.id, ticket.name, coalesce(ticket.state, 'open') <> 'closed', {_UPDATED}
+        """,
+        params,
+    ).result_set:
+        tickets.setdefault(service_id, {})[ticket_id] = (ticket_id, ticket, is_open, updated)
+    kept = {service_id: _first_tickets(rows.values()) for service_id, rows in tickets.items()}
+    kept_ids = sorted({row[0] for rows in kept.values() for row in rows})
+    worked: dict[str, list[tuple[str, str]]] = {}
+    assigned: dict[str, list[list]] = {}
+    if kept_ids:
+        for ticket_id, person_id, person in graph.ro_query(
+            """
+            UNWIND $tickets AS ticket_id
+            MATCH (ticket:Ticket {id: ticket_id})
+            WITH ticket
+            MATCH (ticket)<-[:WORKED_ON]-(person:Person)
+            RETURN ticket.id, person.id, person.name
+            """,
+            {"tickets": kept_ids},
+        ).result_set:
+            worked.setdefault(ticket_id, []).append((person_id, person))
+        # Who a connected tracker (Jira) has those tickets assigned to. GitHub assignees count on the ticket itself only.
+        for row in graph.ro_query(
+            f"""
+            UNWIND $tickets AS ticket_id
+            MATCH (ticket:Ticket {{id: ticket_id}})
+            WITH ticket
+            MATCH (ticket)<-[rel:ASSIGNED]-(account:ExternalUser)
+            WHERE {SCOPED.format(var="account")}
+            OPTIONAL MATCH (account)-[:IS]->(person:Person)
+            RETURN {_ACCOUNT_ID}, {_ACCOUNT_NAME}, {_ACCOUNT_LABEL}, account.source, type(rel), ticket.id, ticket.name
+            """,
+            {"tickets": kept_ids, "scopes": scopes},
+        ).result_set:
+            assigned.setdefault(row[5], []).append(row)
+    names = {service.id: service.name for service in services}
+    for service_id, rows in kept.items():
+        entry = known[service_id]
+        service = names[service_id]
+        for ticket_id, ticket, is_open, _updated in rows:
+            entry.result.add(PathStep(ticket, "ABOUT", service, from_id=ticket_id, to_id=service_id, from_label="Ticket", to_label="Service"))
+            if is_open and ticket not in entry.open_tickets:
+                entry.open_tickets.append(ticket)
+            for person_id, person in worked.get(ticket_id, []):
+                entry.result.add(PathStep(person, "WORKED_ON", ticket, from_id=person_id, to_id=ticket_id, from_label="Person", to_label="Ticket"))
+        if len(entry.open_tickets) == MAX_TICKETS:
+            entry.more_open = max(0, sum(1 for row in tickets[service_id].values() if row[2]) - len(entry.open_tickets))
+        # rows are in ticket-name order already, as the single-service read ordered them.
+        for ticket_id, *_ in rows:
+            for who_id, who, who_label, source, rel, assigned_id, ticket in assigned.get(ticket_id, []):
+                entry.result.add(PathStep(account_name(who, who_label, source), rel, ticket, from_id=who_id, to_id=assigned_id, from_label=who_label, to_label="Ticket"))
+
+    # Pull requests that changed each service's code, and who wrote or reviewed them.
+    for service_id, who_id, who, who_label, rel, pr_id, pull_request, service in graph.ro_query(
+        f"""
+        UNWIND $ids AS id
+        MATCH (service:Service {{id: id}})
+        WITH id, service
+        MATCH (service)<-[:TOUCHES]-(pr:PullRequest)<-[rel:AUTHORED|REVIEWED]-(gh:GitHubUser)
+        WHERE {SCOPED.format(var="pr")}
+        OPTIONAL MATCH (gh)-[:IS]->(person:Person)
+        RETURN id, coalesce(person.id, gh.id), coalesce(person.name, '@' + gh.login),
+               CASE WHEN person IS NULL THEN 'GitHubUser' ELSE 'Person' END, type(rel), pr.id, pr.name, service.name
+        ORDER BY id, pr.name
+        """,
+        params,
+    ).result_set:
+        # Person to code to service, top to bottom.
+        known[service_id].result.add(PathStep(who, rel, pull_request, from_id=who_id, to_id=pr_id, from_label=who_label, to_label="PullRequest"))
+        known[service_id].result.add(PathStep(pull_request, "TOUCHES", service, from_id=pr_id, to_id=service_id, from_label="PullRequest", to_label="Service"))
+    for service_id, person_id, person, document_id, document, service in graph.ro_query(
+        """
+        UNWIND $ids AS id
+        MATCH (service:Service {id: id})
+        WITH id, service
+        MATCH (service)<-[:DESCRIBES]-(document:Document)<-[:AUTHORED]-(person:Person)
+        RETURN id, person.id, person.name, document.id, document.name, service.name
+        ORDER BY id, document.name
+        """,
+        params,
+    ).result_set:
+        known[service_id].result.add(PathStep(person, "AUTHORED", document, from_id=person_id, to_id=document_id, from_label="Person", to_label="Document"))
+        known[service_id].result.add(PathStep(document, "DESCRIBES", service, from_id=document_id, to_id=service_id, from_label="Document", to_label="Service"))
+    return known
+
+
+def _name_key(name) -> tuple[bool, str]:
+    """Cypher's ``ORDER BY name``: nulls last."""
+    return (name is None, name or "")
+
+
+def _first_tickets(rows) -> list[tuple]:
+    """The MAX_TICKETS tickets ``who_knows`` lists, chosen by ``_TICKET_ORDER`` (open first, then
+    unsynced, then newest, then by name) and returned in name order. Stable sorts, last key first."""
+    ordered = sorted(rows, key=lambda row: _name_key(row[1]))
+    ordered.sort(key=lambda row: row[3], reverse=True)
+    ordered.sort(key=lambda row: (not row[2], row[3] != ""))
+    return sorted(ordered[:MAX_TICKETS], key=lambda row: _name_key(row[1]))
