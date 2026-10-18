@@ -25,6 +25,7 @@ class RouteTest(unittest.TestCase):
             "who actually works together": ("working_groups", {}),
             "what breaks if arjun leaves": ("if_person_leaves", {"name": "what breaks if arjun leaves"}),
             "who should know about notebook#45": ("who_should_know", {"name": "who should know about notebook#45"}),
+            "what should I read before touching the invoice worker": ("reading_list", {"name": "what should I read before touching the invoice worker"}),
             "": ("none", {}),
         }
         for question, expected in cases.items():
@@ -189,6 +190,32 @@ class RouteTest(unittest.TestCase):
             ("what is most at risk if arjun leaves", "if_person_leaves"),
             ("which services are load bearing", "load_bearing"),
             ("what breaks if auth goes down", "blast_radius"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+
+    def test_what_to_read_before_a_change_is_a_reading_list(self):
+        for question in (
+            "what should I read before touching the invoice worker",
+            "reading list for billing",
+            "what should I read to understand auth",
+            "what docs cover the invoice worker",
+            "which docs describe billing",
+            "what should a new engineer read about billing",
+            "docs before touching postgres",
+            "read up on the memory layer",
+            "which documents should I read before changing billing",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("reading_list", {"name": question}))
+        for question, tool in (
+            ("what should I know about billing", "who_knows"),
+            ("what should I know about the payments team", "onboarding_brief"),
+            ("who should review the billing runbook", "who_should_know"),
+            ("who should know if postgres changes", "who_should_know"),
+            ("what does the invoice worker depend on", "blast_radius"),
+            ("what have we said about billing", "related_memories"),
+            ("why did we move the memory layer off postgres", "decision_trace"),
         ):
             with self.subTest(question=question):
                 self.assertEqual(ask_service.route(question)[0], tool)

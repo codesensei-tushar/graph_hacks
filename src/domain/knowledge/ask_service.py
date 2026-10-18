@@ -96,6 +96,15 @@ _TICKET_ID = re.compile(r"\b(?!pr-\d)[a-z]{2,}-\d+\b", re.IGNORECASE)
 _ASK_WHO = re.compile(r"\bwho should (?:i|we) (?:ping|ask|talk to)\b", re.IGNORECASE)
 # People between teams. "how is maya connected to the invoice worker" is a path question.
 _CONNECTORS = re.compile(r"\bwho (?:connects|bridges|links)\b|\b(?:bridges?|connectors?|go-betweens?) between\b", re.IGNORECASE)
+# What to read before a change. "what should I know about billing" stays on who_knows. Public:
+# reading_list strips it from the question before resolving the name.
+READING_LIST = re.compile(
+    r"\b(?:what|which) (?:should|do|must) (?:i|we|you|a new \w+) read\b|\breading list\b|\bread up on\b"
+    r"|\b(?:what|which) (?:docs?|documents?|documentation|runbooks?) (?:cover|covers|describe|describes|explain|explains|exist|are there)\b"
+    r"|\b(?:what|which) (?:docs?|documents?|documentation|runbooks?) (?:should|do|must) (?:i|we|you|a new \w+) read\b"
+    r"|\b(?:docs?|documentation|context) (?:to read )?before (?:i |we )?(?:touch|touching|edit|editing|change|changing|work on|working on)\b",
+    re.IGNORECASE,
+)
 
 
 def route(question: str) -> tuple[str, dict]:
@@ -120,6 +129,8 @@ def route(question: str) -> tuple[str, dict]:
         return "connectors", {"source": text, "target": ""}
     if _PATH.search(text):
         return "path_between", {"source": text, "target": ""}
+    if READING_LIST.search(text):
+        return "reading_list", {"name": text}
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
@@ -450,6 +461,13 @@ def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
     return brief.onboarding_brief(question, scopes)
 
 
+def reading_list(question: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``reading_list.py``, which follows decisions forward (and so imports the catalogue). Kept here for the keyword router."""
+    from src.domain.knowledge import reading_list as reading
+
+    return reading.reading_list(question, scopes)
+
+
 def blast_radius(question: str, scopes: list[str], depth=None) -> ToolResult:
     return algorithms.blast_radius(question, scopes, depth)
 
@@ -467,6 +485,7 @@ _ROUTED = {
     "risk_map": lambda args, scopes: risk_map(scopes),
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
+    "reading_list": lambda args, scopes: reading_list(args["name"], scopes),
     "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth"), args.get("direction")),
     "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),
