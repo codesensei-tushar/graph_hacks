@@ -33,6 +33,13 @@ def _person(question: str, scopes: list[str]) -> ToolResult | None:
     return person_profile.profile_or_none(question, scopes)
 
 
+def _explore(question: str, scopes: list[str]) -> ToolResult | None:
+    # Imported here: explore marks replaced decisions, and decisions registers a catalogue tool.
+    from src.domain.knowledge import explore
+
+    return explore.before_refusing(question, scopes)
+
+
 def _search(question: str, scopes: list[str]) -> ToolResult | None:
     # Imported here: search reads decisions, which registers a catalogue tool.
     from src.domain.knowledge import search
@@ -40,8 +47,8 @@ def _search(question: str, scopes: list[str]) -> ToolResult | None:
     return search.if_topic(question, scopes)
 
 
-# Person first, then explore when it lands (see the module docstring); search last.
-STEPS: tuple[Step, ...] = (_person, _search)
+# Person first, then explore (see the module docstring); search last.
+STEPS: tuple[Step, ...] = (_person, _explore, _search)
 
 
 def before_refusing(question: str, scopes: list[str], miss: ToolResult) -> ToolResult:

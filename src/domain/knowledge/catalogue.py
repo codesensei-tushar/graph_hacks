@@ -5,8 +5,9 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, memories, risk_map
+from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, explore, find, memories, risk_map
 from src.domain.knowledge.dto import ToolResult, ToolSpec
+from src.domain.knowledge.kinds import SERVICE_KINDS
 
 _TOOLS: dict[str, ToolSpec] = {}
 
@@ -125,6 +126,53 @@ def _run_search(args: dict, scopes: list[str]) -> ToolResult:
     from src.domain.knowledge import search
 
     return search.search(args["text"], scopes)
+
+
+def _run_explore(args: dict, scopes: list[str]) -> ToolResult:
+    return explore.explore(args["name"], scopes, args.get("depth"))
+
+
+def _run_neighbors(args: dict, scopes: list[str]) -> ToolResult:
+    return explore.neighbors(args["name"], args.get("relation") or "", scopes, args.get("direction"), args.get("depth"))
+
+
+def _run_find(args: dict, scopes: list[str]) -> ToolResult:
+    return find.find(args.get("label"), {key: value for key, value in args.items() if key != "label"}, scopes)
+
+
+def _find_schema() -> dict:
+    """``label`` and one optional property per filter, so the model sees each label's allowlist."""
+    by_filter: dict[str, list[str]] = {}
+    for label, filters in find.FILTERS.items():
+        for name in filters:
+            by_filter.setdefault(name, []).append(label)
+    words = {
+        "kind": ("What kind of service.", {"enum": list(SERVICE_KINDS)}),
+        "team": ("The team, copied from the question: the services it runs, the tickets, decisions and documents about them, or its members.", {}),
+        "owner": ("The person who owns the services listed.", {}),
+        "state": ("open or closed for tickets; open, closed or merged for pull requests.", {"enum": ["open", "closed", "merged"]}),
+        "about": ("The service the tickets or decisions are about.", {}),
+        "person": ("The person who worked on or is assigned the tickets.", {}),
+        "standing": ("true for the decisions that stand today, false for the ones replaced.", {}),
+        "proposer": ("The person who proposed the decisions.", {}),
+        "approver": ("The person who approved the decisions.", {}),
+        "touches": ("The service the pull requests change.", {}),
+        "author": ("The person who wrote the documents or pull requests.", {}),
+        "reviewer": ("The person who reviewed the pull requests.", {}),
+        "describes": ("The service the documents describe.", {}),
+        "holds": ("The service the people own, worked on or know.", {}),
+    }
+    properties: dict = {
+        "label": {
+            "type": "string",
+            "enum": list(find.LABELS),
+            "description": "What to list. Filters by label: " + "; ".join(f"{label}: {', '.join(filters) or 'none'}" for label, filters in find.FILTERS.items()) + ".",
+        }
+    }
+    for name in find.FILTER_NAMES:
+        text, extra = words[name]
+        properties[name] = {"type": "boolean" if name == "standing" else "string", **extra, "description": f"{text} For {', '.join(by_filter[name])}."}
+    return _schema(properties, ["label"])
 
 
 def _run_ingest_ticket(args: dict, scopes: list[str]) -> ToolResult:
@@ -439,6 +487,66 @@ register(
             ["text"],
         ),
         run=_run_search,
+    )
+)
+register(
+    ToolSpec(
+        name="explore",
+        description=(
+            "Everything the graph links to one thing: a service, person, team, document, ticket, decision or pull "
+            "request (or a node id another tool returned), grouped by relationship (owned by, depends on, described "
+            "by, tickets about it, replaced by), every edge cited; depth 2 adds what lies two hops out, counted. Use "
+            "for a node no specific tool covers, or to see everything around it (\"explore billing\", \"what do we "
+            "know about the sales team\"); for owners use who_owns or who_knows, for outages blast_radius, for a "
+            "person person_profile."
+        ),
+        args_schema=_schema(
+            {
+                "name": {"type": "string", "description": "The thing to explore, copied from the question, or a node id."},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 2, "description": "1 for what it links to directly (the default); 2 adds the next ring."},
+            },
+            ["name"],
+        ),
+        run=_run_explore,
+    )
+)
+register(
+    ToolSpec(
+        name="find",
+        description=(
+            "Lists by filter: open tickets, the tickets or decisions about a service, a team's services, systems or "
+            "processes, the standing decisions, pull requests touching a service, documents describing it, people on "
+            "a team (\"which tickets are open\", \"list the services in payments\", \"what decisions have we "
+            "made\"). Each label takes its own filters; every value is matched to the graph first. For what changed "
+            "recently use what_changed; for one decision's reasons, decision_trace."
+        ),
+        args_schema=_find_schema(),
+        run=_run_find,
+    )
+)
+register(
+    ToolSpec(
+        name="neighbors",
+        description=(
+            "Follow one relationship type, chosen by the caller, from one thing: out along the edge, in against it, or "
+            "both, for 1 to 3 hops, grouped by hop with every edge cited (who a team's people are, what cites a "
+            "document, what a pull request closes). For dependencies prefer blast_radius; for everything around a "
+            "thing, explore."
+        ),
+        args_schema=_schema(
+            {
+                "name": {"type": "string", "description": "The thing to start from, copied from the question, or a node id."},
+                "relation": {"type": "string", "enum": list(explore.RELATIONS), "description": "The relationship type to follow."},
+                "direction": {
+                    "type": "string",
+                    "enum": list(explore.DIRECTIONS),
+                    "description": "'out' follows the edge from the thing (Billing Service DEPENDS_ON out: what it depends on), 'in' against it, 'both' either way (the default).",
+                },
+                "depth": {"type": "integer", "minimum": 1, "maximum": 3, "description": "How many hops to follow (1 by default)."},
+            },
+            ["name", "relation"],
+        ),
+        run=_run_neighbors,
     )
 )
 register(
