@@ -1,0 +1,25 @@
+{
+  "status": "COMPLETE",
+  "results": [
+    {"id": "7001", "properties": {"dealstage": "closedwon", "pipeline": "default", "hubspot_owner_id": "102", "hs_is_closed": "true",
+      "createdate": "2026-01-10T09:00:00.000Z", "closedate": "2026-03-01T09:00:00.000Z", "hs_lastmodifieddate": "2026-03-01T09:05:00.000Z", "hs_object_id": "7001"},
+     "createdAt": "2026-01-10T09:00:00.000Z", "updatedAt": "2026-03-01T09:05:00.000Z", "archived": false},
+    {"id": "7002", "properties": {"dealstage": "contractsent", "pipeline": "default", "hubspot_owner_id": "101", "hs_is_closed": "false",
+      "createdate": "2026-09-01T09:00:00.000Z", "closedate": "2026-11-30T09:00:00.000Z", "hs_lastmodifieddate": "2026-10-15T10:00:00.000Z", "hs_object_id": "7002"},
+     "createdAt": "2026-09-01T09:00:00.000Z", "updatedAt": "2026-10-15T10:00:00.000Z", "archived": false},
+    {"id": "7003", "properties": {"dealstage": "qualifiedtobuy", "pipeline": "default", "hubspot_owner_id": "101", "hs_is_closed": "false",
+      "createdate": "2026-08-01T09:00:00.000Z", "closedate": "", "hs_lastmodifieddate": "2026-10-12T10:00:00.000Z", "hs_object_id": "7003"},
+     "createdAt": "2026-08-01T09:00:00.000Z", "updatedAt": "2026-10-12T10:00:00.000Z", "archived": false},
+    {"id": "7004", "properties": {"dealstage": "closedwon", "pipeline": "default", "hubspot_owner_id": "103", "hs_is_closed": "true",
+      "createdate": "2024-04-01T09:00:00.000Z", "closedate": "2024-06-01T09:00:00.000Z", "hs_lastmodifieddate": "2025-01-01T09:00:00.000Z", "hs_object_id": "7004"},
+     "createdAt": "2024-04-01T09:00:00.000Z", "updatedAt": "2025-01-01T09:00:00.000Z", "archived": false},
+    {"id": "7005", "properties": {"dealstage": "closedlost", "pipeline": "default", "hubspot_owner_id": "105", "hs_is_closed": "true",
+      "createdate": "2026-05-01T09:00:00.000Z", "closedate": "2026-08-15T09:00:00.000Z", "hs_lastmodifieddate": "2026-09-20T10:00:00.000Z", "hs_object_id": "7005"},
+     "createdAt": "2026-05-01T09:00:00.000Z", "updatedAt": "2026-09-20T10:00:00.000Z", "archived": false},
+    {"id": "7006", "properties": {"dealstage": "closedlost", "pipeline": "default", "hubspot_owner_id": "104", "hs_is_closed": "true",
+      "createdate": "2026-03-01T09:00:00.000Z", "closedate": "2026-05-01T09:00:00.000Z", "hs_lastmodifieddate": "2026-08-02T10:00:00.000Z", "hs_object_id": "7006"},
+     "createdAt": "2026-03-01T09:00:00.000Z", "updatedAt": "2026-08-02T10:00:00.000Z", "archived": false}
+  ],
+  "startedAt": "2026-10-18T00:00:00.000Z",
+  "completedAt": "2026-10-18T00:00:00.120Z"
+}
