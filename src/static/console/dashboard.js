@@ -207,7 +207,23 @@
       return render(connections || []);
     }, $("#poll-note"));
     loadSlack();
+    nudgeTeams();
     load();
+  }
+
+  // No team yet: answers cannot say who owns what, so the page says where to fix that.
+  async function nudgeTeams() {
+    try {
+      const data = await C.api("GET", "/console/api/teams");
+      if ((data && data.teams || []).length) return;
+    } catch (error) {
+      return;
+    }
+    if (!C.isAdmin(me)) {
+      $("#teams-nudge-sub").textContent = "An owner or admin of your company can add them on the Teams page.";
+      $("#teams-nudge-go").textContent = "See Teams";
+    }
+    $("#teams-nudge").hidden = false;
   }
 
   start();

@@ -24,6 +24,26 @@ class CommandArgsTest(unittest.TestCase):
         self.assertEqual(args["runs"], ["Renewals (process)", "HubSpot (system, <@UNOOR>)", "Pricing playbook (playbook)"])
         self.assertEqual(args["decisions"], ["annual plans only, decided 2026-09-01", "quarterly price review"])
 
+    def test_aliases_follow_aka_outside_or_inside_the_brackets(self):
+        args = command_args(
+            "Payments | members: <@UPAULA> | owns: Billing Service (service) aka billing, payments, Ledger (system, <@USAM>, aka books), Refunds"
+        )
+        self.assertEqual(args["runs"], ["Billing Service (service) aka billing, payments", "Ledger (system, <@USAM>, aka books)", "Refunds"])
+        args |= {"profiles": {"UPAULA": "Paula Ortiz", "USAM": "Sam Okafor"}}
+        runs = team_data(args, FakeLookup(slack={}))["runs"]
+        self.assertEqual(
+            runs,
+            [
+                {"name": "Billing Service", "kind": "service", "owner": "slack-upaula", "aliases": ["billing", "payments"]},
+                {"name": "Ledger", "kind": "system", "owner": "slack-usam", "aliases": ["books"]},
+                {"name": "Refunds", "kind": None, "owner": "slack-upaula"},
+            ],
+        )
+        no_kind = command_args("Payments | members: <@UPAULA> | owns: Payouts aka payout, disbursements")["runs"]
+        self.assertEqual(no_kind, ["Payouts aka payout, disbursements"])
+        row = team_data({**command_args("Payments | members: <@UPAULA> | owns: Payouts aka payout, disbursements"), "profiles": {"UPAULA": "Paula Ortiz"}}, FakeLookup(slack={}))["runs"][0]
+        self.assertEqual((row["name"], row["aliases"]), ("Payouts", ["payout", "disbursements"]))
+
     def test_what_cannot_be_read_is_refused_with_the_shape_to_use(self):
         for line, expected in (
             ("| members: <@U1>", "say the team's name first"),
