@@ -61,6 +61,12 @@ class Settings:
     github_client_id: str = field(default_factory=lambda: os.getenv("GITHUB_CLIENT_ID", ""))
     github_client_secret: str = field(default_factory=lambda: os.getenv("GITHUB_CLIENT_SECRET", ""))
 
+    # Connectors (docs/CONNECTORS.md): every CONNECTOR_<SOURCE>_<FIELD> variable, secrets included.
+    # src/connectors/registry.py turns them into installs; kept out of repr so they never print.
+    connector_env: dict[str, str] = field(
+        default_factory=lambda: {key: value for key, value in os.environ.items() if key.startswith("CONNECTOR_")}, repr=False
+    )
+
     @property
     def llm_enabled(self) -> bool:
         return bool(self.llm_api_key)
