@@ -140,7 +140,7 @@ class JiraConnectorTest(unittest.TestCase):
 
     def test_a_page_carries_each_user_once_and_every_edge_of_its_items(self):
         page = self.connector.fetch(self.install, self.pay, None)
-        self.assertEqual(sorted(user.name for user in page.users), ["Arjun Mehta", "Automation for Jira", "Maya Ortiz", "Robin Contractor"])
+        self.assertEqual(sorted(user.name for user in page.users), ["Arjun Mehta", "Maya Ortiz", "Robin Contractor"])  # not the app account
         edges = {(edge.rel, edge.from_id, edge.to_id) for edge in page.edges}
         self.assertEqual(len(edges), len(page.edges))
         self.assertIn(("BLOCKS", "jira:default:10103", "jira:default:10102"), edges)

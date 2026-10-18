@@ -141,8 +141,20 @@
     const end = el("div", { class: "tour-controls tour-end", hidden: "" });
     end.append(button("tour-again", "Start again", again), button("tour-next tour-own", "Ask your own", () => stop($("#q"))));
     const fact = el("p", { class: "tour-fact", id: "tour-fact", hidden: "" });
-    card.append(top, el("p", { class: "tour-title", id: "tour-title" }), el("p", { class: "tour-text", id: "tour-text", "aria-live": "polite" }), fact, progress, controls, end);
+    // At phone width the card folds to this one line (step, title, Next, close) over the answer;
+    // a tap on the title opens the whole card. Wider screens never show it.
+    const line = el("div", { class: "tour-line" });
+    const expand = el("button", { type: "button", class: "tour-expand", "aria-expanded": "false", "aria-controls": "tour-text" });
+    expand.addEventListener("click", () => fold(!card.classList.contains("open")));
+    line.append(expand, button("tour-line-next", "Next", next), button("tour-close", "×", stop));
+    line.lastChild.setAttribute("aria-label", "Close the tour");
+    card.append(line, top, el("p", { class: "tour-title", id: "tour-title" }), el("p", { class: "tour-text", id: "tour-text", "aria-live": "polite" }), fact, progress, controls, end);
     document.body.append(spot, card);
+  }
+
+  function fold(open) {
+    card.classList.toggle("open", open);
+    card.querySelector(".tour-expand").setAttribute("aria-expanded", String(open));
   }
 
   function button(name, label, onClick) {
@@ -180,8 +192,13 @@
 
   async function start(from, at = 0) {
     if (tour) return;
+    // An Esc while the steps load (a slow graph) means no tour after all.
+    let cancelled = false;
+    const early = (event) => { if (event.key === "Escape") cancelled = true; };
+    document.addEventListener("keydown", early, true);
     const steps = await stepsOffered();
-    if (!steps.length || tour) return;
+    document.removeEventListener("keydown", early, true);
+    if (!steps.length || tour || cancelled) return;
     tour = { steps, at: -1, playing: !reducedMotion(), timer: null, frame: null, target: null, token: 0, asks: 0, askedAt: new Map(), from };
     mount();
     document.addEventListener("keydown", onKey, true);
@@ -256,6 +273,8 @@
     $("#tour-text").textContent = step.text;
     card.querySelector(".tour-back").disabled = tour.at === 0;
     card.querySelector(".tour-next").textContent = last ? "Finish" : "Next";
+    card.querySelector(".tour-line-next").textContent = last ? "Finish" : "Next";
+    card.querySelector(".tour-expand").textContent = `${tour.at + 1}/${tour.steps.length} · ${step.title}`;
     unmark();
     card.querySelectorAll(".tour-dot").forEach((dot, index) => {
       if (index === tour.at) dot.setAttribute("aria-current", "step");
@@ -369,6 +388,9 @@
     card.querySelector(".tour-fill").style.width = "100%";
     card.querySelector(".tour-controls:not(.tour-end)").hidden = true;
     card.querySelector(".tour-end").hidden = false;
+    card.querySelector(".tour-expand").textContent = "Tour · done";
+    card.querySelector(".tour-line-next").hidden = true;
+    fold(true);
     card.querySelector(".tour-own").focus({ preventScroll: true });
   }
 
@@ -376,6 +398,7 @@
     tour.done = false;
     card.querySelector(".tour-controls:not(.tour-end)").hidden = false;
     card.querySelector(".tour-end").hidden = true;
+    card.querySelector(".tour-line-next").hidden = false;
     card.querySelector(".tour-next").focus({ preventScroll: true });
     go(0);
   }

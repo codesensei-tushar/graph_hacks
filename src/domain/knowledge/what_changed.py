@@ -46,7 +46,7 @@ MAX_HOPS = 3
 MAX_LISTED = 5
 DAY_MS = 86_400_000
 
-_LAST_N_DAYS = re.compile(r"\b(?:last|past) (\d{1,3}) days?\b", re.IGNORECASE)
+_LAST_N_DAYS = re.compile(r"\b(?:last|past) (\d{1,5}) days?\b", re.IGNORECASE)
 _WINDOWS = (
     (re.compile(r"\btoday\b", re.IGNORECASE), 1),
     (re.compile(r"\byesterday\b", re.IGNORECASE), 2),
@@ -129,6 +129,25 @@ class Scope:
 
 
 def what_changed(question: str, scopes: list[str], days=None, only=None, person=None) -> ToolResult:
+    """``_what_changed``, saying so when the window asked for was longer than a year."""
+    result = _what_changed(question, scopes, days, only, person)
+    if _window_capped(question, days):
+        result.answer += " (Capped at a year.)"
+    return result
+
+
+def _window_capped(question: str, days) -> bool:
+    asked = [days] + [match.group(1) for match in [_LAST_N_DAYS.search(question or "")] if match]
+    numbers = []
+    for value in asked:
+        try:
+            numbers.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return any(number > MAX_DAYS for number in numbers)
+
+
+def _what_changed(question: str, scopes: list[str], days=None, only=None, person=None) -> ToolResult:
     """What changed in the window, newest first, around what the question names, or around a person's own things."""
     _, graph = connect()
     text = question or ""

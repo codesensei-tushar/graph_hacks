@@ -11,11 +11,21 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M9.5 17.6 22.5 23.4' stroke='%237d8597' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M9.5 14.4 22.5 8.6' stroke='%232dd4e6' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='6' cy='16' r='4.2' fill='%237c8cff'/%3E%3Crect x='21.5' y='3' width='8.5' height='8.5' rx='2' fill='%23f0703a'/%3E%3Cpath d='M25.8 20.5l4.5 4.5-4.5 4.5-4.5-4.5z' fill='%232ec48c'/%3E%3C/svg%3E">
 <link rel="preload" href="/static/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Company Brain">
+<meta property="og:title" content="Company Brain: ask how your company works">
+<meta property="og:description" content="Ask who owns what, who to ask, why a decision was made, or what breaks if something fails. Every answer shows the connections it used, and it never guesses.">
+<meta property="og:url" content="https://brain.noobsurd.space/">
+<meta property="og:image" content="https://brain.noobsurd.space/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Company Brain: ask how your company works, and every answer shows the path it walked.">
+<meta name="twitter:card" content="summary_large_image">
 <script src="/static/theme.js?v=1"></script>
-<link rel="stylesheet" href="/static/style.css?v=15">
+<link rel="stylesheet" href="/static/style.css?v=18">
 <link rel="stylesheet" href="/static/riskmap.css?v=3">
-<link rel="stylesheet" href="/static/explore.css?v=2">
-<link rel="stylesheet" href="/static/tour.css?v=1">
+<link rel="stylesheet" href="/static/explore.css?v=3">
+<link rel="stylesheet" href="/static/tour.css?v=3">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the content</a>
@@ -34,11 +44,11 @@
 </header>
 
 <main id="main">
-  <!-- 2.1 Hero: the whole first screen. A centred block on the horizon: the promise, the ask box and the example chips. -->
+  <!-- 2.1 Hero: the whole first screen. A centred block on the horizon: the promise, the ask box and two example chips. -->
   <section class="hero" id="ask" aria-labelledby="hero-title">
     <span class="hero-sky" aria-hidden="true"></span>
     <div class="hero-center">
-      <p class="eyebrow">Graph Hacks · Track 03 · Company Brain on FalkorDB</p>
+      <p class="eyebrow">Company Brain on FalkorDB</p>
       <h1 id="hero-title">Ask how your company works. <span class="tone">Every answer shows the <em class="em">path</em> it <em class="em">walked</em>.</span></h1>
       <div class="ask-area">
         <form id="ask-form" class="askbar" role="search" autocomplete="off" action="/" method="get">
@@ -52,43 +62,33 @@
       </div>
     </div>
     <div class="hero-foot">
-      <p class="lede">People, teams, what they run, documents, tickets, decisions and chat live in one FalkorDB graph. A Slack agent answers by walking it, and prints every edge it used.</p>
-      <div class="hero-foot-actions">
-        <button type="button" class="btn btn-ghost tour-start" id="tour-start" hidden>Take the 60-second tour</button>
-        <a class="btn btn-ghost" href="#how">How it works <span aria-hidden="true">↗</span></a>
-      </div>
+      <button type="button" class="btn btn-ghost tour-start" id="tour-start" hidden>Take the 60-second tour</button>
     </div>
   </section>
 
   <div class="wrap">
-    <!-- 2.2 Live proof: the answer to whatever was asked above, with the walk. -->
-    <section class="block" id="live-answer" aria-labelledby="live-title">
-      <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Live</p>
-      <h2 id="live-title">Ask the graph behind this project.</h2>
-      <p class="sub"><span id="graph-line">This page reads the live graph this server runs.</span> Pick a question or write your own. The answer comes back with its path, drawn in the order it was walked.</p>
-      <div class="answer" id="answer">
+    <!-- 2.2 Live: one line naming the graph, the answer to whatever was asked above (hidden until
+         something is), and a live slice of the graph under it. -->
+    <section class="block live-block" id="live-answer" aria-label="The live graph">
+      <div class="graph-line">
+        <span id="graph-line">The live graph</span>
+        <dl class="stats" id="stats" aria-label="Live counts from the graph">
+          <div class="stat sk"><dt data-one="person">people</dt><dd data-stat="Person"></dd></div>
+          <div class="stat sk"><dt data-one="thing">things</dt><dd data-stat="Service"></dd></div>
+          <div class="stat sk"><dt data-one="edge">edges</dt><dd data-stat="edges"></dd></div>
+        </dl>
+      </div>
+      <div class="answer" id="answer" hidden>
         <div class="answer-bar"><span>answer</span><span class="q" id="answer-q"></span></div>
         <div class="answer-body" aria-live="polite">
           <div class="status" id="status"></div>
-          <div id="out">
-            <div class="answer-empty">
-              <p>Ask above, or pick one of the example questions. The walk draws here, edge by edge, with its <code>A -[REL]-&gt; B</code> lines.</p>
-              <noscript><p>This part needs JavaScript.</p></noscript>
-            </div>
-          </div>
+          <div id="out"></div>
         </div>
       </div>
-      <p class="small">Public and read-only: public channels only, no model, answers cached for a minute.</p>
-    </section>
-
-    <!-- 2.2b The graph behind every answer: a live slice of it and the live counts. -->
-    <section class="block" id="graph" aria-labelledby="graph-title">
-      <p class="eyebrow">The graph</p>
-      <h2 id="graph-title">The graph behind every answer.</h2>
-      <figure class="live" id="live">
+      <figure class="live" id="graph">
         <div class="live-bar">
           <span class="dot" aria-hidden="true"></span>
-          <span class="grow" id="live-name">Live sample of the graph</span>
+          <span class="grow" id="live-name">Live sample</span>
           <span class="count" id="live-count"></span>
         </div>
         <div class="live-stage" id="live-stage">
@@ -97,39 +97,171 @@
         </div>
         <figcaption class="live-foot">
           <ul class="legend" id="live-legend" aria-label="Node families"></ul>
-          <p class="ticker" id="live-ticker"></p>
         </figcaption>
       </figure>
-      <dl class="stats" id="stats" aria-label="Live counts from the graph">
-        <div class="stat sk"><dt data-one="person">people</dt><dd data-stat="Person"></dd></div>
-        <div class="stat sk"><dt data-one="thing teams run">things teams run</dt><dd data-stat="Service"></dd></div>
-        <div class="stat sk"><dt data-one="decision">decisions</dt><dd data-stat="Decision"></dd></div>
-        <div class="stat sk"><dt data-one="edge">edges</dt><dd data-stat="edges"></dd></div>
-      </dl>
     </section>
 
   </div>
 
-  <!-- 2.3 Why the graph matters: the ablation, loaded when it scrolls into view. A dark band, entered and left through blurred waves. -->
+  <!-- 2.3 Why the graph matters: the ablation, loaded when it scrolls into view, then how an answer is
+       made. A dark band, entered and left through blurred waves. -->
   <section class="block band-dark" id="proof" aria-labelledby="proof-title">
     <div class="wrap">
       <h2 id="proof-title">Take FalkorDB out, and the answers go with it.</h2>
-      <p class="sub">The same questions run twice: once against FalkorDB, once with every graph read returning nothing.</p>
       <div class="proof-head">
         <p class="proof-line" id="proof-line"><span class="sk-line" aria-hidden="true"></span></p>
         <p class="note" id="proof-refusal"></p>
       </div>
-      <p id="proof-status" class="note">The proof runs when this section comes into view.<noscript> This part needs JavaScript.</noscript></p>
+      <p id="proof-status" class="note" hidden></p>
+      <noscript><p class="note">This part needs JavaScript.</p></noscript>
       <div class="proof-wrap">
         <table class="tools proof" id="proof-table">
-          <thead><tr><th scope="col">Question</th><th scope="col">Tool</th><th scope="col">With the graph</th><th scope="col">Without</th><th scope="col">Result</th></tr></thead>
+          <thead><tr><th scope="col">Question</th><th scope="col">With the graph</th><th scope="col">Without</th></tr></thead>
           <tbody id="proof-body">
-            <tr class="sk-row"><td colspan="5"></td></tr><tr class="sk-row"><td colspan="5"></td></tr><tr class="sk-row"><td colspan="5"></td></tr>
-            <tr class="sk-row"><td colspan="5"></td></tr><tr class="sk-row"><td colspan="5"></td></tr><tr class="sk-row"><td colspan="5"></td></tr>
+            <tr class="sk-row"><td colspan="3"></td></tr><tr class="sk-row"><td colspan="3"></td></tr><tr class="sk-row"><td colspan="3"></td></tr>
+            <tr class="sk-row"><td colspan="3"></td></tr><tr class="sk-row"><td colspan="3"></td></tr><tr class="sk-row"><td colspan="3"></td></tr>
           </tbody>
         </table>
       </div>
-      <p class="note proof-more">Each row runs one of the read-only tools in <a href="#tools">the catalogue</a>, the same ones MCP clients call.</p>
+
+      <!-- How it works. Static: it renders without JavaScript. -->
+      <div class="how" id="how">
+        <h3 class="how-title">How an answer is made.</h3>
+        <figure class="arch" id="arch" data-route="all">
+          <div class="arch-routes" id="arch-routes" role="group" aria-label="Show one way in" hidden>
+            <button type="button" aria-pressed="true" data-route="all">All</button>
+            <button type="button" aria-pressed="false" data-route="slack">Slack</button>
+            <button type="button" aria-pressed="false" data-route="page">This page</button>
+            <button type="button" aria-pressed="false" data-route="mcp">MCP</button>
+          </div>
+          <div class="arch-frame" tabindex="0" aria-label="The architecture diagram; scrolls sideways on a narrow screen">
+            <svg viewBox="0 0 1160 470" role="img" aria-labelledby="arch-title arch-desc">
+              <title id="arch-title">How a question becomes an answer with its path</title>
+              <desc id="arch-desc">Three ways in: Slack, this page and MCP clients. In Slack one model call picks a tool from the catalogue and fills in its arguments, with the keyword router as the fallback; on this page the keyword router picks it; an MCP client names the tool itself. Every tool is hand-written, parameterised Cypher that resolves any name against the graph first and reads only what the asker may read, from one FalkorDB graph. A tool that writes is offered only in Slack and runs only after someone approves a card. The answer goes back the same way with the path it walked, its edges as A -[REL]-> B lines, whether it was found, and the nearest names on a miss.</desc>
+              <defs>
+                <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-head"/></marker>
+                <marker id="arch-arrow-path" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-head-path"/></marker>
+              </defs>
+              <g class="arch-cols">
+                <text x="125" y="34">Ask</text><text x="415" y="34">Pick a tool</text><text x="715" y="34">Run</text><text x="1025" y="34">Read</text>
+              </g>
+              <g class="arch-links">
+                <path data-routes="slack" d="M230 97 H310"/>
+                <path data-routes="page" d="M230 187 H310"/>
+                <path data-routes="mcp" d="M230 277 H310"/>
+                <path data-routes="slack" d="M520 97 C 560 97, 560 150, 600 150"/>
+                <path data-routes="page" d="M520 187 H600"/>
+                <path data-routes="mcp" d="M520 277 C 560 277, 560 224, 600 224"/>
+                <path data-routes="slack page mcp" d="M830 187 H910"/>
+                <path class="dashed" data-routes="slack" d="M415 134 V372 H600"/>
+                <path class="dashed" data-routes="slack" d="M830 372 H870 C 890 372, 890 330, 910 330"/>
+                <text data-routes="slack" x="428" y="364">asks to write</text>
+                <text class="mid" data-routes="slack" x="870" y="318">approved</text>
+                <text data-routes="slack page mcp" x="870" y="178">walk</text>
+              </g>
+              <g class="arch-nodes">
+                <g class="entry" data-routes="slack"><rect x="20" y="60" width="210" height="74" rx="12"/><text class="t" x="36" y="86">Slack</text><text class="s" x="36" y="106">@mention, DM or thread</text></g>
+                <g class="entry" data-routes="page"><rect x="20" y="150" width="210" height="74" rx="12"/><text class="t" x="36" y="176">This page</text><text class="s" x="36" y="196">GET /api/ask</text></g>
+                <g class="entry" data-routes="mcp"><rect x="20" y="240" width="210" height="74" rx="12"/><text class="t" x="36" y="266">MCP clients</text><text class="s" x="36" y="286">/mcp, streamable HTTP</text></g>
+                <g class="pick" data-routes="slack"><rect x="310" y="60" width="210" height="74" rx="12"/><text class="t" x="326" y="86">One model call</text><text class="s" x="326" y="106">picks a tool, fills its arguments</text></g>
+                <g class="pick" data-routes="page"><rect x="310" y="150" width="210" height="74" rx="12"/><text class="t" x="326" y="176">Keyword router</text><text class="s" x="326" y="196">the question's words</text></g>
+                <g class="pick" data-routes="mcp"><rect x="310" y="240" width="210" height="74" rx="12"/><text class="t" x="326" y="266">Named by the caller</text><text class="s" x="326" y="286">tools/call with arguments</text></g>
+                <g class="catalogue" data-routes="slack page mcp"><rect x="600" y="60" width="230" height="254" rx="14"/><text class="t" x="616" y="88">Tool catalogue</text><text class="s" x="616" y="112" id="arch-reads">read-only tools</text><text class="b" x="616" y="148">hand-written,</text><text class="b" x="616" y="168">parameterised Cypher</text></g>
+                <g class="writes" data-routes="slack"><rect x="600" y="338" width="230" height="68" rx="12"/><text class="t" x="616" y="364" id="arch-writes">Write tools</text><text class="s" x="616" y="384">wait for an Approve card</text></g>
+                <g class="graph" data-routes="slack page mcp"><rect x="910" y="60" width="230" height="346" rx="14"/><text class="t" x="926" y="88">FalkorDB</text><text class="s" x="926" y="112">one graph</text><text class="b" x="926" y="148">people and teams</text><text class="b" x="926" y="168">what they run</text><text class="b" x="926" y="188">documents, tickets,</text><text class="b" x="926" y="208">decisions, chat</text></g>
+              </g>
+              <g class="arch-back" data-routes="slack page mcp">
+                <path d="M1025 406 V446 H8 V97 H18" marker-end="url(#arch-arrow-path)"/>
+                <path d="M8 187 H18" marker-end="url(#arch-arrow-path)"/>
+                <path d="M8 277 H18" marker-end="url(#arch-arrow-path)"/>
+                <text x="520" y="438">the answer, with the path it walked: A -[REL]-&gt; B</text>
+              </g>
+            </svg>
+          </div>
+        </figure>
+
+        <ul class="bento">
+          <li class="card">
+            <h3>It never writes Cypher.</h3>
+            <p>A model fills in arguments, never a query.</p>
+            <div class="vis mono">
+              <div><span class="k">tool</span> <span class="t">blast_radius</span></div>
+              <div><span class="k">args</span> { <span class="s">"name"</span>: string, <span class="s">"depth"</span>?: integer }</div>
+              <div><span class="k">runs</span> <span class="dim">one fixed traversal</span></div>
+            </div>
+          </li>
+          <li class="card">
+            <h3>It refuses to guess.</h3>
+            <p>Unknown names get the nearest real ones instead.</p>
+            <div class="vis refusal-vis"><span class="sk-line" id="refusal-wait" aria-hidden="true"></span><button class="chip ask-chip" type="button" id="refusal-ask" hidden></button></div>
+          </li>
+          <li class="card">
+            <h3>Writes wait for a human.</h3>
+            <p>Every write waits for an Approve card.</p>
+            <div class="vis slack-card">
+              <b>Ingest ticket needs approval</b>
+              <p><b>Billing exports time out</b> → Billing Service</p>
+              <span class="buttons" aria-hidden="true"><span class="ok">Approve action</span><span>Deny</span></span>
+            </div>
+          </li>
+          <li class="card">
+            <h3>Decisions stay current.</h3>
+            <p>The new one supersedes the old; both stay, dated.</p>
+            <div class="vis mono edge-vis"><span class="nd knowledge">New</span><span class="rel">-[SUPERSEDES]-&gt;</span><span class="nd knowledge">Old</span></div>
+          </li>
+          <li class="card">
+            <h3>Permissions are a graph query.</h3>
+            <p>Private repos reach only those who can read them.</p>
+            <div class="vis mono edge-vis"><span class="nd other">(:SlackUser)</span><span class="rel">-[:IS]-&gt;</span><span class="nd person">(:Person)</span><span class="rel">&lt;-[:IS]-</span><span class="nd other">(:GitHubUser)</span><span class="rel">-[:CAN_READ]-&gt;</span><span class="nd other">(:Repo)</span></div>
+          </li>
+        </ul>
+
+        <figure class="model">
+          <figcaption><b>The data model.</b> Every label and query: <a href="https://github.com/codesensei-tushar/graph_hacks#graph-data-model">README</a>.</figcaption>
+          <div class="model-frame" tabindex="0" aria-label="The data model diagram; scrolls sideways on a narrow screen">
+            <svg viewBox="0 0 1000 410" role="img" aria-labelledby="dm-title dm-desc">
+              <title id="dm-title">The graph data model</title>
+              <desc id="dm-desc">Slack users and GitHub users are each linked to a Person by IS, and a GitHub user CAN_READ a Repo. A Person is a MEMBER_OF a Team and OWNS, WORKED_ON or KNOWS a Service; a Team RUNS a Service, and a Service DEPENDS_ON other services. A Person PROPOSED or APPROVED a Decision. A Decision and a Ticket are ABOUT a Service, a Document DESCRIBES it, a pull request TOUCHES it and a Memory MENTIONS it. A Decision SUPERSEDES an older one.</desc>
+              <defs><marker id="dm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="dm-head"/></marker></defs>
+              <g class="dm-groups">
+                <rect x="22" y="44" width="156" height="350" rx="14"/><text x="100" y="30">Access</text>
+                <rect x="252" y="44" width="156" height="350" rx="14"/><text x="330" y="30">People and teams</text>
+                <rect x="512" y="44" width="176" height="350" rx="14"/><text x="600" y="30">What teams run</text>
+                <rect x="807" y="44" width="156" height="350" rx="14"/><text x="885" y="30">Knowledge</text>
+              </g>
+              <g class="dm-edges">
+                <path d="M162 120 L268 172"/><text x="214" y="136">IS</text>
+                <path d="M162 230 L268 180"/><text x="214" y="198">IS</text>
+                <path d="M100 247 L100 323"/><text x="108" y="289" text-anchor="start">CAN_READ</text>
+                <path d="M330 192 L330 303"/><text x="338" y="252" text-anchor="start">MEMBER_OF</text>
+                <path d="M392 318 L534 252"/><text x="458" y="302">RUNS</text>
+                <path d="M392 178 L534 236"/><text x="466" y="184"><tspan x="466">OWNS · WORKED_ON</tspan><tspan x="466" dy="12">· KNOWS</tspan></text>
+                <path d="M392 166 C 520 92, 700 84, 823 98"/><text x="609" y="88">PROPOSED · APPROVED</text>
+                <path d="M585 262 C 568 322, 632 322, 615 262"/><text x="600" y="334">DEPENDS_ON</text>
+                <path d="M823 104 L666 236"/><text x="776" y="132">ABOUT</text>
+                <path d="M823 170 L666 240"/><text x="780" y="184">DESCRIBES</text>
+                <path d="M823 240 L666 245"/><text x="780" y="236">ABOUT</text>
+                <path d="M823 310 L666 250"/><text x="780" y="290">TOUCHES</text>
+                <path d="M823 380 L666 255"/><text x="772" y="342">MENTIONS</text>
+                <path d="M874 83 C 860 54, 910 54, 896 83"/><text x="885" y="60">SUPERSEDES</text>
+              </g>
+              <g class="dm-nodes">
+                <g class="other"><rect x="38" y="103" width="124" height="34" rx="8"/><text x="100" y="124">SlackUser</text></g>
+                <g class="other"><rect x="38" y="213" width="124" height="34" rx="8"/><text x="100" y="234">GitHubUser</text></g>
+                <g class="other"><rect x="38" y="323" width="124" height="34" rx="8"/><text x="100" y="344">Repo</text></g>
+                <g class="person"><rect x="268" y="158" width="124" height="34" rx="8"/><text x="330" y="179">Person</text></g>
+                <g class="person"><rect x="268" y="303" width="124" height="34" rx="8"/><text x="330" y="324">Team</text></g>
+                <g class="service"><rect x="534" y="228" width="132" height="34" rx="8"/><text x="600" y="249">Service</text></g>
+                <g class="knowledge"><rect x="823" y="83" width="124" height="34" rx="8"/><text x="885" y="104">Decision</text></g>
+                <g class="knowledge"><rect x="823" y="153" width="124" height="34" rx="8"/><text x="885" y="174">Document</text></g>
+                <g class="knowledge"><rect x="823" y="223" width="124" height="34" rx="8"/><text x="885" y="244">Ticket</text></g>
+                <g class="knowledge"><rect x="823" y="293" width="124" height="34" rx="8"/><text x="885" y="314">PullRequest</text></g>
+                <g class="knowledge"><rect x="823" y="363" width="124" height="34" rx="8"/><text x="885" y="384">Memory</text></g>
+              </g>
+            </svg>
+          </div>
+        </figure>
+      </div>
     </div>
   </section>
 
@@ -138,7 +270,7 @@
     <!-- 2.4 Every team. -->
     <section class="block" id="teams" aria-labelledby="teams-title">
       <h2 id="teams-title">Not only engineering.</h2>
-      <p class="sub">A <code>Service</code> node has a kind: a service, a system, a process, a product, an account, a policy or a playbook. A team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as a billing service, in their own words: a process stalls, a playbook no longer applies.</p>
+      <p class="sub">Processes, accounts and playbooks answer like services: a process stalls, a playbook no longer applies.</p>
       <ul class="team-cards" id="team-cards">
         <li class="sk-card" aria-hidden="true"></li><li class="sk-card" aria-hidden="true"></li><li class="sk-card" aria-hidden="true"></li>
       </ul>
@@ -146,8 +278,7 @@
 
       <div class="team-more">
         <div class="panel onboard">
-          <h3>One file, written for people who do not write code.</h3>
-          <p>Import it and the team is in the graph. The import only merges and deletes nothing, and people Slack already knows are matched by email, never duplicated.</p>
+          <h3>One file per team.</h3>
           <figure class="code">
             <figcaption>from <a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/templates/team.example.toml">docs/templates/team.example.toml</a></figcaption>
 <pre tabindex="0"><code><span class="c-sec">[team]</span>
@@ -164,182 +295,23 @@ name = <span class="c-str">"Ticket triage"</span>
 kind = <span class="c-str">"process"</span>
 owner = <span class="c-str">"Alex Kim"</span></code></pre>
           </figure>
-          <p class="note">The guide: <a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/ONBOARDING-TEAMS.md">docs/ONBOARDING-TEAMS.md</a>.<span id="onboard-slack" hidden> A small team can also onboard from Slack with one line, <code>onboard team: Sales | members: @priya @dev | owns: Renewals (process)</code>, and an Approve card lists everything it will create before anything is written.</span></p>
+          <p class="note onboard-line"><a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/ONBOARDING-TEAMS.md">Guide</a><span id="onboard-slack" hidden> · Slack: <code>onboard team: Sales | members: @priya @dev | owns: Renewals (process)</code></span></p>
         </div>
 
         <div class="panel beat">
           <h3>Ask what rests on one person.</h3>
           <ul class="chips beat-chips" id="beat-chips" aria-label="Bus-factor questions" hidden></ul>
           <blockquote>If Arjun Mehta leaves, 1 thing rests on them alone. Billing Service: Arjun Mehta is its only owner; next in line: Lena Fischer, then Tomas Reyes; 2 others depend on it.</blockquote>
-          <p class="source">The demo company's reply to <em>what if arjun mehta leaves</em>, pinned by <code>tests/integration/test_knowledge_bus_factor.py</code>.</p>
-          <p>Once the Sales team is imported, <em>what if priya shah leaves</em> shows the cross-team case: the next in line for the pricing playbook, Tomas Reyes, is on Platform.</p>
         </div>
       </div>
     </section>
-
-    <!-- 2.5 How it works. Static: it renders without JavaScript. -->
-    <section class="block" id="how" aria-labelledby="how-title">
-      <p class="eyebrow">How it works</p>
-      <h2 id="how-title">How an answer is made.</h2>
-      <p class="sub">Three ways in, one fixed catalogue of tools, one graph. Every answer comes back with the path it walked.</p>
-
-      <figure class="arch" id="arch" data-route="all">
-        <div class="arch-routes" id="arch-routes" role="group" aria-label="Show one way in" hidden>
-          <button type="button" aria-pressed="true" data-route="all">All</button>
-          <button type="button" aria-pressed="false" data-route="slack">Slack</button>
-          <button type="button" aria-pressed="false" data-route="page">This page</button>
-          <button type="button" aria-pressed="false" data-route="mcp">MCP</button>
-        </div>
-        <div class="arch-frame" tabindex="0" aria-label="The architecture diagram; scrolls sideways on a narrow screen">
-          <svg viewBox="0 0 1160 470" role="img" aria-labelledby="arch-title arch-desc">
-            <title id="arch-title">How a question becomes an answer with its path</title>
-            <desc id="arch-desc">Three ways in: Slack, this page and MCP clients. In Slack one model call picks a tool from the catalogue and fills in its arguments, with the keyword router as the fallback; on this page the keyword router picks it; an MCP client names the tool itself. Every tool is hand-written, parameterised Cypher that resolves any name against the graph first and reads only what the asker may read, from one FalkorDB graph. A tool that writes is offered only in Slack and runs only after someone approves a card. The answer goes back the same way with the path it walked, its edges as A -[REL]-> B lines, whether it was found, and the nearest names on a miss.</desc>
-            <defs>
-              <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-head"/></marker>
-              <marker id="arch-arrow-path" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-head-path"/></marker>
-            </defs>
-            <g class="arch-cols">
-              <text x="125" y="34">Ask</text><text x="415" y="34">Pick a tool</text><text x="715" y="34">Run</text><text x="1025" y="34">Read</text>
-            </g>
-            <g class="arch-links">
-              <path data-routes="slack" d="M230 97 H310"/>
-              <path data-routes="page" d="M230 187 H310"/>
-              <path data-routes="mcp" d="M230 277 H310"/>
-              <path data-routes="slack" d="M520 97 C 560 97, 560 150, 600 150"/>
-              <path data-routes="page" d="M520 187 H600"/>
-              <path data-routes="mcp" d="M520 277 C 560 277, 560 224, 600 224"/>
-              <path data-routes="slack page mcp" d="M830 187 H910"/>
-              <path class="dashed" data-routes="slack" d="M415 134 V372 H600"/>
-              <path class="dashed" data-routes="slack" d="M830 372 H870 C 890 372, 890 330, 910 330"/>
-              <text data-routes="slack" x="428" y="364">asks to write</text>
-              <text class="mid" data-routes="slack" x="870" y="318">approved</text>
-              <text data-routes="slack page mcp" x="870" y="178">walk</text>
-            </g>
-            <g class="arch-nodes">
-              <g class="entry" data-routes="slack"><rect x="20" y="60" width="210" height="74" rx="12"/><text class="t" x="36" y="86">Slack</text><text class="s" x="36" y="106">@mention, DM or thread</text><text class="m" x="36" y="124">replies with every edge</text></g>
-              <g class="entry" data-routes="page"><rect x="20" y="150" width="210" height="74" rx="12"/><text class="t" x="36" y="176">This page</text><text class="s" x="36" y="196">GET /api/ask</text><text class="m" x="36" y="214">draws the walk</text></g>
-              <g class="entry" data-routes="mcp"><rect x="20" y="240" width="210" height="74" rx="12"/><text class="t" x="36" y="266">MCP clients</text><text class="s" x="36" y="286">/mcp, streamable HTTP</text><text class="m" x="36" y="304">structured content</text></g>
-              <g class="pick" data-routes="slack"><rect x="310" y="60" width="210" height="74" rx="12"/><text class="t" x="326" y="86">One model call</text><text class="s" x="326" y="106">picks a tool, fills its arguments</text><text class="m" x="326" y="124">keywords if no model</text></g>
-              <g class="pick" data-routes="page"><rect x="310" y="150" width="210" height="74" rx="12"/><text class="t" x="326" y="176">Keyword router</text><text class="s" x="326" y="196">the question's words</text><text class="m" x="326" y="214">public channels only</text></g>
-              <g class="pick" data-routes="mcp"><rect x="310" y="240" width="210" height="74" rx="12"/><text class="t" x="326" y="266">Named by the caller</text><text class="s" x="326" y="286">tools/call with arguments</text><text class="m" x="326" y="304">public channels only</text></g>
-              <g class="catalogue" data-routes="slack page mcp"><rect x="600" y="60" width="230" height="254" rx="14"/><text class="t" x="616" y="88">Tool catalogue</text><text class="s" x="616" y="112" id="arch-reads">read-only tools</text><text class="b" x="616" y="148">hand-written,</text><text class="b" x="616" y="168">parameterised Cypher</text><text class="b" x="616" y="200">resolves any name first:</text><text class="b" x="616" y="220">no match, no guess</text><text class="b" x="616" y="252">filtered to what the</text><text class="b" x="616" y="272">asker may read</text></g>
-              <g class="writes" data-routes="slack"><rect x="600" y="338" width="230" height="68" rx="12"/><text class="t" x="616" y="364" id="arch-writes">Write tools</text><text class="s" x="616" y="384">wait for an Approve card</text><text class="m" x="616" y="400">Slack only, never over MCP</text></g>
-              <g class="graph" data-routes="slack page mcp"><rect x="910" y="60" width="230" height="346" rx="14"/><text class="t" x="926" y="88">FalkorDB</text><text class="s" x="926" y="112">one graph</text><text class="b" x="926" y="148">people and teams</text><text class="b" x="926" y="168">what they run</text><text class="b" x="926" y="188">documents, tickets,</text><text class="b" x="926" y="208">decisions, chat</text><text class="b" x="926" y="240">read-only queries,</text><text class="b" x="926" y="260">filtered by scope</text></g>
-            </g>
-            <g class="arch-back" data-routes="slack page mcp">
-              <path d="M1025 406 V446 H8 V97 H18" marker-end="url(#arch-arrow-path)"/>
-              <path d="M8 187 H18" marker-end="url(#arch-arrow-path)"/>
-              <path d="M8 277 H18" marker-end="url(#arch-arrow-path)"/>
-              <text x="520" y="438">the answer and the path it walked: A -[REL]-&gt; B, found, and the nearest names on a miss</text>
-            </g>
-          </svg>
-        </div>
-        <figcaption>From <code>src/api</code> (Slack events, <code>/api/ask</code>, <code>/mcp</code>) to <code>src/domain/knowledge</code> (the agent, the keyword router, the catalogue) and one FalkorDB graph. The forward links are grey; the way back, with the path, is the walk's colour.</figcaption>
-      </figure>
-      <ol class="flow">
-        <li><span class="n" aria-hidden="true">01</span><b>Resolve.</b><p>Names in the question are matched against the graph first. No match, no guess: it says what it does not know and names the nearest things it does.</p></li>
-        <li><span class="n" aria-hidden="true">02</span><b>Pick a tool.</b><p>A fixed catalogue of hand-written, parameterised Cypher. In Slack a model picks the tool and fills in the arguments; it never writes a query.</p></li>
-        <li><span class="n" aria-hidden="true">03</span><b>Walk.</b><p>The tool walks the graph, filtered to what the asker may read.</p></li>
-        <li><span class="n" aria-hidden="true">04</span><b>Show the path.</b><p>The reply prints every edge it used, <code>A -[REL]-&gt; B</code>. The explanation is the traversal, not a sentence written afterwards.</p></li>
-      </ol>
-
-      <ul class="bento">
-        <li class="card">
-          <h3>It never writes Cypher.</h3>
-          <p>The model only fills in the arguments of a tool someone wrote and reviewed. No model-generated string reaches a query.</p>
-          <div class="vis mono">
-            <div><span class="k">tool</span> <span class="t">blast_radius</span></div>
-            <div><span class="k">args</span> { <span class="s">"name"</span>: string, <span class="s">"depth"</span>?: integer }</div>
-            <div><span class="k">runs</span> <span class="dim">one fixed, parameterised traversal</span></div>
-          </div>
-        </li>
-        <li class="card">
-          <h3>It refuses to guess.</h3>
-          <p>A name the graph does not hold is refused, with the nearest names it does hold.</p>
-          <div class="vis">
-            <p class="mono refusal">Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”).</p>
-            <p class="source">The demo company's reply, pinned by <code>tests/integration/test_knowledge_catalogue.py</code>.</p>
-            <p class="try" id="refusal-try" hidden>Try one here: <button class="link-btn" type="button" id="refusal-ask"></button></p>
-          </div>
-        </li>
-        <li class="card">
-          <h3>Writes wait for a human.</h3>
-          <p>Filing a ticket or recording a decision shows a card that names the target before anything is written.</p>
-          <div class="vis slack-card">
-            <b>Ingest ticket needs approval</b>
-            <span class="dim">Review exact action</span>
-            <p><b>What will happen</b><br>File a ticket titled <b>Billing exports time out</b> in the company graph, linked to <b>Billing Service</b>. Visible to public channels.</p>
-            <span class="buttons" aria-hidden="true"><span class="ok">Approve action</span><span>Deny</span></span>
-            <p class="source">The card's wording, pinned by <code>tests/integration/test_slack_agent_turn.py</code>.</p>
-          </div>
-        </li>
-        <li class="card">
-          <h3>Decisions stay current.</h3>
-          <p>A new decision supersedes the old one; both dates stay, and the answer quotes the message it came from.</p>
-          <div class="vis mono edge-vis"><span class="nd knowledge">New</span><span class="rel">-[SUPERSEDES]-&gt;</span><span class="nd knowledge">Old</span></div>
-        </li>
-        <li class="card">
-          <h3>Permissions are a graph query.</h3>
-          <p>Whether someone sees a private repo's pull requests is a path from their Slack account to the repo.</p>
-          <div class="vis mono edge-vis"><span class="nd other">(:SlackUser)</span><span class="rel">-[:IS]-&gt;</span><span class="nd person">(:Person)</span><span class="rel">&lt;-[:IS]-</span><span class="nd other">(:GitHubUser)</span><span class="rel">-[:CAN_READ]-&gt;</span><span class="nd other">(:Repo)</span></div>
-        </li>
-      </ul>
-
-      <figure class="model">
-        <figcaption><b>The data model.</b> The main labels and edges, in the four families the drawings use. The full model and every query are in the README's <a href="https://github.com/codesensei-tushar/graph_hacks#graph-data-model">Graph data model</a>.</figcaption>
-        <div class="model-frame" tabindex="0" aria-label="The data model diagram; scrolls sideways on a narrow screen">
-          <svg viewBox="0 0 1000 410" role="img" aria-labelledby="dm-title dm-desc">
-            <title id="dm-title">The graph data model</title>
-            <desc id="dm-desc">Slack users and GitHub users are each linked to a Person by IS, and a GitHub user CAN_READ a Repo. A Person is a MEMBER_OF a Team and OWNS, WORKED_ON or KNOWS a Service; a Team RUNS a Service, and a Service DEPENDS_ON other services. A Person PROPOSED or APPROVED a Decision. A Decision and a Ticket are ABOUT a Service, a Document DESCRIBES it, a pull request TOUCHES it and a Memory MENTIONS it. A Decision SUPERSEDES an older one.</desc>
-            <defs><marker id="dm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="dm-head"/></marker></defs>
-            <g class="dm-groups">
-              <rect x="22" y="44" width="156" height="350" rx="14"/><text x="100" y="30">Access</text>
-              <rect x="252" y="44" width="156" height="350" rx="14"/><text x="330" y="30">People and teams</text>
-              <rect x="512" y="44" width="176" height="350" rx="14"/><text x="600" y="30">What teams run</text>
-              <rect x="807" y="44" width="156" height="350" rx="14"/><text x="885" y="30">Knowledge</text>
-            </g>
-            <g class="dm-edges">
-              <path d="M162 120 L268 172"/><text x="214" y="136">IS</text>
-              <path d="M162 230 L268 180"/><text x="214" y="198">IS</text>
-              <path d="M100 247 L100 323"/><text x="108" y="289" text-anchor="start">CAN_READ</text>
-              <path d="M330 192 L330 303"/><text x="338" y="252" text-anchor="start">MEMBER_OF</text>
-              <path d="M392 318 L534 252"/><text x="458" y="302">RUNS</text>
-              <path d="M392 178 L534 236"/><text x="466" y="184"><tspan x="466">OWNS · WORKED_ON</tspan><tspan x="466" dy="12">· KNOWS</tspan></text>
-              <path d="M392 166 C 520 92, 700 84, 823 98"/><text x="609" y="88">PROPOSED · APPROVED</text>
-              <path d="M585 262 C 568 322, 632 322, 615 262"/><text x="600" y="334">DEPENDS_ON</text>
-              <path d="M823 104 L666 236"/><text x="776" y="132">ABOUT</text>
-              <path d="M823 170 L666 240"/><text x="780" y="184">DESCRIBES</text>
-              <path d="M823 240 L666 245"/><text x="780" y="236">ABOUT</text>
-              <path d="M823 310 L666 250"/><text x="780" y="290">TOUCHES</text>
-              <path d="M823 380 L666 255"/><text x="772" y="342">MENTIONS</text>
-              <path d="M874 83 C 860 54, 910 54, 896 83"/><text x="885" y="60">SUPERSEDES</text>
-            </g>
-            <g class="dm-nodes">
-              <g class="other"><rect x="38" y="103" width="124" height="34" rx="8"/><text x="100" y="124">SlackUser</text></g>
-              <g class="other"><rect x="38" y="213" width="124" height="34" rx="8"/><text x="100" y="234">GitHubUser</text></g>
-              <g class="other"><rect x="38" y="323" width="124" height="34" rx="8"/><text x="100" y="344">Repo</text></g>
-              <g class="person"><rect x="268" y="158" width="124" height="34" rx="8"/><text x="330" y="179">Person</text></g>
-              <g class="person"><rect x="268" y="303" width="124" height="34" rx="8"/><text x="330" y="324">Team</text></g>
-              <g class="service"><rect x="534" y="228" width="132" height="34" rx="8"/><text x="600" y="249">Service</text></g>
-              <g class="knowledge"><rect x="823" y="83" width="124" height="34" rx="8"/><text x="885" y="104">Decision</text></g>
-              <g class="knowledge"><rect x="823" y="153" width="124" height="34" rx="8"/><text x="885" y="174">Document</text></g>
-              <g class="knowledge"><rect x="823" y="223" width="124" height="34" rx="8"/><text x="885" y="244">Ticket</text></g>
-              <g class="knowledge"><rect x="823" y="293" width="124" height="34" rx="8"/><text x="885" y="314">PullRequest</text></g>
-              <g class="knowledge"><rect x="823" y="363" width="124" height="34" rx="8"/><text x="885" y="384">Memory</text></g>
-            </g>
-          </svg>
-        </div>
-      </figure>
-    </section>
-
   </div>
 
   <!-- 2.6 For builders: the same tools over MCP. A dark band: a quick start with copy buttons, and the live catalogue. -->
   <section class="block band-dark" id="builders" aria-labelledby="builders-title">
     <div class="wrap">
-      <p class="eyebrow">For builders</p>
       <h2 id="builders-title">The same tools, over MCP.</h2>
-      <p class="sub">Every read-only tool in the catalogue is served at <code>/mcp</code> over streamable HTTP, with the same schemas and the same cited results: the answer, the path, whether it was found, and the nearest names on a miss. Read-only, public scope, no token needed: about 60 calls a minute per address.</p>
+      <p class="sub">Every read-only tool at <code>/mcp</code>, streamable HTTP. No token; about 60 calls a minute.</p>
 
       <div class="quickstart" id="quickstart">
         <div class="qs-tabs" role="tablist" aria-label="Connect" hidden>
@@ -349,15 +321,15 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
           <button type="button" role="tab" id="qs-tab-http" aria-controls="qs-http" aria-selected="false" tabindex="-1">The ask API</button>
         </div>
         <div class="qs-pane" id="qs-claude" role="tabpanel" aria-labelledby="qs-tab-claude">
-          <p class="qs-say">Add it to Claude Code, then ask in plain words; Claude picks the tool.</p>
+          <p class="qs-say">Add it to Claude Code, then ask in plain words.</p>
           <div class="snippet"><pre tabindex="0"><code>claude mcp add --transport http company-brain <span class="origin">https://brain.noobsurd.space</span>/mcp</code></pre><button class="copy" type="button">Copy</button></div>
         </div>
         <div class="qs-pane" id="qs-any" role="tabpanel" aria-labelledby="qs-tab-any">
-          <p class="qs-say">Streamable HTTP, stateless, JSON responses. No token; a token, where one was issued, lifts the limit.</p>
+          <p class="qs-say">Streamable HTTP, stateless, JSON. No token needed.</p>
           <div class="snippet"><pre tabindex="0"><code><span class="origin">https://brain.noobsurd.space</span>/mcp</code></pre><button class="copy" type="button">Copy</button></div>
         </div>
         <div class="qs-pane" id="qs-python" role="tabpanel" aria-labelledby="qs-tab-python">
-          <p class="qs-say">The client from the README: list the tools, call one, print the path it walked.</p>
+          <p class="qs-say">List the tools, call one, print the path.</p>
           <div class="snippet"><pre tabindex="0"><code><span class="c-kw">from</span> mcp.client.session <span class="c-kw">import</span> ClientSession
 <span class="c-kw">from</span> mcp.client.streamable_http <span class="c-kw">import</span> create_mcp_http_client, streamable_http_client
 
@@ -370,29 +342,16 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
             print(result.structured_content[<span class="c-str">"path"</span>])</code></pre><button class="copy" type="button">Copy</button></div>
         </div>
         <div class="qs-pane" id="qs-http" role="tabpanel" aria-labelledby="qs-tab-http">
-          <p class="qs-say">The same answers as plain JSON, the way this page asks: the answer, the tool, the nodes and edges it walked.</p>
+          <p class="qs-say">The same answers as JSON: text, tool, nodes, edges.</p>
           <div class="snippet"><pre tabindex="0"><code>curl -s '<span class="origin">https://brain.noobsurd.space</span>/api/ask?q=who+owns+billing'</code></pre><button class="copy" type="button">Copy</button></div>
         </div>
       </div>
 
       <div class="catalogue-panel" id="tools">
-        <div class="tool-head">
-          <p class="tool-count" id="tool-count"><span class="sk-line short" aria-hidden="true"></span></p>
-          <label class="tool-filter"><span class="sr">Filter the tools</span><input type="search" id="tool-filter" placeholder="Filter: owner, depends, leaves…" autocomplete="off" disabled></label>
-        </div>
-        <ul class="tool-grid" id="tool-list" aria-live="polite">
-          <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
-          <li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li><li class="sk-tool" aria-hidden="true"></li>
-        </ul>
-        <p class="note tool-empty" id="tool-empty" hidden>No tool matches that. Try a word from what it does: owner, depends, leaves, decision.</p>
-        <p class="note tool-writes" id="tool-writes" hidden></p>
+        <p class="tool-line"><span id="tool-count"><span class="sk-line" aria-hidden="true"></span></span>. Full list in the <a href="https://github.com/codesensei-tushar/graph_hacks#the-same-tools-over-mcp">README</a>.</p>
+        <ul class="tool-pills" id="tool-list" aria-label="The read-only tools"></ul>
         <noscript><p class="note">The tool list needs JavaScript.</p></noscript>
       </div>
-
-      <ul class="links">
-        <li><a href="https://github.com/codesensei-tushar/graph_hacks#graph-data-model">The data model and the query list</a><span>in the README</span></li>
-        <li><a href="https://github.com/codesensei-tushar/graph_hacks/blob/main/docs/SETUP.md">Local setup</a><span><code>docker compose up -d</code>, then two commands</span></li>
-      </ul>
     </div>
   </section>
 </main>
@@ -400,18 +359,15 @@ owner = <span class="c-str">"Alex Kim"</span></code></pre>
 <!-- 2.7 Footer. -->
 <footer class="site">
   <div class="wrap">
-    <p>Built for Graph Hacks. Track 03, Company Brain (primary); also Track 01, Agents That Act on Connected Data, and Track 02, Agent Memory and Coordination.</p>
-    <p>AI assistance: parts of this project were written with Claude Code (Anthropic), including the production infrastructure, deploy pipeline and their docs.</p>
-    <p>Synthetic data and this project's own only.</p>
-    <p class="foot-links"><a href="https://github.com/codesensei-tushar/graph_hacks#readme">README</a><a href="/healthz">/healthz</a></p>
+    <p class="foot-links"><span class="foot-name">Company Brain</span><a href="https://github.com/codesensei-tushar/graph_hacks">GitHub</a></p>
   </div>
 </footer>
-<script src="/static/shell.js?v=5"></script>
+<script src="/static/shell.js?v=6"></script>
 <script src="/static/graph.js?v=8"></script>
 <script src="/static/hero.js?v=5"></script>
 <script src="/static/riskmap.js?v=2"></script>
-<script src="/static/answer.js?v=2"></script>
-<script src="/static/app.js?v=15"></script>
-<script src="/static/tour.js?v=1"></script>
+<script src="/static/answer.js?v=4"></script>
+<script src="/static/app.js?v=16"></script>
+<script src="/static/tour.js?v=2"></script>
 </body>
 </html>

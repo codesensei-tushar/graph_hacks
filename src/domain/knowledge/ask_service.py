@@ -176,6 +176,11 @@ _SHOULD_KNOW = re.compile(
 )
 _TICKET_ID = re.compile(r"\b(?!pr-\d)[a-z]{2,}-\d+\b", re.IGNORECASE)
 _TKT_ID = re.compile(r"^TKT-(\d+)$")
+# A ticket key and nothing else, written as a tracker writes it: "PAY-999", "PLAT-7?".
+_BARE_KEY = re.compile(r"^\s*(?!PR-\d)[A-Z][A-Z0-9]{1,9}-\d+\s*[?.!]*\s*$")
+# "what's open in PLAT", "what is open in the PAY project".
+# The project is its key as the tracker writes it (uppercase): "what's open in billing" is not a project.
+_OPEN_IN = re.compile(r"^\s*[Ww]hat(?:'s|s| is) (?:still )?open in (?:the )?(?:[Jj]ira )?(?:project )?([A-Z][A-Z0-9]{1,9})(?: project)?\s*[?.!]*\s*$")
 # Someone to go to: "who should we ping about the auth outage" wants the people who know Auth,
 # not what breaks, so it is routed before blast radius, which shares "outage". Pinging about a
 # pull request ("who should I ping about notebook#45") is about a change.
@@ -262,6 +267,12 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     text = question.strip()
     if not text:
         return "none", {}
+    if tickets and _BARE_KEY.match(text):
+        # "PAY-999" on its own: the ticket, or what is synced of its project.
+        return "ticket_status", {"name": text}
+    if open_in := _OPEN_IN.match(text):
+        # "what's open in PLAT": the open tickets of a synced project.
+        return "find", {"label": "Ticket", "state": "open", "project": open_in.group(1)}
     first, rest = split_compound(text)
     if rest:
         # "who owns billing and what breaks if auth goes down": the first question; the agent answers the second after it.
@@ -339,8 +350,10 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
-    if _RELATED_MEMORIES.search(text):
-        return "related_memories", {"name": text}
+    if (said := _RELATED_MEMORIES.search(text)) is not None:
+        # "what have we said about the refund batch": the thing after the phrase, not "have" or "we".
+        named = text[said.end() :].strip(" ?.!")
+        return "related_memories", {"name": named or text}
     if _RECALL.search(text):
         return "recall", {"query": text}
     about_a_change = _SHOULD_KNOW.search(text) or (_ASK_WHO.search(text) and coordination.pr_reference(text))
@@ -367,22 +380,26 @@ def route(question: str, tickets: bool = True) -> tuple[str, dict]:
 # A second question joined to the first: "..., and what breaks if auth goes down", "...; who knows X",
 # "... also who to contact". One about the first part's thing ("and who owns it") is split and asked
 # about that thing. One about more people ("and who else has worked on it") is the same question.
-_COMPOUND = re.compile(
-    r"^(?P<first>\S+(?:\s+\S+)+?)\s*(?:,?\s+and\s+(?:also\s+)?|;\s*|\?\s+(?:and\s+|also\s+)?|,\s+(?:also\s+)?|\s+also\s+)"
-    r"(?P<rest>(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should)\b.+)$",
-    re.IGNORECASE,
-)
+_QUESTION_WORD = r"(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should)\b"
+_SEPARATOR = re.compile(r"\s*(?:,?\s+and\s+(?:also\s+)?|;\s*|\?\s+(?:and\s+|also\s+)?|,\s+(?:also\s+)?|\s+also\s+)" rf"(?={_QUESTION_WORD}.)", re.IGNORECASE)
 _QUESTION_START = re.compile(r"^\s*(?:what|who|whom|why|how|which|when|where|is|are|does|do|can|should|list|show|tell|explain|explore)\b", re.IGNORECASE)
 _REFERS_BACK = re.compile(r"\b(?:they|them|their|those|these|else|there|he|she|him|her)\b", re.IGNORECASE)
 
 
 def split_compound(question: str) -> tuple[str, str | None]:
-    """The first question and the one joined after it, or the question and None."""
-    match = _COMPOUND.match((question or "").strip())
-    if match is None or _REFERS_BACK.search(match.group("rest")) or not _QUESTION_START.match(match.group("first")):
+    """The first question and the one joined after it, or the question and None.
+
+    The earliest join that leaves a question on each side wins, so "what breaks if auth goes down,
+    who owns it and who should know" splits at the comma and its rest splits again."""
+    text = (question or "").strip()
+    if not _QUESTION_START.match(text):
         # "billing is failing, what changed" is one question with its context first.
         return question, None
-    return match.group("first").strip().rstrip(",;?"), match.group("rest").strip()
+    for join in _SEPARATOR.finditer(text):
+        first, rest = text[: join.start()].strip(), text[join.end() :].strip()
+        if len(first.split()) >= 2 and not _REFERS_BACK.search(rest):
+            return first.rstrip(",;?"), rest
+    return question, None
 
 
 def ask(question: str, scopes: list[str]) -> ToolResult:
@@ -433,6 +450,8 @@ def ingest_ticket(title: str, about: str, scope: str) -> TicketCreated:
 
 def who_owns(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
+    if (project := _project_named(graph, question, scopes)) is not None:
+        return project
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found:
         return fallback.before_refusing(question, scopes, _miss("who_owns", resolution))
@@ -443,7 +462,7 @@ def who_owns(question: str, scopes: list[str]) -> ToolResult:
     if target.label != "Service":
         rows = graph.ro_query(
             f"""
-            MATCH (node {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
             WHERE {SCOPED.format(var="service")}
             RETURN service.id, service.name, type(rel), service.kind
             LIMIT 1
@@ -518,6 +537,8 @@ def who_knows(question: str, scopes: list[str], context: str | None = None) -> T
     """``context``, when given, is the whole question ``question`` was cut from ("I am new on payments,
     who should I talk to about X"): resolved instead when the cut names nothing."""
     _, graph = connect()
+    if (project := _project_named(graph, question, scopes)) is not None:
+        return project
     resolution = resolve.resolve_name(question, ANSWER_LABELS, scopes, graph=graph)
     if not resolution.found and context and (whole := resolve.resolve_name(context, ANSWER_LABELS, scopes, graph=graph)).found:
         question, resolution = context, whole
@@ -542,7 +563,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
         result = ToolResult(tool="who_knows", answer="")
         rows = graph.ro_query(
             f"""
-            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (person:Person)-[rel:OWNS|WORKED_ON|AUTHORED|KNOWS]->(node)
             WHERE {SCOPED.format(var="person")}
             RETURN person.id, person.name, type(rel), node.name
             ORDER BY person.name, type(rel)
@@ -555,7 +578,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
         # worked on an account but is not linked to a person (HubSpot).
         account_rows = graph.ro_query(
             f"""
-            MATCH (account)-[rel:{ACCOUNT_RELS}]->(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (account)-[rel:{ACCOUNT_RELS}]->(node)
             WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
             OPTIONAL MATCH (account)-[:IS]->(person:Person)
             RETURN {_ACCOUNT_ID}, {_ACCOUNT_NAME}, {_ACCOUNT_LABEL}, account.source, type(rel), node.name
@@ -567,7 +592,7 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
             result.add(PathStep(account_name(who, who_label, source), rel, node, from_id=who_id, to_id=target.id, from_label=who_label, to_label=target.label))
         links = graph.ro_query(
             f"""
-            MATCH (node {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})-[rel:ABOUT|DESCRIBES]->(service:Service)
             WHERE {SCOPED.format(var="service")}
             RETURN node.name, type(rel), service.id, service.name
             """,
@@ -578,7 +603,9 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
             result.add(PathStep(source, rel, service, from_id=target.id, to_id=service_id, from_label=target.label, to_label="Service"))
         via = graph.ro_query(
             f"""
-            MATCH (person:Person)-[rel:OWNS|WORKED_ON|KNOWS]->(service:Service)<-[:DESCRIBES|ABOUT]-(node {{id: $id}})
+            MATCH (node:{resolve.label_of(target)} {{id: $id}})
+            WITH node
+            MATCH (person:Person)-[rel:OWNS|WORKED_ON|KNOWS]->(service:Service)<-[:DESCRIBES|ABOUT]-(node)
             WHERE {SCOPED.format(var="service")}
             RETURN person.id, person.name, type(rel), service.id, service.name
             ORDER BY person.name
@@ -833,6 +860,13 @@ def _search(text: str, scopes: list[str]) -> ToolResult:
     from src.domain.knowledge import search
 
     return search.search(text, scopes)
+
+
+def _project_named(graph, question: str, scopes: list[str]) -> ToolResult | None:
+    """A synced project named in full ("what is Quillfern Payments"): what it holds, before a word of its
+    name that is another thing's alias ("payments") is taken for the question's subject. None otherwise."""
+    project = coverage.resolve_container(graph, question, scopes, by="name")
+    return _explore().explore_node(graph, project, scopes, 1) if project is not None else None
 
 
 def _miss(tool: str, resolution: Resolution, kind: str = "service, document, or ticket") -> ToolResult:

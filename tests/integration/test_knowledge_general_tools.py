@@ -274,7 +274,7 @@ class GeneralToolsTest(unittest.TestCase):
         self.assertFalse(ask_api.answer_question("what decisions have we made about postgres").found)
 
     def test_the_explore_step_sits_between_person_and_search(self):
-        self.assertEqual(fallback.STEPS, (fallback._person, fallback._explore, fallback._search))
+        self.assertEqual(fallback.STEPS, (fallback._person, fallback._explore, fallback._search, fallback._recall))
         self.assertEqual(fallback._explore("who owns the platform team", ORG).tool, "explore")
 
     # --- surfaces ----------------------------------------------------------------------

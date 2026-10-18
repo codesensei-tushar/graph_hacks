@@ -40,17 +40,20 @@ def containers(graph, scopes: list[str]) -> list[tuple[str, str, str, str]]:
     return [tuple(row) for row in rows]
 
 
-def resolve_container(graph, text: str, scopes: list[str]) -> Entity | None:
-    """The one readable container the text names by its key ("PLAT", any case) or its name ("Payments project")."""
+def resolve_container(graph, text: str, scopes: list[str], by: str = "any") -> Entity | None:
+    """The one readable container the text names by its key ("PLAT", any case) or its full name
+    ("Quillfern Payments"). ``by`` is "key", "name" or "any"."""
     found = containers(graph, scopes)
-    words = set(resolve.tokens(text))
-    by_key = [row for row in found if row[2] and row[2].lower() in words]
-    if len(by_key) == 1:
-        return _entity(by_key[0])
-    rows = [resolve.EntityRow(id=row[0], name=row[1], label="Container") for row in found]
-    resolution = resolve.resolve_rows(text, rows, ("Container",))
-    if resolution.found:
-        return _entity(next(row for row in found if row[0] == resolution.entity.id))
+    if by in ("key", "any"):
+        words = set(resolve.tokens(text))
+        by_key = [row for row in found if row[2] and row[2].lower() in words]
+        if len(by_key) == 1:
+            return _entity(by_key[0])
+    if by in ("name", "any"):
+        rows = [resolve.EntityRow(id=row[0], name=row[1], label="Container") for row in found]
+        resolution = resolve.resolve_rows(text, rows, ("Container",), partial=False)
+        if resolution.found:
+            return _entity(next(row for row in found if row[0] == resolution.entity.id))
     return None
 
 
@@ -79,13 +82,18 @@ def capped_note(graph, scopes: list[str], node_ids: list[str]) -> str:
     ids = [node_id for node_id in dict.fromkeys(node_ids) if node_id]
     if not ids:
         return ""
+    # From the rare side: nothing is read when no container is capped.
     rows = graph.ro_query(
         f"""
-        MATCH (n)-[:IN_CONTAINER]->(c:Container)
-        WHERE n.id IN $ids AND {SCOPED.format(var="c")}
-        WITH DISTINCT c
-        MATCH (state:ConnectorState {{id: c.id}})
+        MATCH (state:ConnectorState)
         WHERE state.capped = true
+        WITH state
+        MATCH (c:Container {{id: state.id}})
+        WHERE {SCOPED.format(var="c")}
+        WITH c
+        MATCH (n)-[:IN_CONTAINER]->(c)
+        WHERE n.id IN $ids
+        WITH DISTINCT c
         RETURN coalesce(c.external_id, c.name, c.id), coalesce(c.source, '')
         ORDER BY coalesce(c.external_id, c.name, c.id)
         """,

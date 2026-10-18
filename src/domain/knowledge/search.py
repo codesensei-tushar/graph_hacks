@@ -212,11 +212,11 @@ def _said(graph, query: str, scopes: list[str]) -> list[Hit]:
 
 
 def _about(graph, label: str, node_id: str, scopes: list[str]) -> list[tuple[str, str, str]]:
-    rel = _ABOUT[label]
+    rel = _ABOUT[label]  # label is one of _ABOUT's keys, so safe in the query text
     rows = graph.ro_query(
         f"""
-        MATCH (hit {{id: $id}})-[edge]->(service:Service)
-        WHERE $label IN labels(hit) AND type(edge) = $rel AND {SCOPED.format(var="service")}
+        MATCH (hit:{label} {{id: $id}})-[edge]->(service:Service)
+        WHERE type(edge) = $rel AND {SCOPED.format(var="service")}
         RETURN DISTINCT service.id, service.name
         ORDER BY service.name
         """,
@@ -231,14 +231,20 @@ def _people(graph, label: str, node_id: str, scopes: list[str]) -> list[tuple[st
     # Imported here: ask_service reaches this module through the refusal fallback.
     from src.domain.knowledge.ask_service import ACCOUNT_LABELS, account_name
 
+    if label not in _ABOUT:
+        raise ValueError(f"not a searched label: {label!r}")
+    # Each part starts from the hit, by its label's id index.
     rows = graph.ro_query(
         f"""
-        MATCH (person:Person)-[rel:AUTHORED|WORKED_ON|PROPOSED|APPROVED]->(hit {{id: $id}})
-        WHERE $label IN labels(hit)
+        MATCH (hit:{label} {{id: $id}})
+        WITH hit
+        MATCH (person:Person)-[rel:AUTHORED|WORKED_ON|PROPOSED|APPROVED]->(hit)
         RETURN person.id AS id, person.name AS name, 'Person' AS label, type(rel) AS rel, null AS source
         UNION
-        MATCH (account)-[rel:AUTHORED|REVIEWED|OPENED|ASSIGNED]->(hit {{id: $id}})
-        WHERE $label IN labels(hit) AND labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
+        MATCH (hit:{label} {{id: $id}})
+        WITH hit
+        MATCH (account)-[rel:AUTHORED|REVIEWED|OPENED|ASSIGNED]->(hit)
+        WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")}
         OPTIONAL MATCH (account)-[:IS]->(person:Person)
         RETURN coalesce(person.id, account.id) AS id,
                coalesce(person.name, CASE WHEN labels(account)[0] = 'GitHubUser' THEN '@' + account.login ELSE account.name END) AS name,

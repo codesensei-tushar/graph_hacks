@@ -66,34 +66,48 @@ _VISIBLE = SCOPED + " AND NOT coalesce({var}.is_forgotten, false)"
 _WANTED = "NOT type(r) IN $hidden AND ($rel IS NULL OR type(r) = $rel)"
 _DIRECTED = "($dir = 'both' OR ($dir = 'out' AND startNode(r) = {var}) OR ($dir = 'in' AND endNode(r) = {var}))"
 
-# One hop out of the nodes in $ids. Each returns: the node walked from, the edge type,
-# whether the edge points away from it, and the node reached (label, id, name, kind).
+# One hop out of the nodes in $nodes (internal ids, ascending: ``_node_ids``), each found by id
+# seek. Each returns: the node walked from, the edge type, whether the edge points away from it,
+# and the node reached (label, id, name, kind).
 _DIRECT = f"""
+UNWIND $nodes AS node
+MATCH (n) WHERE ID(n) = node
+WITH n
 MATCH (n)-[r]-(m)
-WHERE n.id IN $ids AND labels(m)[0] IN $shown AND {_WANTED} AND {_DIRECTED.format(var="n")} AND {_VISIBLE.format(var="m")}
+WHERE labels(m)[0] IN $shown AND {_WANTED} AND {_DIRECTED.format(var="n")} AND {_VISIBLE.format(var="m")}
 RETURN n.id, type(r), startNode(r) = n, labels(m)[0], m.id, coalesce(m.name, m.id), m.kind
 """
 # The node reached is an account: show the person it belongs to, or the account when it has none.
 _THROUGH_ACCOUNT = f"""
+UNWIND $nodes AS node
+MATCH (n) WHERE ID(n) = node
+WITH n
 MATCH (n)-[r]-(a)
-WHERE n.id IN $ids AND labels(a)[0] IN $accounts AND {_WANTED} AND {_DIRECTED.format(var="n")} AND {SCOPED.format(var="a")}
+WHERE labels(a)[0] IN $accounts AND {_WANTED} AND {_DIRECTED.format(var="n")} AND {SCOPED.format(var="a")}
 OPTIONAL MATCH (a)-[:IS]->(p:Person)
 RETURN n.id, type(r), startNode(r) = n, CASE WHEN p IS NULL THEN labels(a)[0] ELSE 'Person' END,
        coalesce(p.id, a.id), coalesce(p.name, '@' + a.login, a.name, a.id), CASE WHEN p IS NULL THEN a.source END
 """
 # The node walked from is a person: what their accounts did is theirs.
 _OWN_ACCOUNTS = f"""
-MATCH (n:Person)<-[:IS]-(a)-[r]-(m)
-WHERE n.id IN $ids AND labels(a)[0] IN $accounts AND labels(m)[0] IN $shown AND {_WANTED} AND {_DIRECTED.format(var="a")}
+UNWIND $nodes AS node
+MATCH (n:Person) WHERE ID(n) = node
+WITH n
+MATCH (n)<-[:IS]-(a)-[r]-(m)
+WHERE labels(a)[0] IN $accounts AND labels(m)[0] IN $shown AND {_WANTED} AND {_DIRECTED.format(var="a")}
   AND {SCOPED.format(var="a")} AND {_VISIBLE.format(var="m")}
 RETURN n.id, type(r), startNode(r) = a, labels(m)[0], m.id, coalesce(m.name, m.id), m.kind
 """
-_BY_ID = f"""
-MATCH (n {{id: $id}})
-WHERE labels(n)[0] IN $labels AND n.name IS NOT NULL AND {SCOPED.format(var="n")}
-RETURN n.id, n.name, labels(n)[0], n.kind
+# A node by its id, in any explorable label: one id-index seek per label.
+_BY_ID = " UNION ALL ".join(
+    f"""
+MATCH (n:{label} {{id: $id}})
+WHERE labels(n)[0] = '{label}' AND n.name IS NOT NULL AND {SCOPED.format(var="n")}
+RETURN ID(n) AS node, n.id AS id, n.name AS name, '{label}' AS label, n.kind AS kind
 """
-_DETAILS = "MATCH (n {id: $id}) RETURN coalesce(n.title, ''), n.state, n.merged, n.decided_at"
+    for label in (*resolve.DEFAULT_LABELS, "PullRequest")
+)
+_DETAILS = "MATCH (n:{label} {{id: $id}}) RETURN coalesce(n.title, ''), n.state, n.merged, n.decided_at"
 _MEMORIES = f"""
 MATCH (m:Memory)
 WHERE m.id IN $ids AND {_VISIBLE.format(var="m")}
@@ -172,10 +186,24 @@ class Link:
         return Entity(self.id, self.name, self.label, self.kind)
 
 
-def links(graph, ids: list[str], scopes: list[str], rel: str | None = None, direction: str = BOTH) -> list[Link]:
-    """Every edge one hop out of ``ids`` that the asker may read, accounts shown as their person."""
+def _node_ids(graph, nodes) -> list[int]:
+    """The internal ids of ``nodes`` (anything with ``label`` and ``id``), ascending: each found by its
+    label's id index, never by scanning every node, and walked in the order a scan would meet them."""
+    by_label: dict[str, list[str]] = {}
+    for node in nodes:
+        by_label.setdefault(resolve.label_of(node), []).append(node.id)
+    params = {f"ids{index}": ids for index, ids in enumerate(by_label.values())}
+    parts = [f"UNWIND $ids{index} AS id MATCH (n:{label} {{id: id}}) RETURN ID(n) AS node" for index, label in enumerate(by_label)]
+    if not parts:
+        return []
+    return sorted({row[0] for row in graph.ro_query(" UNION ALL ".join(parts), params).result_set})
+
+
+def links(graph, nodes, scopes: list[str], rel: str | None = None, direction: str = BOTH) -> list[Link]:
+    """Every edge one hop out of ``nodes`` (each with ``label`` and ``id``) that the asker may read,
+    accounts shown as their person."""
     params = {
-        "ids": list(ids), "scopes": list(scopes), "shown": list(SHOWN), "accounts": list(ACCOUNTS),
+        "nodes": _node_ids(graph, nodes), "scopes": list(scopes), "shown": list(SHOWN), "accounts": list(ACCOUNTS),
         "hidden": list(HIDDEN_RELS), "rel": rel, "dir": direction,
     }
     found: list[Link] = []
@@ -196,9 +224,9 @@ def resolve_node(graph, text: str, scopes: list[str]) -> Resolution:
     """The node ``text`` names: an id as given (search returns ids), a team before "team", else any explorable name."""
     text = (text or "").strip()
     if text:
-        rows = graph.ro_query(_BY_ID, {"id": text, "labels": list(EXPLORABLE), "scopes": list(scopes)}).result_set
+        rows = sorted(graph.ro_query(_BY_ID, {"id": text, "scopes": list(scopes)}).result_set)
         if rows:
-            node_id, name, label, kind = rows[0]
+            _node, node_id, name, label, kind = rows[0]
             return Resolution(query=text, entity=Entity(node_id, name, label, kinds.kind_or_default(kind) if label == "Service" else None))
     if _TEAM_WORD.search(text):
         team = resolve.resolve_name(text, ("Team",), scopes, graph=graph)
@@ -206,12 +234,15 @@ def resolve_node(graph, text: str, scopes: list[str]) -> Resolution:
             return team
     from src.domain.knowledge import coverage  # coverage reads the connectors' cap; imported when needed
 
+    # A synced project by its full name ("what is Quillfern Payments") before a word of it that is
+    # another thing's alias ("payments"); by its key ("explore PLAT") before part of another name.
+    named = coverage.resolve_container(graph, text, scopes, by="name")
+    if named is not None:
+        return Resolution(query=text, entity=named)
     exact = resolve.resolve_name(text, EXPLORABLE, scopes, graph=graph, partial=False)
     if exact.found:
         return exact
-    # A synced project by its key or name ("explore PLAT"): what it holds, before part of another name
-    # ("plat" is the start of Platform) is taken for it.
-    project = coverage.resolve_container(graph, text, scopes)
+    project = coverage.resolve_container(graph, text, scopes, by="key")
     if project is not None:
         return Resolution(query=text, entity=project)
     return resolve.resolve_name(text, EXPLORABLE, scopes, graph=graph)
@@ -340,7 +371,7 @@ def before_refusing(question: str, scopes: list[str]) -> ToolResult | None:
 
 def explore_node(graph, target: Entity, scopes: list[str], depth=None, candidates=()) -> ToolResult:
     wanted = _clamp(depth, MAX_EXPLORE_DEPTH)
-    ring_one = links(graph, [target.id], scopes)
+    ring_one = links(graph, [target], scopes)
     nodes: dict[str, Entity] = {target.id: target}
     for link in ring_one:
         nodes.setdefault(link.id, link.node)
@@ -392,7 +423,7 @@ def _intro(graph, target: Entity, scopes: list[str]) -> str:
     """A sentence before the groups, for things with a title or a date. Empty for the rest."""
     if target.label not in ("Decision", "Ticket", "PullRequest"):
         return ""
-    rows = graph.ro_query(_DETAILS, {"id": target.id}).result_set
+    rows = graph.ro_query(_DETAILS.format(label=resolve.label_of(target)), {"id": target.id}).result_set
     title, state, merged, decided_at = rows[0] if rows else ("", None, None, None)
     if target.label == "Decision":
         from src.domain.knowledge import decisions
@@ -408,7 +439,11 @@ def _intro(graph, target: Entity, scopes: list[str]) -> str:
 
 def _second_ring(graph, nodes: dict[str, Entity], ring_one: list[Link], scopes: list[str], result: ToolResult) -> str:
     """Two hops out: what the first ring links to, counted by label, a few edges cited."""
-    through = list(dict.fromkeys(link.id for link in ring_one if link.label in EXPLORABLE))
+    through: dict[str, Link] = {}
+    for link in ring_one:
+        if link.label in EXPLORABLE:
+            through.setdefault(link.id, link)
+    through = list(through.values())
     if not through:
         return "Nothing more two hops out."
     first_reach: dict[str, Link] = {}
@@ -453,7 +488,7 @@ def neighbors(question: str, relation: str, scopes: list[str], direction: str | 
     by_hop: list[list[Link]] = []
     for _hop in range(hops):
         reached: dict[str, list[Link]] = {}
-        for link in links(graph, frontier, scopes, rel, way):
+        for link in links(graph, [nodes[node_id] for node_id in frontier], scopes, rel, way):
             if link.id not in nodes:
                 reached.setdefault(link.id, []).append(link)
         if not reached:
