@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, memories, risk_map, topics
+from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, memories, risk_map
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 
 _TOOLS: dict[str, ToolSpec] = {}
@@ -106,8 +106,11 @@ def _run_recall(args: dict, scopes: list[str]) -> ToolResult:
     return memories.recall(args["query"], scopes, args.get("k", memories.DEFAULT_K))
 
 
-def _run_topic_experts(args: dict, scopes: list[str]) -> ToolResult:
-    return topics.topic_experts(args["topic"], scopes)
+def _run_search(args: dict, scopes: list[str]) -> ToolResult:
+    # Imported here: search reads decisions, which imports this catalogue.
+    from src.domain.knowledge import search
+
+    return search.search(args["text"], scopes)
 
 
 def _run_ingest_ticket(args: dict, scopes: list[str]) -> ToolResult:
@@ -368,18 +371,20 @@ register(
 )
 register(
     ToolSpec(
-        name="topic_experts",
+        name="search",
         description=(
-            "Who knows about a topic that is not a named service, document, or ticket (\"who knows about refunds\", "
-            "\"who can help with webhooks\"): full-text search over the documents, tickets, pull requests, decisions, "
-            "and chat memories the asker can read, then the people who wrote, worked on, reviewed, proposed, or said each, "
-            "ranked by those edges, with the thing each is about. For a named service, document, or ticket, use who_knows."
+            "Search what people wrote and said for words that name no service, document, ticket, person or team "
+            "(\"who knows about refunds\", \"search for webhooks\", \"anything about PDF layout\"): full-text over the "
+            "documents, tickets, pull requests, decisions, and chat memories the asker can read, then the people who wrote, "
+            "worked on, reviewed, proposed, approved, or said each hit, ranked by those edges, with the thing each is about. "
+            "Prefer who_knows for a named service, document, or ticket, explore for a named node's neighbourhood, and "
+            "recall for chat memories alone."
         ),
         args_schema=_schema(
-            {"topic": {"type": "string", "description": "The topic words, copied from the question (refunds, PDF layout, webhooks)."}},
-            ["topic"],
+            {"text": {"type": "string", "description": "The words to search for, copied from the question (refunds, PDF layout, webhooks)."}},
+            ["text"],
         ),
-        run=_run_topic_experts,
+        run=_run_search,
     )
 )
 register(

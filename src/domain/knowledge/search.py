@@ -1,14 +1,16 @@
-"""Who knows about a topic, not a named thing: ``topic_experts``.
+"""``search``: words in what people wrote or said, and the people behind each hit.
 
-The resolver answers for things the graph names. "who knows about refunds" names nothing,
-so ``who_knows`` used to refuse it. Full-text indexes over what people wrote (documents,
-tickets, pull requests, decisions) and said (memories) find where the topic comes up; the
-edges from each hit to the people who wrote, worked on, reviewed, proposed or said it rank
-who to ask, and each hit's ``DESCRIBES``, ``ABOUT``, ``TOUCHES`` or ``MENTIONS`` edge names
-the thing it is about. Every answer cites those edges.
+The general text tool of the family (``explore``, ``find``, ``neighbors``, ``search``). The
+resolver answers for things the graph names; "who knows about refunds" or "search for
+webhooks" names nothing. Full-text indexes over documents, tickets, pull requests, decisions
+and memories find where every word comes up together; the edges from each hit to the people
+who wrote, worked on, reviewed, proposed, approved or said it rank who to ask, and each hit's
+``DESCRIBES``, ``ABOUT``, ``TOUCHES`` or ``MENTIONS`` edge names the thing it is about. Every
+answer cites those edges.
 
-Names and aliases of owned things are not indexed: they stay with the resolver, so "who
-knows the payments gateway" is still a refusal. The words searched are the question's,
+It also runs before a tool refuses (``fallback.before_refusing``), when the question asks about
+a topic. Names and aliases of owned things are not indexed: they stay with the resolver, so
+"who knows the payments gateway" is still a refusal. The words searched are the question's,
 passed as ``$q`` and matched all together (a full-text AND), never spliced into a query.
 """
 
@@ -23,7 +25,7 @@ from src.domain.knowledge.resolve import SCOPED, join_names
 
 log = logging.getLogger(__name__)
 
-TOOL = "topic_experts"
+TOOL = "search"
 
 # One full-text index per label, over the fields people write in. Memory.text has its own,
 # created by memory_service.ensure_indexes.
@@ -56,25 +58,21 @@ _VERBS = {
 }
 
 # Asking about a topic, not a thing: "who knows about refunds", "who can help with webhooks",
-# "who is the expert on session tokens". ``who_knows`` checks this before it refuses.
+# "who is the expert on session tokens". The refusal fallback searches only when this matches.
 TOPIC_QUESTION = re.compile(
     r"\babout\b|\bhelp(?:s|ing)?(?: me| us)? with\b|\bexperts? (?:on|in|at)\b|\bexpertise (?:on|in)\b|\bfamiliar with\b",
     re.IGNORECASE,
 )
 # Resolver question words that can be the topic itself ("join tables", "moving off postgres",
 # "the refund policy"): kept in the search.
-_KEPT = frozenset(
-    {
-        "join", "joined", "move", "moved", "off", "new", "policy", "policies", "rules", "ticket", "service", "services",
-        "break", "breaks", "down", "path", "depth", "bus", "factor", "company", "onboarding", "brief", "speed",
-    }
-)
+_KEPT = frozenset({"join", "joined", "move", "moved", "off", "policy", "policies", "rules"})
 # Words around a topic, on top of the resolver's question words.
 _TOPIC_WORDS = frozenset(
     {
         "knowledge", "knowledgeable", "help", "helps", "helping", "us", "expert", "experts", "expertise", "ask",
         "talk", "could", "someone", "somebody", "person", "people", "best", "most", "topic", "go", "familiar",
         "understands", "understand", "there", "be", "any", "anything", "something", "stuff", "things", "thing",
+        "search", "lookup", "everything", "mention", "mentions", "mentioning", "decide", "decided",
     }
 )
 
@@ -112,21 +110,17 @@ def full_text_query(terms: list[str]) -> str:
     return " ".join(terms)
 
 
-def topic_if_asked(question: str, scopes: list[str], miss: ToolResult) -> ToolResult:
-    """What ``who_knows`` returns instead of refusing, when the question asks about a topic and the topic comes up."""
+def if_topic(question: str, scopes: list[str]) -> ToolResult | None:
+    """The refusal fallback's step: an answer when the question asks about a topic that comes up, else None."""
     if not TOPIC_QUESTION.search(question):
-        return miss
-    try:
-        found = topic_experts(question, scopes)
-    except Exception:
-        log.exception("[topics] topic search failed; keeping the refusal")
-        return miss
-    return found if found.found else miss
+        return None
+    found = search(question, scopes)
+    return found if found.found else None
 
 
-def topic_experts(question: str, scopes: list[str]) -> ToolResult:
-    """Where the topic comes up in what the asker can read, and who to ask about it."""
-    terms = topic_terms(question)
+def search(text: str, scopes: list[str]) -> ToolResult:
+    """Where the words come up in what the asker can read, and who to ask about them."""
+    terms = topic_terms(text)
     if not terms:
         return ToolResult(tool=TOOL, answer="Name a topic to look for, such as refunds or webhooks.", found=False)
     topic = " ".join(terms)
@@ -163,7 +157,7 @@ def _written(graph, label: str, query: str, scopes: list[str]) -> list[Hit]:
         ).result_set
     except Exception as error:
         # No index yet (a graph seeded before this feature, before the next start): no hits, no crash.
-        log.warning("[topics] full-text search on %s failed: %s", label, error)
+        log.warning("[search] full-text search on %s failed: %s", label, error)
         return []
     hits = []
     for node_id, name, score in rows:
@@ -193,7 +187,7 @@ def _said(graph, query: str, scopes: list[str]) -> list[Hit]:
             {"q": query, "scopes": scopes, "limit": MAX_HITS},
         ).result_set
     except Exception as error:
-        log.warning("[topics] full-text search on memories failed: %s", error)
+        log.warning("[search] full-text search on memories failed: %s", error)
         return []
     hits = []
     for memory_id, name, text, scope, channel_id, created_at, ts, score, person_id, speaker, speaker_label in rows:
@@ -307,7 +301,37 @@ def _answer(graph, topic: str, hits: list[Hit], scopes: list[str]) -> ToolResult
         else:
             parts.append("Nobody in the graph is linked to those yet.")
     result.answer = " ".join(parts)
+    result.grid = hits_grid(topic, hits, asked)
     return result
+
+
+def hits_grid(topic: str, hits: list[Hit], asked: dict[str, "_Asked"]) -> dict:
+    """Every hit as data, for an MCP client or a page to chain from: each row carries the node id,
+    so a caller can explore or walk its neighbours next. Scores are the index's own, per label."""
+    return {
+        "kind": "search",
+        "topic": topic,
+        "columns": [
+            {"key": "label", "label": "Kind", "type": "text"},
+            {"key": "name", "label": "Where it comes up", "type": "text"},
+            {"key": "about", "label": "About", "type": "list"},
+            {"key": "people", "label": "People on it", "type": "list"},
+        ],
+        "rows": [
+            {
+                "id": hit.id,
+                "label": hit.label,
+                "name": hit.name,
+                "score": round(hit.score, 4),
+                "about": [{"id": service_id, "name": service} for service_id, service, _ in hit.about],
+                "people": [{"id": who_id, "name": who, "rel": rel} for who_id, who, _, rel in hit.people],
+                "replaced_by": hit.replaced_by,
+                "learned_at": hit.memory.learned_at if hit.memory is not None else None,
+            }
+            for hit in hits
+        ],
+        "ranked": [{"name": person.name, "score": person.score} for person in sorted(asked.values(), key=lambda person: (-person.score, person.name))],
+    }
 
 
 def _reasons(person: _Asked) -> str:
@@ -344,19 +368,19 @@ def _owners(graph, service_ids: list[str], scopes: list[str], result: ToolResult
 # --- indexes -----------------------------------------------------------------------------
 
 
-def ensure_topic_indexes(graph=None) -> list[str]:
-    """Create the full-text indexes ``topic_experts`` reads. Run on every start and after a seed.
+def ensure_search_indexes(graph=None) -> list[str]:
+    """Create the full-text indexes ``search`` reads. Run on every start and after a seed.
 
     Idempotent: an index that already covers its fields is left alone, so a second run
     creates nothing. Failure-safe: a failure is logged and the rest carry on; the tool then
-    finds nothing for that label and ``who_knows`` keeps its refusal. Returns what it created.
+    finds nothing for that label and the asking tool keeps its refusal. Returns what it created.
     """
     if graph is None:
         _, graph = connect()
     try:
         present = indexed_fields(graph)
     except Exception:
-        log.exception("[topics] could not list indexes; topic search may miss until the next start")
+        log.exception("[search] could not list indexes; search may miss until the next start")
         return []
     created = []
     for label, fields in INDEXED.items():
@@ -371,9 +395,9 @@ def ensure_topic_indexes(graph=None) -> list[str]:
                 created.append(f"{label}.{name}")
             except Exception as error:
                 if "already indexed" not in str(error).lower():
-                    log.warning("[topics] full-text index on %s.%s not created: %s", label, name, error)
+                    log.warning("[search] full-text index on %s.%s not created: %s", label, name, error)
     if created:
-        log.info("[topics] full-text indexes created: %s", "; ".join(created))
+        log.info("[search] full-text indexes created: %s", "; ".join(created))
     return created
 
 

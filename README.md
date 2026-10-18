@@ -173,7 +173,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 **Decisions stay current.** A decision recorded from Slack (`decision: <title>`, or the agent's `record_decision` tool, both behind an Approve card that names what the write will replace) gets `decided_at` and the room's `scope`, `SUPERSEDES` the standing decision it replaces, is `DECIDED_IN` the channel, and is `BASED_ON` the documents, tickets or pull requests it names. Nothing is deleted: asking about a superseded decision answers "*old* is no longer current" and then the current one, with both dates. Vector recall was left out on purpose for the hackathon; recall follows `MENTIONS` edges instead (see `related_memories` below).
 
-**Indexes** (`ensure_indexes` in `src/domain/memory/memory_service.py`): range indexes on `Memory.scope`, `Memory.id`, `Memory.custom_id`, `Tag.id`, `Tag.container`, `Scope.id`, `SlackUser.id`, `Channel.id`; a full-text index on `Memory.text`. `ensure_topic_indexes` in `src/domain/knowledge/topics.py` adds full-text indexes on `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)` and `Decision(name, summary)` for `topic_experts`.
+**Indexes** (`ensure_indexes` in `src/domain/memory/memory_service.py`): range indexes on `Memory.scope`, `Memory.id`, `Memory.custom_id`, `Tag.id`, `Tag.container`, `Scope.id`, `SlackUser.id`, `Channel.id`; a full-text index on `Memory.text`. `ensure_search_indexes` in `src/domain/knowledge/search.py` adds full-text indexes on `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)` and `Decision(name, summary)` for `search`.
 
 **Short-lived state** lives as Redis keys in the same FalkorDB instance, so the app talks to one process: the scheduler's sorted set `brain:schedule`, approvals `brain:approval:*`, running turns `brain:thread-turn:*`, bot threads `brain:bot-thread:*`, the per-channel event ring `brain:slack-event:*`, channel-observe batches `brain:observe:*`, and the dedupe keys `slack:evt:*` and `github:delivery:*`.
 
@@ -194,7 +194,7 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `load_bearing` | Which services the company leans on most, by PageRank, with dependent counts | no |
 | `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
 | `recall` | Memories whose text matches the question, dated, no path | no |
-| `topic_experts` | Who knows about a topic that is not a named thing ("who knows about refunds"): full-text over documents, tickets, pull requests, decisions and chat, then the people on each hit ranked by their edges | no |
+| `search` | Words that name no node ("who knows about refunds", "search for webhooks"): full-text over documents, tickets, pull requests, decisions and chat, then the people on each hit ranked by their edges. Also the last step before any refusal | no |
 | `working_groups` | Who clusters together from shared work, by label propagation, and where that splits from the org chart | no |
 | `if_person_leaves` | What rests on one person alone if they leave, ranked by what depends on it, and who is next in line for each | no |
 | `risk_map` | Where risk concentrates across the company: every owned thing ranked by what depends on it times its gaps (one person, no document, owner on another team), with PageRank shown beside it, plus the full ranking as a table | no |
@@ -421,7 +421,9 @@ RETURN d.id, d.name, coalesce(d.kind, 'service'), length(path),
        [n IN nodes(path) | n.id], [n IN nodes(path) | n.name]
 ```
 
-**topic_experts** (who knows about a topic, not a named thing). "who knows about refunds" names no service, document or ticket, so `who_knows` used to refuse it. Before refusing, `who_knows` now checks whether the question asks about a topic ("about", "help with", "expert on"); if so, full-text indexes over `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)`, `Decision(name, summary)` and `Memory.text` find where every word of the topic comes up together, filtered by the asker's scopes. The people on each hit rank who to ask: wrote it or proposed it 3, worked on, reviewed, approved or is assigned 2, opened it or said it in chat 1. Each hit's `DESCRIBES`, `ABOUT`, `TOUCHES` or `MENTIONS` edge names what it is about, a replaced decision says what replaced it, and chat messages come back dated. When nothing comes up, the refusal is the one `who_knows` always gave, so "who knows the payments gateway" is still refused: names and aliases of owned things are not indexed, they stay with the resolver. The model and MCP can call it directly with the topic words.
+**search** (words that name no node: "who knows about refunds", "search for webhooks", "anything about PDF layout"). Full-text indexes over `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)`, `Decision(name, summary)` and `Memory.text` find where every word comes up together, filtered by the asker's scopes. The people on each hit rank who to ask: wrote it or proposed it 3, worked on, reviewed, approved or is assigned 2, opened it or said it in chat 1. Each hit's `DESCRIBES`, `ABOUT`, `TOUCHES` or `MENTIONS` edge names what it is about, a replaced decision says what replaced it, and chat messages come back dated. Names and aliases of owned things are not indexed; they stay with the resolver.
+
+**Before any refusal** (`fallback.before_refusing`). `who_knows`, `who_owns`, `onboarding_brief`, `decision_trace` (unless the question asks why) and `blast_radius` each refuse when the question does not name the kind of thing they take. Instead of refusing straight away they hand the refusal to one ordered list of steps, and the first that answers wins: a person the question names (`person_profile`), then any other node a name resolves to (`explore`), then `search` when the question asks about a topic ("about", "help with", "expert on") and the words come up. Nothing found returns the refusal word for word, so "who knows the payments gateway" is still refused with the nearest names.
 
 ```cypher
 CALL db.idx.fulltext.queryNodes($label, $q) YIELD node, score
@@ -439,7 +441,7 @@ RETURN coalesce(person.id, gh.id) AS id, coalesce(person.name, '@' + gh.login) A
        CASE WHEN person IS NULL THEN 'GitHubUser' ELSE 'Person' END AS label, type(rel) AS rel
 ```
 
-The indexes are created by `ensure_topic_indexes` on every start and after every seed, one field per call (`CALL db.idx.fulltext.createNodeIndex($label, $field)`). It reads `db.indexes()` first and creates only what is missing, so a second start is a no-op. A failure is logged and never stops the app; until the next start the topic search finds nothing for that label and `who_knows` keeps its refusal.
+The indexes are created by `ensure_search_indexes` on every start and after every seed, one field per call (`CALL db.idx.fulltext.createNodeIndex($label, $field)`). It reads `db.indexes()` first and creates only what is missing, so a second start is a no-op. A failure is logged and never stops the app; until the next start the search finds nothing for that label and the asking tool keeps its refusal.
 
 **decision_pressure** (is this decision still the last word). The standing decision, followed through `SUPERSEDES`, then the tickets and pull requests on the same service that it does not cite. "Why did we" stays on `decision_trace`.
 

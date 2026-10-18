@@ -194,11 +194,11 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
     if ensure_indexes is not None:
         ensure_indexes()
     try:
-        from src.domain.knowledge.topics import ensure_topic_indexes
+        from src.domain.knowledge.search import ensure_search_indexes
     except ImportError:
-        ensure_topic_indexes = None
-    if ensure_topic_indexes is not None:
-        ensure_topic_indexes(real_graph)
+        ensure_search_indexes = None
+    if ensure_search_indexes is not None:
+        ensure_search_indexes(real_graph)
 
     report.nodes = int(real_graph.query("MATCH (n) RETURN count(n)").result_set[0][0])
     return report
