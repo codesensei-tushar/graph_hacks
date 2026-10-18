@@ -24,6 +24,7 @@ after the request's context is gone, so each is handed its org (``tenancy.in_org
 
 import json
 import logging
+import time
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, BackgroundTasks, Request
@@ -133,6 +134,15 @@ def _workspace_user_event(body: dict) -> tuple[str, str, str, dict] | None:
     return body.get("team_id") or "", body.get("event_id") or "", event["type"], event["user"]
 
 
+def _heard_from(team_id) -> None:
+    """When this team's last signed event arrived: the console shows it (``GET /console/api/slack``)."""
+    if isinstance(team_id, str) and team_id:
+        try:
+            kv().set(f"slack:last_event:{team_id}", int(time.time()), ex=30 * 24 * 60 * 60)
+        except Exception:
+            log.warning("[slack] last-event stamp failed team=%s", team_id)
+
+
 @router.post("/events")
 async def slack_events(request: Request, background: BackgroundTasks):
     raw_body = await request.body()
@@ -152,6 +162,7 @@ async def slack_events(request: Request, background: BackgroundTasks):
     if not verify_slack_signature(raw_body, headers, settings.slack_signing_secret):
         return JSONResponse({"error": "invalid signature"}, status_code=401)
 
+    _heard_from(body.get("team_id"))
     # team_join / user_change first: their nested user object fails the generic schema.
     workspace_user = _workspace_user_event(body)
     if workspace_user:

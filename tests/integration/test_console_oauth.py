@@ -269,6 +269,13 @@ class ConsoleOAuthTest(unittest.TestCase):
         self.assertGreater(self._sync(self.acme.id, install), 0)
         self.assertGreater(self._count(self.acme.id, "MATCH (t:Ticket {source: 'jira'}) RETURN count(t)"), 0)
         self.assertEqual(self._count(self.acme.id, "MATCH (t:Ticket {source: 'jira'}) WHERE NOT t.url STARTS WITH 'https://quillfern.atlassian.net/browse/' RETURN count(t)"), 0)
+        # Each project's issue count comes with the listing (project/search?expand=insight), for the console.
+        with tenancy.org_context(self.acme.id):
+            facts = connector_graph.container_facts(install)
+        counts = sorted(project["insight"]["totalIssueCount"] for project in self.vendors.jira.projects(["PAY", "PLAT"]))
+        self.assertTrue(counts and counts[-1] > 0)
+        self.assertEqual(sorted(fact["available"] for fact in facts.values()), counts)
+        self.assertTrue(all(fact["readers"] is None for fact in facts.values()))  # company-wide projects
         jira_paths = {path for method, path in self.vendors.calls if "/rest/api/3/" in path}
         self.assertTrue(jira_paths and all(path.startswith(f"/ex/jira/{CLOUD_ID}/") for path in jira_paths))
         # Nothing reached the legacy graph.

@@ -38,7 +38,14 @@ def container(install: Install, project: dict, base_url: str) -> Container:
         external_id=str(project["id"]),
         url=f"{base_url}/browse/{project['key']}",
         kind="project",
+        available=issue_count(project),
     )
+
+
+def issue_count(project: dict) -> int | None:
+    """The project's issue count from ``project/search?expand=insight`` (``insight.totalIssueCount``), or None."""
+    value = (project.get("insight") or {}).get("totalIssueCount")
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
 def user(install: Install, raw: dict | None, people: dict[str, str] | None = None) -> ExternalUser | None:
