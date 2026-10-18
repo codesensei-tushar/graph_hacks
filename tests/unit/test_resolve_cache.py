@@ -197,6 +197,21 @@ class LoadRowsCacheTest(unittest.TestCase):
         resolve.resolve_name("who owns the claude api", scopes=["org_shared"], graph=self.graph)
         self.assertEqual(len(self.graph.queries), 1)
 
+    def test_after_a_write_only_changed_rows_are_tokenised_and_keys_stay_exact(self):
+        first = resolve.load_rows(self.graph, resolve.DEFAULT_LABELS, ["org_shared"]).keys()
+        renamed = EntityRow("billing-service", "Billing Service", "Service", aliases="billing,payments,ledger", kind="service")
+        self.graph.nodes = [(node, scope, renamed if row.id == "billing-service" else row) for node, scope, row in self.graph.nodes]
+        falkordb_client.bump_generation("g_rows")
+        calls = []
+        real = resolve._row_keys
+        with mock.patch.object(resolve, "_row_keys", side_effect=lambda row: calls.append(row.id) or real(row)):
+            rows = resolve.load_rows(self.graph, resolve.DEFAULT_LABELS, ["org_shared"])
+            second = rows.keys()
+        self.assertEqual(calls, ["billing-service"])  # only the changed row
+        self.assertEqual(second, resolve._build_keys(list(rows)))  # the same keys as built from scratch
+        self.assertNotEqual(first, second)
+        self.assertEqual(resolve.resolve_rows("who owns the ledger", rows).entity.id, "billing-service")
+
 
 if __name__ == "__main__":
     unittest.main()
