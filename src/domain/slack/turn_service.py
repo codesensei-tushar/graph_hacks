@@ -29,6 +29,7 @@ import logging
 import uuid
 
 from src.domain.access import approvals
+from src.domain.knowledge import tool_guard
 from src.domain.memory import memory_service
 from src.domain.memory.read_scope import resolve_brain_read_container_tags
 from src.domain.memory.writeback import (
@@ -585,7 +586,10 @@ def _run_slack_turn_inner(
         outcome = None
         for _ in range(3):
             request.live_updates += [update.instruction for update in turn_inbox.consume_pending_turn_updates(control)]
-            outcome = compute_turn(request)
+            # A graph query past FalkorDB's timeout is a question too broad for the graph, not a fault:
+            # guard logs it in one line and raises ToolTimedOut, answered below with its sentence.
+            with tool_guard.guard("slack", effective_question):
+                outcome = compute_turn(request)
             if outcome.status == "suspended":
                 break
             finalization = turn_control.claim_thread_turn_finalization_if_inbox_empty(control)
@@ -597,6 +601,11 @@ def _run_slack_turn_inner(
         reply = outcome.reply
         memory = None if passive_investigation else outcome.memory
         after_reply = outcome.after_reply
+    except tool_guard.ToolTimedOut as timed_out:
+        if not turn_control.is_thread_turn_current(control):
+            return
+        # An answer, not a failure: the asker gets the sentence, and a passive investigation stays quiet.
+        reply = "" if passive_investigation else str(timed_out)
     except Exception:
         log.exception("[company-brain] turn failed channel=%s ts=%s", channel, ev.ts)
         if not turn_control.is_thread_turn_current(control):

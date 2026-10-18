@@ -4,6 +4,10 @@
     (:WorkspaceRoute {team_id, created_at})-[:OF]->(:Org)       a Slack workspace's org
     (:ExternalAccount {key, created_at})-[:OF]->(:Org)          'jira:<cloudId>', 'hubspot:<hubId>'; one org each
 
+A new org's graph starts with its Company node, ``(:Company {id: <slug>, name: <org name>})``,
+which every team it onboards is PART_OF (``ensure_company``; orgs made before that get it at
+startup). The legacy org's Company is the seeded one (``SEED_COMPANY``).
+
 Each org's own data lives in its graph (``org_<ulid>``); the legacy org (Quillfern) keeps
 ``settings.falkordb_graph``. A Slack team with no route belongs to the legacy org, which is
 how every workspace installed before orgs keeps working. Invite codes and the audit log are
@@ -136,8 +140,35 @@ def build_org_indexes(org: OrgRef) -> None:
         ensure_search_indexes()
 
 
+def company_id(org: OrgRef) -> str:
+    """The id of a non-legacy org's Company node: its slug, which never changes."""
+    if org.slug:
+        return org.slug
+    stored = get_org(org.id)
+    if stored is None:
+        raise LookupError(f"no such org: {org.id!r}")
+    return stored.slug
+
+
+def ensure_company(org: OrgRef) -> str | None:
+    """The org's Company node in its graph, created if missing (idempotent). Returns its id.
+    The legacy org's Company comes from the seed, so this leaves it alone and returns None."""
+    if tenancy.is_legacy(org):
+        return None
+    from src.db.falkordb_client import connect
+
+    ident = company_id(org)
+    with tenancy.org_context(org):
+        _, graph = connect()
+        graph.query(
+            "MERGE (c:Company {id: $id}) ON CREATE SET c.name = $name, c.created_at = $now SET c.name = coalesce(c.name, $name)",
+            {"id": ident, "name": org.name or ident, "now": _now_ms()},
+        )
+    return ident
+
+
 def create_org(name: str, created_by: str | None) -> Org:
-    """A new org with its own graph (``org_<ulid>``) and that graph's indexes. ``created_by`` is
+    """A new org with its own graph (``org_<ulid>``), that graph's indexes and its Company node. ``created_by`` is
     ``"<team_id>:<slack_user_id>"``; the caller has checked the invite code."""
     name = " ".join((name or "").split())[:80]
     if not name:
@@ -145,6 +176,7 @@ def create_org(name: str, created_by: str | None) -> Org:
     ulid = tenancy.new_ulid()
     org = Org(id=ulid, slug=_slug_for(name), name=name, graph=f"org_{ulid}", legacy=False, created_by=created_by, created_at=_now_ms())
     build_org_indexes(org.ref())
+    ensure_company(org.ref())
     control_graph().query(
         """
         CREATE (o:Org {id: $id, slug: $slug, name: $name, graph: $graph, legacy: false,

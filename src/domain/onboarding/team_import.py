@@ -16,6 +16,7 @@ is refused whole, one message per problem, before anything is written.
 """
 
 import dataclasses
+import logging
 import difflib
 import re
 import tomllib
@@ -30,10 +31,15 @@ from src.domain.knowledge.dto import PathStep
 from src.domain.knowledge.kinds import KIND_OF, NOT_DEPENDABLE, SERVICE_KINDS, normalize_kind
 from src.seed.seed import SeedReport, seed_company
 
+log = logging.getLogger(__name__)
+
 MAX_FILE_BYTES = 256 * 1024
 ORG_SHARED = "org_shared"
 _MAX_TEXT = 200
 _MAX_SUMMARY = 1000
+# The one thing said when the org's graph has no Company node: to a Slack user, a console
+# admin and the operator alike, so no setting name (SEED_COMPANY) ever reaches a user.
+NO_COMPANY = "Your company isn't set up in Company Brain yet; an admin can finish setup in the console."
 
 # What each section may say. Anything else is refused by name, so a typo is a message, not a silent drop.
 FIELDS: dict[str, tuple[str, ...]] = {
@@ -173,11 +179,23 @@ def parse_team_data(data: dict, company_id: str, lookup: GraphLookup | None = No
 
 
 def default_company_id() -> str:
-    """The id of the company this instance runs (``SEED_COMPANY``), which a new team joins."""
+    """The id of the legacy org's company (``SEED_COMPANY``), which a team imported there joins."""
     from src.core.config import settings
     from src.seed.seed import company_module
 
     return company_module(settings.seed_company).COMPANY["id"]
+
+
+def company_id() -> str:
+    """The id of the Company a new team joins: the org in context's (its slug; see
+    ``orgs.ensure_company``), or ``SEED_COMPANY``'s in the legacy org. Never another org's."""
+    from src.core import tenancy
+    from src.domain import orgs
+
+    org = tenancy.current_org_ref()
+    if tenancy.is_legacy(org):
+        return default_company_id()
+    return orgs.company_id(org)
 
 
 @dataclass
@@ -199,7 +217,7 @@ def import_team(text: str | bytes, company_id: str) -> ImportResult:
     """Check a team file against the graph, then merge it. Nothing is written unless every
     row and every reference checks out."""
     team = check_team(text, company_id)
-    return ImportResult(team, seed_company(team))
+    return _merged(team)
 
 
 def check_team_data(data: dict, company_id: str, scope: str = ORG_SHARED, scopes: list[str] | None = None) -> SimpleNamespace:
@@ -210,7 +228,39 @@ def check_team_data(data: dict, company_id: str, scope: str = ORG_SHARED, scopes
 
 def import_team_data(data: dict, company_id: str, scope: str = ORG_SHARED, scopes: list[str] | None = None) -> ImportResult:
     team = check_team_data(data, company_id, scope, scopes)
-    return ImportResult(team, seed_company(team))
+    return _merged(team)
+
+
+def _merged(team: SimpleNamespace) -> ImportResult:
+    """Merge a checked team, then resync the org's connectors from the start (``resync_connectors``)."""
+    result = ImportResult(team, seed_company(team))
+    if team.PEOPLE or team.SERVICES:
+        resync_connectors()
+    return result
+
+
+def resync_connectors() -> list[str]:
+    """Queue a full sync of every connector install of the org in context; returns their keys.
+
+    A connector resolves an item's ABOUT edges and links an account to a Person (by email) when
+    it writes them, and a poll only rewrites what changed at the source. Tickets synced before a
+    team import would stay about nothing, and their accounts unlinked; a full sync rewrites every
+    item (each container is capped, so it is bounded) against the Services and People there now.
+    A failure to queue never fails the import."""
+    from src.connectors import registry, sync
+    from src.core import tenancy
+
+    queued = []
+    try:
+        org = tenancy.current_org_ref()
+        for _connector, install in registry.installs_of(org.id):
+            if sync.sync_now(install.source, full=True, install_id=install.id):
+                queued.append(install.key)
+    except Exception:
+        log.exception("[onboarding] could not queue the connector resync")
+    if queued:
+        log.info("[onboarding] full resync queued installs=%s", ",".join(queued))
+    return queued
 
 
 def contents(team: SimpleNamespace) -> dict:
@@ -289,7 +339,7 @@ class _Reader:
     def read(self) -> SimpleNamespace:
         # Merging the team onto a company the graph lacks would create a nameless one.
         if self.lookup is not None and not self.lookup.has_company(self.company_id):
-            self.problems.append(f"the graph has no company '{self.company_id}' to add the team to; check SEED_COMPANY")
+            self.problems.append(NO_COMPANY)
         for key in self.data:
             if key not in FIELDS:
                 self._unknown(key, "the file", tuple(FIELDS))

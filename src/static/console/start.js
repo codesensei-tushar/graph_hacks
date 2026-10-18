@@ -7,15 +7,16 @@
   const C = window.Console;
   const { el, $ } = C;
   const bannerBox = $("#banner");
-  const steps = { org: $("#step-org"), slack: $("#step-slack"), tool: $("#step-tool") };
+  const steps = { org: $("#step-org"), slack: $("#step-slack"), tool: $("#step-tool"), team: $("#step-team") };
+  let teamCount = 0;
   let me = null;
 
   function show(connections) {
     // A new company's creator is "pending" until the Slack install confirms them; then owner.
     const pending = me.role === "pending";
-    const done = { org: Boolean(me.org), slack: Boolean(me.org && me.slack_connected && !pending), tool: connections.length > 0 };
+    const done = { org: Boolean(me.org), slack: Boolean(me.org && me.slack_connected && !pending), tool: connections.length > 0, team: teamCount > 0 };
     let open = false;
-    for (const name of ["org", "slack", "tool"]) {
+    for (const name of ["org", "slack", "tool", "team"]) {
       const state = done[name] ? "done" : open ? "todo" : "current";
       if (state === "current") open = true;
       steps[name].dataset.state = state;
@@ -32,7 +33,10 @@
       const names = [...new Set(connections.map((c) => C.sourceOf(c).name))].join(" and ");
       line.replaceChildren(`${names} connected. `, el("a", { href: "/console" }, "Open the console →"));
     }
-    if (done.org && done.slack && done.tool) C.banner(bannerBox, "You are set up. Your tools sync in the background.", "ok");
+    if (done.team) {
+      $("#team-done").replaceChildren(`${C.plural(teamCount, "team", "teams")} in the graph. `, el("a", { href: "/console/teams" }, "See Teams →"));
+    }
+    if (done.org && done.slack && done.tool && done.team) C.banner(bannerBox, "You are set up. Your tools sync in the background.", "ok");
     tools();
   }
 
@@ -60,6 +64,8 @@
 
   async function connections() {
     if (!me.org || me.role === "pending") return [];
+    // Step 4 reads the teams alongside; a failed read leaves it open.
+    try { teamCount = (((await C.api("GET", "/console/api/teams")) || {}).teams || []).length; } catch (error) { teamCount = 0; }
     try { return (await C.api("GET", "/console/api/connections")) || []; } catch (error) { return []; }
   }
 

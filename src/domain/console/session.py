@@ -182,13 +182,41 @@ def slack_membership_refusal(team_id: str, slack_user_id: str) -> str | None:
     """
     workspace = get_workspace_by_team_id(team_id)
     if workspace is None:
-        return "workspace_unavailable"
+        return "workspace_key" if _bot_token_unreadable(team_id) else "workspace_unavailable"
     info = workspace.client.user_info(slack_user_id)
     if info is None:
         return "slack_unavailable"
     if not is_workspace_member(info) or (info.team_id and info.team_id != team_id):
         return "not_a_member"
     return None
+
+
+def _bot_token_unreadable(team_id: str) -> bool:
+    """Whether the team's stored bot token is there but cannot be decrypted: TOKEN_ENCRYPTION_KEYS
+    lost the key it was encrypted with (a rotation that dropped the old key before rewrapping).
+    Nobody in the team can sign in or be answered until an operator fixes it, so it is logged as an
+    error saying what to do, never as a transient failure."""
+    from src.domain.slack.token_crypto import decrypt_token
+    from src.domain.slack.workspace import get_workspace_row
+
+    try:
+        row = get_workspace_row(team_id)
+    except Exception:
+        return False
+    encrypted = (row or {}).get("bot_token_enc")
+    if not encrypted:
+        return False
+    try:
+        decrypt_token(encrypted)
+        return False
+    except Exception as error:
+        log.error(
+            "[console] the stored Slack bot token of team=%s cannot be decrypted (%s): TOKEN_ENCRYPTION_KEYS no longer "
+            "holds the key it was encrypted with. Put the old key back as a second key (then rewrap), or reinstall "
+            "the Slack app for this workspace. See docs/CONSOLE.md, Troubleshooting.",
+            team_id, type(error).__name__,
+        )
+        return True
 
 
 def _is_creator(session: Session, org: orgs.Org) -> bool:
@@ -211,14 +239,26 @@ def _current_role(session: Session, org: orgs.Org) -> str | None:
     return roles.role_of(session.slack_user, env_roles=org.legacy)
 
 
+def _pending_but_routed(session: Session) -> bool:
+    """A pending creator whose team the Slack install has just routed to their org: their role is
+    re-read at once, not up to a minute later (setup would show Slack as not done, Connect a 403)."""
+    if session.role != ROLE_PENDING or not session.team:
+        return False
+    try:
+        return orgs.routed_org_id(session.team) == session.org
+    except Exception:
+        return False
+
+
 def refresh(session: Session) -> Session | None:
-    """Renews the idle timer, re-reading the role when it is over a minute old.
+    """Renews the idle timer, re-reading the role when it is over a minute old, or at once for a
+    pending creator whose Slack install has routed the team (``_pending_but_routed``).
 
     None (and the record deleted) when the org is gone or the person has left it.
     """
     now = time.time()
     changes: dict = {"last_seen": now}
-    if session.org and now - session.role_checked_at >= ROLE_REFRESH_SECONDS:
+    if session.org and (now - session.role_checked_at >= ROLE_REFRESH_SECONDS or _pending_but_routed(session)):
         org = orgs.get_org(session.org)
         role = None
         if org is not None:

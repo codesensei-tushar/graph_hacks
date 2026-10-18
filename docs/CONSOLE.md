@@ -153,6 +153,9 @@ An owner or admin clicks **Connect** in the console.
      account the org already has replaces that install's tokens instead of making a second install.
 3. The redirect goes to a fixed page:
    - `/console?connected=<source>` on success; the console then offers the next step (Jira: pick projects).
+     A tool with nothing to pick (HubSpot reads the whole portal) starts syncing from the callback
+     itself: the install is loaded and its first step armed at once. It shows `connecting` until that
+     step works, then `active`.
    - `/console/connect/jira/site?id=<connection id>` when the Jira consent covers several sites.
    - `/console?error=<code>` on a failure.
    - Nothing from the vendor (an error description, a site name) is put in a URL or a page.
@@ -164,6 +167,37 @@ An owner or admin clicks **Connect** in the console.
 | `oauth_state` | The state is unknown, expired (10 min), already used or for another tool, or the session changed (signed out, signed in again, created an org, no longer an admin). Start again. |
 | `account_claimed` | Another org already reads this Jira site or HubSpot portal |
 | `oauth_failed` | Anything else: the code exchange or the account lookup failed, the consent covers no Jira site on atlassian.net, or the app's client id or secret is missing. The backend logs the failure type, never its text. |
+
+## Teams
+
+A new org's graph starts with its Company node (`{id: <org slug>, name: <org name>}`); every team
+it imports or onboards from Slack joins it. `src/api/v1/console_teams.py`:
+
+- `POST /console/api/teams/import` (owners and admins; JSON, CSRF): `{"file": "<team file TOML>", "check": false}`.
+  The file is the one `/ops/import` takes (docs/ONBOARDING-TEAMS.md), with the same 256 KiB limit and
+  the same checks against the org's graph. `check: true` writes nothing.
+  - 200 check: `{mode: "check", company, team, contents, counts: {people, runs: {<kind>: n}, decisions}}`
+  - 200 merge: the same plus `mode: "merge"`, `nodes`, `nodes_created`, `edges_created`, `properties_set`
+  - 400 `{error: "refused", problems: [...]}` (nothing written); 413 `{error: "too_large", limit_bytes}`
+- `GET /console/api/teams` (members): `{teams: [{id, name, summary, members: [{id, name, role}],
+  runs: [{id, name, kind, owners: [{id, name}]}]}]}`, what the member could read in a Slack DM.
+
+## People
+
+Jira often hides emails, so many synced accounts link to no person. `src/api/v1/console_people.py`
+(owners and admins) lets the org link them; this replaces `CONNECTOR_*_PEOPLE` for console orgs.
+
+- `GET /console/api/people/unlinked`: `{unlinked: [{id, name, source: "jira"|"hubspot", items,
+  suggestions: [{person_id, name, reason: "same_name"|"same_email_domain"}]}], people: [{id, name}]}`.
+  At most 500 accounts, most active first; at most 5 suggestions each; public mail domains suggest
+  nobody. No email or domain is ever returned. Apps and bots are left out (`is_bot`, `account_type`
+  app/bot/customer, Jira accountIds under `557058:`, "Automation for Jira") and cannot be linked.
+- `POST /console/api/people/link` (JSON, CSRF) `{external_user_id, person_id}`: writes
+  `(:ExternalUser)-[:IS {via: "admin", by, at}]->(:Person)` and moves the account's OWNS/WORKED_ON
+  onto the person. Audited as `people.link`. 200 `{ok, external_user_id, person: {id, name}, changed}`;
+  404 unknown account or person (in this org); 409 when the account is already linked by email.
+  An admin link can be corrected by linking again. Like an email link, it lets the person read, in a
+  DM, the restricted Jira projects the account can read.
 
 ## Tokens at run time
 
@@ -202,6 +236,28 @@ Logs show `[oauth] <install> token refreshed; rotated=True` and
 3. Drop the old key (`TOKEN_ENCRYPTION_KEYS=<new>`) and redeploy.
 
 Refreshes write with the first key too, so active installs move to it on their own within an hour.
+
+## Troubleshooting
+
+**Sign-in says "Company Brain cannot read this workspace's Slack connection: its encryption key
+changed"** (`/signin?error=workspace_key`). The workspace's stored bot token cannot be decrypted
+with any key in `TOKEN_ENCRYPTION_KEYS`: the old key was dropped (step 3 above) before the rewrap
+reached it. Until it is fixed nobody in that workspace can sign in and the bot cannot answer there.
+The backend logs, once per attempt:
+
+```
+[console] the stored Slack bot token of team=T... cannot be decrypted (InvalidToken): TOKEN_ENCRYPTION_KEYS no longer holds the key it was encrypted with. ...
+```
+
+Fix it either way:
+
+- Put the old key back as a second key (`TOKEN_ENCRYPTION_KEYS=<new>,<old>`), redeploy, run the
+  rewrap (step 2 above), and only then drop it again.
+- Or, if the old key is gone, have a workspace member reinstall the Slack app from the console
+  (setup step 2): the install stores a fresh token under the current key.
+
+A transient failure (Slack or the graph unreachable) is `workspace_unavailable` instead, and goes
+away on a retry.
 
 ## nginx
 

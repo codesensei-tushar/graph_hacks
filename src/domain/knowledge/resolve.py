@@ -408,7 +408,13 @@ def best_match_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...]) -
     return Entity(best.id, best.name, best.label, best.kind) if best is not None and best_score >= 2 else None
 
 
+SELF_MISS = "I can't tell who you are here. Ask in Slack, where I know who you are (send `link account` once if I don't)."
+
+
 def describe_miss(resolution: Resolution, kind: str = "service, document, or ticket") -> str:
+    if resolution.reason == "self":
+        # The asker named themselves ("what team am I on") where nobody knows who asks.
+        return SELF_MISS
     named = core(resolution.query)
     if not named:
         return f"I can't tell what that refers to. Name a {kind}."

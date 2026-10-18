@@ -25,6 +25,10 @@ onboard team: Sales | members: @priya @dev | owns: Renewals (process), HubSpot (
 - Members are @mentions, so Slack says exactly who they are.
 - Each thing is `Name (kind)`. Add `@someone` inside the brackets to name its owner;
   otherwise the first member owns it. Someone named as an owner joins the team.
+- Other names people use for a thing follow `aka`, so questions find it by them:
+  `Billing Service (service) aka billing, payments`. The names after `aka` run up to the next
+  thing with a `(kind)`, so put a thing without one before them, or write the names inside the
+  brackets: `Billing Service (service, @dev, aka billing, payments)`.
 - A decision is about everything the line lists. `decided YYYY-MM-DD` dates it; without
   that, it is dated the day of the message, and whoever sent the line proposed it.
 
@@ -68,7 +72,10 @@ The answer counts what the file holds and what the import changed:
 Importing the same file again is safe. Every write merges by id and nothing is ever
 deleted, so a second import of an unchanged file creates nothing and sets nothing; an edited
 file updates what changed. The other side of that: taking a block out of the file does not
-take it out of Company Brain. The team joins the company the instance runs (`SEED_COMPANY`).
+take it out of Company Brain. The team joins its org's company: an org made in the console
+gets a Company node named after it when it is created (orgs made earlier get one at the next
+startup), and the legacy org's is the seeded one (`SEED_COMPANY`). `/ops/import` writes to the
+legacy org only.
 
 ## The file
 

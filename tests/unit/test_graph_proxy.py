@@ -2,11 +2,12 @@
 
 import dataclasses
 import unittest
+from unittest import mock
 
 import tests  # noqa: F401  pins the test settings before src loads
 
 from src.db import falkordb_client  # noqa: E402
-from src.db.falkordb_client import _GraphProxy, query_timeout  # noqa: E402
+from src.db.falkordb_client import DeadlineExceeded, _GraphProxy, query_timeout, request_deadline  # noqa: E402
 from src.domain.knowledge import mcp_tools, tool_guard  # noqa: E402
 
 
@@ -63,11 +64,65 @@ class TimeoutTest(unittest.TestCase):
         graph = _GraphProxy(FakeGraph())
         self.assertEqual((graph.name, graph.delete()), ("fake_graph", "deleted"))
 
-    def test_the_public_guard_sets_the_short_timeout_and_a_plain_guard_does_not(self):
-        with tool_guard.guard("ask", "q", timeout_ms=tool_guard.PUBLIC_QUERY_TIMEOUT_MS):
-            self.assertEqual(falkordb_client.query_timeout_ms.get(), 2000)
+    def test_the_public_guard_sets_the_short_timeout_and_the_deadline_and_a_plain_guard_does_neither(self):
+        with tool_guard.public("ask", "q"):
+            self.assertEqual(falkordb_client.query_timeout_ms.get(), tool_guard.PUBLIC_QUERY_TIMEOUT_MS)
+            self.assertIsNotNone(falkordb_client.query_deadline.get())
         with tool_guard.guard("slack", "q"):
             self.assertIsNone(falkordb_client.query_timeout_ms.get())
+            self.assertIsNone(falkordb_client.query_deadline.get())
+
+
+class DeadlineTest(unittest.TestCase):
+    def test_each_query_gets_at_most_the_time_left(self):
+        fake = FakeGraph()
+        graph = _GraphProxy(fake)
+        with request_deadline(1000):
+            graph.ro_query("no timeout of its own")
+            with query_timeout(2000):
+                graph.ro_query("the context's, cut")
+            graph.ro_query("its own, shorter", timeout=50)
+            graph.ro_query("its own, cut", timeout=60_000)
+        graph.ro_query("after")
+        timeouts = [timeout for *_rest, timeout in fake.calls]
+        for cut in (timeouts[0], timeouts[1], timeouts[3]):
+            self.assertTrue(900 <= cut <= 1000, timeouts)
+        self.assertEqual((timeouts[2], timeouts[4]), (50, None))
+
+    def test_a_spent_deadline_sends_nothing_and_reads_as_a_timeout(self):
+        fake = FakeGraph()
+        with request_deadline(0):
+            with self.assertRaises(DeadlineExceeded) as raised:
+                _GraphProxy(fake).ro_query("A")
+        self.assertEqual(fake.calls, [])
+        self.assertTrue(tool_guard.is_timeout(raised.exception))
+        with self.assertLogs("src.domain.knowledge.tool_guard", "WARNING"), self.assertRaises(tool_guard.ToolTimedOut):
+            with tool_guard.guard("ask", "q", deadline_ms=0):
+                _GraphProxy(fake).ro_query("A")
+
+    def test_many_queries_share_one_deadline(self):
+        clock = [100.0]
+
+        class SlowGraph(FakeGraph):
+            def _record(self, method, q, params, timeout):
+                clock[0] += 0.25
+                return super()._record(method, q, params, timeout)
+
+        fake = SlowGraph()
+        with mock.patch.object(falkordb_client.time, "monotonic", lambda: clock[0]):
+            with request_deadline(1000), self.assertRaises(DeadlineExceeded):
+                for _ in range(10):
+                    _GraphProxy(fake).ro_query("one of dozens")
+        self.assertEqual([timeout for *_rest, timeout in fake.calls], [1000, 750, 500, 250])
+
+    def test_nested_deadlines_keep_the_earlier(self):
+        with request_deadline(1000):
+            outer = falkordb_client.query_deadline.get()
+            with request_deadline(60_000):
+                self.assertEqual(falkordb_client.query_deadline.get(), outer)
+            with request_deadline(None):
+                self.assertEqual(falkordb_client.query_deadline.get(), outer)
+        self.assertIsNone(falkordb_client.query_deadline.get())
 
     def test_mcp_calls_run_under_the_public_timeout(self):
         seen = []

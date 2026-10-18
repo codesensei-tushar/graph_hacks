@@ -16,10 +16,11 @@ answered from ``tests/fixtures/console/``, so the pages can be built before the 
 """
 
 import os
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response
 
 from src.core.config import settings
 
@@ -45,11 +46,61 @@ PAGES = {
     "/console/connectors/{connection_id}/projects": "projects.html",
     "/console/connectors/{connection_id}": "connection.html",
     "/console/ask": "ask.html",
+    "/console/teams": "teams.html",
 }
 
-# The public header's link, hidden in the files; shown when the console runs.
-SIGNIN_HIDDEN = " hidden data-console-link>"
-SIGNIN_SHOWN = " data-console-link>"
+# Whether the console runs, for the page's scripts; render() flips it on a page served while it does.
+CONSOLE_OFF = '<meta name="brain-console" content="off">'
+CONSOLE_ON = '<meta name="brain-console" content="on">'
+
+# The one header. Every page's <header class="top" data-shell="site|console" data-here="<page>">
+# holds the brand, a NAV_MARK and an ACTIONS_MARK; render() fills them from NAV, so every page
+# gets the same links as plain HTML (no-JS visitors and crawlers included), the current page
+# marked, "Sign in" when the console runs, and the console's company name and Sign out slots,
+# which console.js fills. Everything rendered is a constant from this file.
+NAV = {
+    "site": (
+        ("ask", "Ask", "/#ask"),
+        ("graph", "Graph", "/#graph"),
+        ("explore", "Explore", "/explore"),
+        ("proof", "Proof", "/#proof"),
+        ("teams", "Teams", "/#teams"),
+        ("how", "How it works", "/#how"),
+        ("builders", "Builders", "/#builders"),
+    ),
+    "console": (
+        ("connections", "Connections", "/console"),
+        ("teams", "Teams", "/console/teams"),
+        ("ask", "Ask", "/console/ask"),
+    ),
+}
+HERE_UNDER = {"team": "teams"}
+NAV_MARK = "<!-- shell:nav -->"
+ACTIONS_MARK = "<!-- shell:actions -->"
+_HEADER = re.compile(r'<header class="top" data-shell="(site|console)" data-here="([a-z]+)">')
+
+
+def render(html: str, console_on: bool) -> str:
+    """A page with its header filled in, and the console flag its scripts read."""
+    match = _HEADER.search(html)
+    if not match:
+        return html
+    shell, here = match.group(1), match.group(2)
+    current = HERE_UNDER.get(here, here)
+    label = "Console" if shell == "console" else "Sections"
+    links = ""
+    for key, text, href in NAV[shell]:
+        mark = ' aria-current="page"' if key == current else ""
+        links += f'<a href="{href}" data-nav="{key}"{mark}>{text}</a>'
+    if shell == "console":
+        actions = '<span class="top-org" id="top-org" hidden></span><button class="top-signin" id="sign-out" type="button" hidden>Sign out</button>'
+    elif console_on and here != "signin":
+        actions = '<a class="top-signin" href="/signin">Sign in</a>'
+    else:
+        actions = ""
+    html = html.replace(NAV_MARK, f'<nav aria-label="{label}">{links}</nav>', 1).replace(ACTIONS_MARK, actions, 1)
+    return html.replace(CONSOLE_OFF, CONSOLE_ON, 1) if console_on else html
+
 
 router = APIRouter(tags=["console-web"], include_in_schema=False)
 
@@ -60,16 +111,13 @@ def console_enabled() -> bool:
 
 def public_page(path: Path) -> Response:
     """A public page (``/``, ``/team/<id>``, ``/explore``), with "Sign in" shown when the console runs."""
-    if not console_enabled():
-        return FileResponse(path, media_type="text/html", headers={"Cache-Control": "no-cache"})
-    html = path.read_text().replace(SIGNIN_HIDDEN, SIGNIN_SHOWN, 1)
-    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(render(path.read_text(), console_enabled()), headers={"Cache-Control": "no-cache"})
 
 
 def _serve(name: str) -> Response:
     if not console_enabled():
         raise HTTPException(status_code=404)
-    return FileResponse(CONSOLE_DIR / name, media_type="text/html", headers=HEADERS)
+    return HTMLResponse(render((CONSOLE_DIR / name).read_text(), True), headers=HEADERS)
 
 
 def _page(route: str, name: str):
@@ -92,7 +140,7 @@ for _route, _name in PAGES.items():
 
 @router.get("/privacy")
 def privacy():
-    return FileResponse(PRIVACY, media_type="text/html", headers=HEADERS)
+    return HTMLResponse(render(PRIVACY.read_text(), console_enabled()), headers=HEADERS)
 
 
 def fixtures_enabled() -> bool:

@@ -333,7 +333,13 @@ class ConsoleConnectorsTest(unittest.TestCase):
         self.assertIn("org_internal", body["scopes"])
         self.assertIn("org_shared", body["scopes"])
         self.assertEqual(body["picked_by"], "keywords")  # no model in tests; members never get it
-        self.assertIn("user_p-ada", body["scopes"])  # the asker's own DM memory, as in Slack
+        # The asker's own DM memory, under the tag a Slack DM turn writes it to (keyed by the Slack user id).
+        from src.domain.memory.writeback import slack_memory_container_tag, slack_memory_scope_for_turn
+
+        dm_tag = slack_memory_container_tag(slack_memory_scope_for_turn(is_dm=True, channel="D1", channel_type="im", user_id="UADA", slack_user_id="UADA"))
+        self.assertEqual(dm_tag, "user_UADA")
+        self.assertIn(dm_tag, body["scopes"])
+        self.assertNotIn("user_p-ada", body["scopes"])
         self.assertEqual(self.client.post("/console/api/ask", json={"q": " "}, headers=self.headers).status_code, 400)
 
     def test_after_a_disconnect_an_answer_shows_none_of_its_data(self):

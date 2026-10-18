@@ -455,9 +455,41 @@ class ConsoleAuthTest(unittest.TestCase):
         # The bot install (package B) verifies the creator, then routes the team: now owner.
         self.slack.users["UFOUNDER"] = SlackUserInfo(id="UFOUNDER", real_name="Founder", team_id=team)
         self._install_and_route(org_id, team, "UFOUNDER")
-        self._age(role_checked_at=0)
+        # At once, not after the minute between role checks: the route is what a pending role waits for.
         self.assertEqual(self.client.get("/console/api/me").json()["role"], "owner")
         self.assertEqual(self.client.get("/console/api/whoami").json()["org"], org_id)
+
+    def test_the_slack_install_callback_promotes_the_installers_pending_session(self):
+        from src.api.v1 import slack_install
+
+        team = f"TPRO{RUN.upper()}"
+        self._sign_in(team, "UFOUNDER")
+        org_id = self._mutate("/console/api/orgs", {"name": "Promoted", "invite_code": self._mint()}).json()["org"]["id"]
+        self.slack.users["UFOUNDER"] = SlackUserInfo(id="UFOUNDER", real_name="Founder", team_id=team)
+        self._install_and_route(org_id, team, "UFOUNDER")
+        request = mock.Mock(cookies={sessions.COOKIE: self.client.cookies[sessions.COOKIE]})
+        slack_install._promote_pending_creator(request, tenancy.resolve(org_id), team)
+        # The stored record itself is owner, before the browser's next request reaches the console.
+        self.assertEqual(json.loads(kv().get(self._session_key()))["role"], "owner")
+        # A cookie that is no session is ignored.
+        slack_install._promote_pending_creator(mock.Mock(cookies={sessions.COOKIE: "not-a-session"}), tenancy.resolve(org_id), team)
+
+    def test_an_unreadable_bot_token_is_named_for_the_operator(self):
+        with tenancy.org_context(self.org_x):
+            from cryptography.fernet import Fernet
+
+            # Encrypted under a key TOKEN_ENCRYPTION_KEYS does not hold (dropped in a rotation).
+            lost = "fernet:" + Fernet(Fernet.generate_key()).encrypt(b"xoxb-test").decode()
+            upsert_workspace(team_id=self.team_x, bot_token_enc=lost, bot_user_id="UBOT", team_name="Org X", installed_by="UINSTALLER")
+            with self.assertLogs(sessions.log, "ERROR") as logged:
+                self.assertEqual(sessions.slack_membership_refusal(self.team_x, "UADA"), "workspace_key")
+        self.assertIn("TOKEN_ENCRYPTION_KEYS", logged.output[0])
+        self.assertNotIn("xoxb", logged.output[0])
+        response, _ = self._sign_in(self.team_x, "UADA")
+        self.assertEqual(response.headers["location"], "/signin?error=workspace_key")
+        # No workspace at all is still the transient code.
+        with tenancy.org_context(self.org_x):
+            self.assertEqual(sessions.slack_membership_refusal("TNOSUCH", "UADA"), "workspace_unavailable")
 
     def _install_and_route(self, org_id: str, team: str, installer: str) -> None:
         with tenancy.org_context(org_id):

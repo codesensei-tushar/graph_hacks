@@ -186,10 +186,6 @@
   // The header: the company's name, Sign out, and which page this is. A page that needs a company
   // (every page but /console/start) goes to the setup steps while the workspace has none.
   async function boot({ needsOrg = true } = {}) {
-    const here = document.body.dataset.nav;
-    for (const link of document.querySelectorAll(".top nav a[data-nav]")) {
-      if (link.dataset.nav === here) link.setAttribute("aria-current", "page");
-    }
     const me = await whoami();
     // No company yet, or one whose Slack install has not confirmed its creator (role "pending").
     if (needsOrg && (!me.org || me.role === "pending")) {
