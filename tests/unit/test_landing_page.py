@@ -293,7 +293,8 @@ class RiskMapTest(unittest.TestCase):
         self.assertEqual(answer_js.count("RiskMap.render("), 1)
         # Each part of a question in two parts is its own paragraph; one part is the answer itself.
         self.assertLess(render.index("part.answer));"), render.index(hook))
-        self.assertIn("data.parts && data.parts.length ? data.parts : [data]", render)
+        self.assertIn("const parts = data.parts && data.parts.length ? data.parts : null;", render)
+        self.assertIn("for (const [index, part] of (parts || [data]).entries())", render)
         self.assertLess(render.index(hook), render.index("BrainGraph.renderPath("))
         self.assertIn("onAsk: askFromPage,", (STATIC / "app.js").read_text())
 
