@@ -419,7 +419,7 @@ _LIST_NOUNS = (
     (re.compile(r"\b(?:documents?|docs?|runbooks?)\b", re.IGNORECASE), "Document", None),
     (re.compile(r"\bpeople\b", re.IGNORECASE), "Person", None),
     (re.compile(r"\bteams\b", re.IGNORECASE), "Team", None),
-    (re.compile(r"\b(?:accounts|customers?|opportunit(?:y|ies)|deals?|pipeline)\b", re.IGNORECASE), "Service", "account"),
+    (re.compile(r"\b(?:accounts|customers?|opportunit(?:y|ies)|deals?|(?:sales|deal) pipeline)\b", re.IGNORECASE), "Service", "account"),
     (re.compile(r"\bservices\b", re.IGNORECASE), "Service", None),
     (re.compile(r"\bsystems\b", re.IGNORECASE), "Service", "system"),
     (re.compile(r"\bprocesses\b", re.IGNORECASE), "Service", "process"),
@@ -429,8 +429,10 @@ _STATE = re.compile(r"\b(open|closed|merged)\b", re.IGNORECASE)
 _STANDING = re.compile(r"\b(?:standing|current)\b", re.IGNORECASE)
 _BLOCKED = re.compile(r"\bblocked\b", re.IGNORECASE)
 _LIFECYCLE = re.compile(r"\b(customers?|opportunit(?:y|ies)|evangelists?)\b", re.IGNORECASE)
-_DEAL_STAGE = re.compile(r"\bdeals? (?:that are |are )?(?:in|at) (?:the )?(?:stage )?(.+?)(?: stage)?\s*\??\s*$", re.IGNORECASE)
-_PIPELINE = re.compile(r"\b(?:deals?|pipeline)\b", re.IGNORECASE)
+_DEAL_STAGE = re.compile(r"\bdeals? (?:(?:that )?are (?:in |at )?|in |at )(?:the )?(?:stage )?(.+?)(?: stage)?\s*[?.!]*\s*$", re.IGNORECASE)
+_PIPELINE = re.compile(r"\b(?:deals?|(?:sales|deal) pipeline)\b", re.IGNORECASE)
+# "closed won" and "closed lost" are deal stages, never the closed state.
+_CLOSED_STAGE = re.compile(r"\bclosed[ -]?(?:won|lost)\b", re.IGNORECASE)
 _ABOUT = re.compile(r"\b(?:about|for|on|touching|describing)\s+(.+?)\s*\??\s*$", re.IGNORECASE)
 _IN_TEAM = re.compile(r"\bin\s+(?:the\s+)?(.+?)(?:\s+team)?\s*\??\s*$", re.IGNORECASE)
 # Whose list it is: "tickets assigned to Om Sherikar", "accounts owned by Yash", "which accounts does Yash own".
@@ -454,7 +456,8 @@ def parse(question: str) -> dict:
     if kind:
         args["kind"] = kind
     # Only an account among services has a state ("open opportunities"); "the open services" is not a filter.
-    if (state := _STATE.search(text)) and "state" in allowed and (label != "Service" or kind == "account"):
+    closed_stage = kind == "account" and _CLOSED_STAGE.search(text)
+    if (state := _STATE.search(text)) and "state" in allowed and (label != "Service" or kind == "account") and not closed_stage:
         value = state.group(1).lower()
         if value in (PULL_REQUEST_STATES if label == "PullRequest" else TICKET_STATES):
             args["state"] = value
@@ -468,7 +471,14 @@ def parse(question: str) -> dict:
             args["status"] = stage_key(lifecycle.group(1))
         if (stage := _DEAL_STAGE.search(text)) is not None:
             args["stage"] = stage.group(1)
-        elif _PIPELINE.search(text):
+        elif closed_stage:
+            # "closed won deals": the stage, with no open-deal default.
+            args["stage"] = closed_stage.group(0)
+        elif _PIPELINE.search(text) and "state" not in args:
+            args["stage"] = "open"
+        elif _PIPELINE.search(text) and args.get("state") == "open":
+            # "open deals": an open deal, whatever the account's own state.
+            args.pop("state")
             args["stage"] = "open"
     who = _BY_PERSON.search(text) or _DOES_PERSON.search(text)
     person_filter = _PERSON_FILTER.get(label)

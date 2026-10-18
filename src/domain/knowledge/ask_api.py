@@ -12,7 +12,10 @@ and edges of that path keyed by id, so the page can draw the traversal it is rea
 The surface is public, so it is protected here rather than in the route: a question longer
 than ``MAX_QUESTION_CHARS`` is refused with ``QuestionTooLong``; keyword answers and the
 proof report are kept for ``CACHE_TTL_SECONDS`` per graph, so a chip clicked twice walks the
-graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``.
+graph once; and ``admit`` allows each client ``RATE_LIMIT`` calls per ``RATE_WINDOW_SECONDS``
+on average, with bursts of up to ``RATE_BURST``. Only the routes that can walk the graph for
+a new key are counted (a question, an explorer walk, an MCP call); the page's cacheable
+reads are served from the cache uncounted.
 
 The page offers an example chip only when it answers with a path or a dated memory on the graph in use, so a chip whose
 data the live graph lacks stays hidden until a seed refresh brings it back.
@@ -122,8 +125,12 @@ class ToolRefused(ValueError):
 MAX_QUESTION_CHARS = 300
 CACHE_TTL_SECONDS = 60.0
 CACHE_MAX_ENTRIES = 256
-RATE_LIMIT = 30
+RATE_LIMIT = 60
 RATE_WINDOW_SECONDS = 60.0
+# A client may spend this many calls at once; the budget then refills at RATE_LIMIT per window.
+RATE_BURST = 30
+# What a browser and nginx may keep a cacheable public read for: the domain cache's lifetime.
+CACHE_CONTROL = f"public, max-age={int(CACHE_TTL_SECONDS)}"
 
 
 class QuestionTooLong(ValueError):
@@ -169,36 +176,45 @@ class RateDecision:
 
 
 class RateLimiter:
-    """At most ``limit`` calls per client in each fixed window of ``window`` seconds."""
+    """A token bucket per client: ``limit`` calls per ``window`` seconds on average, ``burst`` at once.
 
-    def __init__(self, limit: int, window: float, clock: Callable[[], float] = time.monotonic, max_clients: int = 4096) -> None:
+    Each client starts with ``burst`` tokens (``limit`` when no burst is given), spends one per
+    call and earns them back at ``limit / window`` a second, up to ``burst``. A refused call is
+    told how many whole seconds until its next token.
+    """
+
+    def __init__(self, limit: int, window: float, clock: Callable[[], float] = time.monotonic, max_clients: int = 4096, burst: int | None = None) -> None:
         self.limit = limit
         self.window = window
+        self.burst = burst or limit
+        self.rate = limit / window
         self.clock = clock
         self.max_clients = max_clients
-        self._windows: dict[str, tuple[float, int]] = {}
+        self._buckets: dict[str, tuple[float, float]] = {}
         self._lock = threading.Lock()
 
     def check(self, client: str) -> RateDecision:
         now = self.clock()
         with self._lock:
-            start, count = self._windows.get(client, (now, 0))
-            if now - start >= self.window:
-                start, count = now, 0
-            if count >= self.limit:
-                return RateDecision(False, max(1, math.ceil(start + self.window - now)))
-            self._windows[client] = (start, count + 1)
-            if len(self._windows) > self.max_clients:
-                self._windows = {key: value for key, value in self._windows.items() if now - value[0] < self.window}
+            seen, tokens = self._buckets.get(client, (now, float(self.burst)))
+            tokens = min(float(self.burst), tokens + (now - seen) * self.rate)
+            if tokens < 1:
+                self._buckets[client] = (now, tokens)
+                return RateDecision(False, max(1, math.ceil((1 - tokens) / self.rate)))
+            self._buckets[client] = (now, tokens - 1)
+            if len(self._buckets) > self.max_clients:
+                # A client idle long enough to have refilled is the same as one never seen.
+                full = self.burst / self.rate
+                self._buckets = {key: value for key, value in self._buckets.items() if now - value[0] < full}
             return RateDecision(True)
 
     def reset(self) -> None:
         with self._lock:
-            self._windows.clear()
+            self._buckets.clear()
 
 
 ANSWERS = TtlCache(CACHE_TTL_SECONDS, CACHE_MAX_ENTRIES)
-LIMITER = RateLimiter(RATE_LIMIT, RATE_WINDOW_SECONDS)
+LIMITER = RateLimiter(RATE_LIMIT, RATE_WINDOW_SECONDS, burst=RATE_BURST)
 
 
 def admit(client: str | None) -> RateDecision:

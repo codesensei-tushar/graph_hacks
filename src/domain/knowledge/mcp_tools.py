@@ -6,13 +6,16 @@ the ``args_schema`` as the input schema verbatim. Calling one runs ``spec.run`` 
 returns the same answer, path, ``found`` and ``candidates`` a Slack asker gets, plus
 ``next``: calls worth making about the services the answer pointed at, so a client can
 chain search, then what changed or what to read, without guessing a name. Tools that
-write the graph are never listed: the server is read-only.
+write the graph are never listed: the server is read-only. A string argument longer than
+``ask_api.MAX_QUESTION_CHARS`` is refused, as the ask page refuses a long question. A tool whose graph
+query runs past FalkorDB's timeout is a ``ToolError`` saying so (``tool_guard.TIMEOUT_REPLY``).
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from src.domain.knowledge import catalogue
+from src.domain.knowledge import catalogue, tool_guard
+from src.domain.knowledge.ask_api import MAX_QUESTION_CHARS
 from src.domain.knowledge.dto import ToolSpec
 
 ORG_SHARED = "org_shared"
@@ -112,6 +115,9 @@ def tool_names() -> list[str]:
 
 
 def _check_arguments(spec: ToolSpec, arguments: dict) -> None:
+    too_long = sorted(key for key, value in arguments.items() if isinstance(value, str) and len(value) > MAX_QUESTION_CHARS)
+    if too_long:
+        raise ToolError(f"{spec.name}: {', '.join(too_long)} is limited to {MAX_QUESTION_CHARS} characters")
     schema = spec.args_schema or {}
     missing = [key for key in schema.get("required", []) if key not in arguments]
     if missing:
@@ -129,5 +135,9 @@ def call_tool(name: str, arguments: dict | None, scopes: Sequence[str] = DEFAULT
         raise ToolError(f"no tool named {name!r}; the tools are {', '.join(tool_names())}")
     arguments = dict(arguments or {})
     _check_arguments(spec, arguments)
-    result = spec.run(arguments, list(scopes))
+    try:
+        with tool_guard.guard("mcp", f"{spec.name} {arguments}"):
+            result = spec.run(arguments, list(scopes))
+    except tool_guard.ToolTimedOut as error:
+        raise ToolError(str(error)) from error
     return {**result.to_dict(), "found": result.found, "candidates": list(result.candidates), "next": next_calls(spec.name, result)}

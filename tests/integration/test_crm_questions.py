@@ -86,8 +86,12 @@ class CrmQuestionsTest(unittest.TestCase):
         self.assertEqual(_cites(result), ["Priya Shah -[WORKED_ON]-> Larkspur Freightways"])
         self.assertEqual(_ask("which deals are in qualified to buy?").answer, "1 account with a deal in qualified to buy: Tidewhistle Robotics.")
 
+    def test_closed_won_is_a_deal_stage_not_the_closed_state(self):
+        self.assertEqual(_ask("which deals are closed won").answer, "1 account with a deal in closed won: Larkspur Freightways.")
+        self.assertIn("Bramblecote Analytics", _ask("deals in closed lost").answer)
+
     def test_the_open_pipeline_leaves_closed_deals_out(self):
-        result = _ask("show me the pipeline")
+        result = _ask("show me the sales pipeline")
         self.assertIn("Larkspur Freightways", result.answer)
         self.assertIn("Tidewhistle Robotics", result.answer)
         self.assertNotIn("Bramblecote", result.answer)  # its only deal is closed lost
@@ -100,7 +104,7 @@ class CrmQuestionsTest(unittest.TestCase):
         self.assertIn("2 closed accounts", find.find("Service", {"kind": "account", "state": "closed"}, SLACK).answer)
 
     def test_the_public_reader_sees_no_accounts(self):
-        for question in ("show me our customers", "open opportunities", "deals in contract sent", "show me the pipeline"):
+        for question in ("show me our customers", "open opportunities", "deals in contract sent", "show me the sales pipeline"):
             with self.subTest(question=question):
                 self.assertNotIn("Larkspur", _ask(question, ORG).answer)
 

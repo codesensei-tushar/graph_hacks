@@ -1,23 +1,22 @@
 """``GET /api/teams`` and ``GET /api/team/{team_id}``: what the team pages show, read-only and public.
 
-Reads ``org_shared`` only, like the ask routes, and shares their per-address rate limit and
-their one-minute cache. An unknown team is a 404.
+Reads ``org_shared`` only, like the ask routes, from their one-minute cache. The team list is
+the same for every visitor: it goes out with ``Cache-Control`` and is not counted. One team's
+page takes any id, so it is counted against the per-address limit. An unknown team is a 404.
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from src.api.v1.ask import _throttled
+from src.api.v1.ask import _throttled, cached
 from src.domain.knowledge import team_page
 
 router = APIRouter(prefix="/api", tags=["teams"])
 
 
 @router.get("/teams")
-def teams(request: Request):
-    if throttled := _throttled(request):
-        return throttled
-    return {"teams": [team.to_dict() for team in team_page.public_teams()]}
+def teams():
+    return cached({"teams": [team.to_dict() for team in team_page.public_teams()]})
 
 
 @router.get("/team/{team_id}")
