@@ -202,12 +202,12 @@ def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> list[EntityR
     ]
 
 
-def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: list[str] | None = None, graph=None) -> Resolution:
+def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: list[str] | None = None, graph=None, partial: bool = True) -> Resolution:
     """The one node ``text`` names, within the asker's scopes, or the nearest candidates."""
     if graph is None:
         _, graph = connect()
     scopes = scopes or [ORG_SHARED]
-    return resolve_rows(text, load_rows(graph, labels, scopes), labels, known=_graph_words(graph, scopes))
+    return resolve_rows(text, load_rows(graph, labels, scopes), labels, known=_graph_words(graph, scopes), partial=partial)
 
 
 def _graph_words(graph, scopes: list[str]):
@@ -293,13 +293,13 @@ def entities_in_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] =
     return list(dict.fromkeys(match.entity for match in _kept_matches(text, rows, labels)))
 
 
-def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEFAULT_LABELS, known=None) -> Resolution:
+def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEFAULT_LABELS, known=None, partial: bool = True) -> Resolution:
     """``known(word)``, when given, says whether a word names anything in the graph; it lets a
     match that is only the end of a noun phrase ("the claude api") be refused."""
     resolution = Resolution(query=text)
     kept = _kept_matches(text, rows, labels)
     if not kept:
-        taken = _partial_match(text, rows)
+        taken = _partial_match(text, rows) if partial else None
         if taken is not None:
             # "billing" for Billing Service when nothing else in scope has it as a word of its name.
             entity, said = taken
