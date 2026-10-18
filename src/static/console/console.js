@@ -194,6 +194,8 @@
     }
     // With no company yet there is nothing to show on the other pages.
     if (!me.org || me.role === "pending") for (const link of document.querySelectorAll(".top nav a")) link.hidden = true;
+    // Linking people is for owners and admins; members do not see the page in the nav.
+    if (!isAdmin(me)) for (const link of document.querySelectorAll(".top nav a[data-nav=people]")) link.hidden = true;
     const org = $("#top-org");
     if (org && me.org) {
       org.textContent = me.org.name;

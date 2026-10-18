@@ -29,6 +29,7 @@ from src.db.falkordb_client import connect  # noqa: E402
 from src.domain import orgs  # noqa: E402
 from src.domain.access import approvals  # noqa: E402
 from src.domain.access.roles import set_role  # noqa: E402
+from src.domain.knowledge import resolve  # noqa: E402
 from src.domain.memory.writeback import SlackMemoryScope  # noqa: E402
 from src.domain.onboarding import team_import  # noqa: E402
 from src.domain.slack import compute, turn_service  # noqa: E402
@@ -60,7 +61,7 @@ kind = "system"
 owner = "Sam Okafor"
 depends_on = ["Billing Service"]
 """
-PAYMENTS = "<@UBOT> onboard team: Payments | members: <@UPAULA> <@USAM> | owns: Billing Service (service), Ledger (system, <@USAM>)"
+PAYMENTS = "<@UBOT> onboard team: Payments | members: <@UPAULA> <@USAM> | owns: Ledger (system, <@USAM>), Billing Service (service) aka billing, payments"
 PROFILES = {
     "UPAULA": SimpleNamespace(id="UPAULA", real_name="Paula Ortiz", display_name="", name="paula", email="paula@dayone.example"),
     "USAM": SimpleNamespace(id="USAM", real_name="Sam Okafor", display_name="", name="sam", email="sam@dayone.example"),
@@ -132,6 +133,11 @@ class OrgDayOneTest(unittest.TestCase):
             sorted(row[0] for row in _rows(org.ref(), "MATCH (:Team {id: 'payments'})-[:RUNS]->(s:Service) RETURN s.name")),
             ["Billing Service", "Ledger"],
         )
+        self.assertEqual(_rows(org.ref(), "MATCH (s:Service {id: 'billing-service'}) RETURN s.aliases"), [["billing, payments"]])
+        with tenancy.org_context(org.ref()):
+            _, graph = connect()
+            found = resolve.resolve_rows("billing", resolve.load_rows(graph, ("Service",), ["org_shared"]), ("Service",)).entity
+        self.assertEqual(found.id, "billing-service", "a question names it by its alias")
         self.assertEqual(_rows(org.ref(), "MATCH (c:Company) RETURN count(c)"), [[1]], "no second, nameless company")
         self.assertEqual(self._legacy_companies(), legacy_before, "nothing reaches the legacy graph")
 

@@ -46,6 +46,8 @@ PAGES = {
     "/console/connectors/{connection_id}/projects": "projects.html",
     "/console/connectors/{connection_id}": "connection.html",
     "/console/ask": "ask.html",
+    "/console/teams": "teams.html",
+    "/console/people": "people.html",
 }
 
 # Whether the console runs, for the page's scripts; render() flips it on a page served while it does.
@@ -69,6 +71,8 @@ NAV = {
     ),
     "console": (
         ("connections", "Connections", "/console"),
+        ("teams", "Teams", "/console/teams"),
+        ("people", "People", "/console/people"),
         ("ask", "Ask", "/console/ask"),
     ),
 }

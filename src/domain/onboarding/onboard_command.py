@@ -40,6 +40,9 @@ from src.domain.onboarding.team_import import (
 TOOL_NAME = "onboard_team"
 COMMAND = re.compile(r"^onboard(?:\s+(?:a|the|my|our))?\s+team\s*[:\-]\s*(.+)$", re.IGNORECASE | re.DOTALL)
 MENTION = re.compile(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>")
+# "Billing Service (service) aka billing, payments", or the same inside the brackets.
+_AKA = re.compile(r"\s+aka\s+", re.IGNORECASE)
+_AKA_TOKEN = re.compile(r"^aka\s+", re.IGNORECASE)
 _ITEM = re.compile(r"^(?P<name>[^()]+?)\s*(?:\((?P<inner>[^()]*)\))?$")
 _DECIDED = re.compile(r"^(?P<name>.+?)(?:\s*[,;]?\s*\bdecided(?:\s+on)?\s+(?P<day>\d{4}-\d{2}-\d{2}))?\s*$", re.IGNORECASE | re.DOTALL)
 # What each part of the line may be called, and the tool argument it fills.
@@ -78,7 +81,7 @@ def command_args(body: str) -> dict:
             if MENTION.sub("", value).strip(" ,@"):
                 problems.append("mention each member with @ so Slack links them, like `members: @priya @dev`")
         elif field == "runs":
-            args["runs"] += [item for item in _split(value, ",") if item]
+            args["runs"] += _runs(value)
         elif field == "decisions":
             args["decisions"].append(" ".join(value.split()))
         else:
@@ -93,6 +96,36 @@ def command_args(body: str) -> dict:
 def mentioned_users(args: dict) -> list[str]:
     """Every Slack user the arguments mention, once, in order."""
     return list(dict.fromkeys(MENTION.findall(" ".join([*args.get("members", []), *args.get("runs", [])]))))
+
+
+def _runs(value: str) -> list[str]:
+    """The things in an ``owns:`` part. After ``aka`` outside the brackets, the names up to the next
+    thing with a ``(kind)`` are aliases: ``Billing (service) aka billing, payments, Ledger (system)``."""
+    runs: list[str] = []
+    for item in _split(value, ","):
+        if not item:
+            continue
+        if runs and _AKA.search(_outside(runs[-1])) and "(" not in item and not _AKA.search(item):
+            runs[-1] += f", {item}"
+        else:
+            runs.append(item)
+    return runs
+
+
+def _outside(item: str) -> str:
+    """The item with its bracketed part taken out."""
+    return re.sub(r"\([^()]*\)", " ", item)
+
+
+def _aliases(item: str) -> tuple[str, list[str]]:
+    """The item without its ``aka`` names, and those names."""
+    head, separator, tail = item.partition(")")
+    rest = tail if separator else head
+    parts = _AKA.split(rest, maxsplit=1)
+    if len(parts) == 1:
+        return item, []
+    base = f"{head}{separator}{parts[0]}" if separator else parts[0]
+    return base.strip(), [name.strip() for name in parts[1].split(",") if name.strip()]
 
 
 def unlinked_mentions(args: dict, scopes: list[str] | None = None) -> list[str]:
@@ -136,15 +169,23 @@ def team_data(args: dict, lookup: GraphLookup) -> dict:
     first = next(iter(members.values()), None)
     runs = []
     for item in args.get("runs") or []:
-        match = _ITEM.match(MENTION.sub(lambda m: f"<@{m.group(1)}>", item.strip()))
+        text, aliases = _aliases(MENTION.sub(lambda m: f"<@{m.group(1)}>", item.strip()))
+        match = _ITEM.match(text)
         if not match:
             problems.append(f"I can't read `{item[:60]}`; write each thing as `Name (kind)`, like `Renewals (process)`")
             continue
         inner = [token.strip() for token in (match.group("inner") or "").split(",") if token.strip()]
+        # Inside the brackets, ``aka`` starts the aliases: "(service, @dev, aka billing, payments)".
+        aka = next((index for index, token in enumerate(inner) if _AKA_TOKEN.match(token)), None)
+        if aka is not None:
+            aliases += [_AKA_TOKEN.sub("", inner[aka]).strip()] + [token for token in inner[aka + 1 :] if not MENTION.fullmatch(token)]
+            inner = inner[:aka] + [token for token in inner[aka + 1 :] if MENTION.fullmatch(token)]
         kinds = [token for token in inner if not MENTION.fullmatch(token)]
         owners = [member(user) for token in inner for user in MENTION.findall(token)]
         owner = owners[0] if owners else first
         row = {"name": " ".join(match.group("name").split()), "kind": kinds[0] if kinds else None}
+        if aliases := [" ".join(alias.split()) for alias in aliases if alias.strip()]:
+            row["aliases"] = aliases
         if owner:
             row["owner"] = owner["id"]
         runs.append(row)
@@ -275,7 +316,8 @@ catalogue.register(
                 "runs": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": f"Each thing the team runs as 'Name (kind)', kind one of {', '.join(SERVICE_KINDS)}.",
+                    "description": f"Each thing the team runs as 'Name (kind)', kind one of {', '.join(SERVICE_KINDS)}; "
+                    "other names people call it follow 'aka', like 'Billing Service (service) aka billing, payments'.",
                 },
                 "decisions": {"type": "array", "items": {"type": "string"}, "description": "Each decision, as 'what was decided, decided YYYY-MM-DD'."},
             },

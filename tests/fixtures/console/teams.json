@@ -1,0 +1,46 @@
+{
+ "teams": [
+  {
+   "id": "data",
+   "name": "Data",
+   "summary": "The warehouse, the event pipeline and the dashboards the company runs on.",
+   "members": [
+    {"id": "person-tomas-reyes", "name": "Tomas Reyes", "role": "Data engineer"},
+    {"id": "person-yuki-tanaka", "name": "Yuki Tanaka", "role": "Analytics lead"}
+   ],
+   "runs": [
+    {"id": "service-event-pipeline", "name": "Event Pipeline", "kind": "service", "owners": [{"id": "person-tomas-reyes", "name": "Tomas Reyes"}]},
+    {"id": "service-warehouse", "name": "Warehouse", "kind": "system", "owners": [{"id": "person-yuki-tanaka", "name": "Yuki Tanaka"}]}
+   ]
+  },
+  {
+   "id": "payments",
+   "name": "Payments",
+   "summary": "Billing, invoices and everything that moves money.",
+   "members": [
+    {"id": "person-arjun-mehta", "name": "Arjun Mehta", "role": "Billing engineer"},
+    {"id": "person-lena-fischer", "name": "Lena Fischer", "role": "Backend engineer"}
+   ],
+   "runs": [
+    {"id": "service-billing", "name": "Billing Service", "kind": "service", "owners": [{"id": "person-arjun-mehta", "name": "Arjun Mehta"}]},
+    {"id": "service-invoice-worker", "name": "Invoice Worker", "kind": "service", "owners": [{"id": "person-lena-fischer", "name": "Lena Fischer"}]},
+    {"id": "service-refunds", "name": "Refunds", "kind": "process", "owners": []}
+   ]
+  },
+  {
+   "id": "platform",
+   "name": "Platform",
+   "summary": "Auth, the API gateway and the infrastructure every team builds on.",
+   "members": [
+    {"id": "person-maya-chen", "name": "Maya Chen", "role": "Platform lead"},
+    {"id": "person-sam-okafor", "name": "Sam Okafor", "role": "SRE"},
+    {"id": "person-tomas-reyes", "name": "Tomas Reyes", "role": "Data engineer"}
+   ],
+   "runs": [
+    {"id": "service-auth", "name": "Auth Service", "kind": "service", "owners": [{"id": "person-maya-chen", "name": "Maya Chen"}]},
+    {"id": "service-api-gateway", "name": "API Gateway", "kind": "service", "owners": [{"id": "person-sam-okafor", "name": "Sam Okafor"}, {"id": "person-maya-chen", "name": "Maya Chen"}]},
+    {"id": "service-on-call", "name": "On-call rotation", "kind": "process", "owners": [{"id": "person-sam-okafor", "name": "Sam Okafor"}]}
+   ]
+  }
+ ]
+}

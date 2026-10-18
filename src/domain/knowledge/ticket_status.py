@@ -20,9 +20,9 @@ import re
 from dataclasses import dataclass, field
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import people, resolve
+from src.domain.knowledge import coverage, people, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult
-from src.domain.knowledge.resolve import SCOPED, Entity, join_names
+from src.domain.knowledge.resolve import SCOPED, Entity, Resolution, join_names
 
 TOOL = "ticket_status"
 MAX_LINKED = 5
@@ -35,7 +35,7 @@ _WHO = re.compile(r"\bwho(?:'s| is| are)? (?:working on|assigned(?: to)?|on|hand
 _BLOCKS = re.compile(r"\bblock(?:s|ed|ing|ers?)?\b|\bwaiting on\b|\bdepends on\b", re.IGNORECASE)
 # The ticket as the blocker, not the blocked: "what does PAY-13 block", "is PAY-13 blocking anything",
 # "what is PAY-13 blocking". "what blocks PAY-11" and "is PAY-11 blocked" ask the other way.
-_BLOCKING = re.compile(r"\b(?:does|do|did|will)\s+\S+\s+block\b|\bblocking\b|\bblocks\s+(?:anything|what|any)\b", re.IGNORECASE)
+_BLOCKING = re.compile(r"\b(?:does|do|did|will)\s+\S+\s+block\b|\bis\s+[a-z][a-z0-9]*-\d+\s+blocking\b|\bblocks\s+(?:anything|what|any)\b", re.IGNORECASE)
 # The question shapes routed here when they name a ticket handle.
 ASKS = re.compile(
     r"\b(?:what|which) is\b|\bwhat'?s\b|\bstatus\b|\bstate of\b|\bpriority\b|\bprogress\b|\btell me about\b|\bdetails\b"
@@ -71,27 +71,124 @@ class Ticket:
     assignee_hidden: bool = False
 
 
+def asks_about_a_titled_ticket(question: str) -> bool:
+    """No key, but a ticket's state asked about by what it is called: "what's blocking the postgres upgrade",
+    "status of the refund export". ``ticket_status`` looks the words up in ticket titles, and falls
+    through to the route the question would otherwise take when no title matches."""
+    text = question or ""
+    return not HANDLE.search(text) and bool(_TITLE_ASKS.search(text))
+
+
 def ticket_status(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = resolve.resolve_name(question, ("Ticket",), scopes, graph=graph)
+    taking = ""
     if not resolution.found:
         miss = ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "ticket"), found=False, candidates=resolution.candidate_names())
-        return _not_a_ticket(question, scopes, miss)
+        # A title is looked up only when no key is given and the words name nothing else: "who is working
+        # on the invoice worker" is about the service, whatever ticket titles mention it.
+        named = HANDLE.search(question or "") or resolve.resolve_name(question, _NAMED_ELSEWHERE, scopes, graph=graph).found
+        hits = [] if named else _titled(graph, question, scopes)
+        if not hits:
+            return _not_a_ticket(question, scopes, miss, graph)
+        if len(hits) > 1 and hits[0][3] < STRONG_HIT * hits[1][3]:
+            return _titled_list(hits)
+        ticket_id, name, title, _score = hits[0]
+        resolution = Resolution(query=question, entity=Entity(ticket_id, name, "Ticket"))
+        taking = f"(Taking “{_words(question)}” as {name}, “{title}”.) "
     result = ToolResult(tool=TOOL, answer="", candidates=resolution.candidate_names())
     ticket = read(graph, resolution.entity, scopes, result)
-    result.answer = _answer(question, ticket)
+    result.answer = taking + _answer(question, ticket) + coverage.capped_note(graph, scopes, [ticket.id])
     return result
 
 
-def _not_a_ticket(question: str, scopes: list[str], miss: ToolResult) -> ToolResult:
-    """What a word-number token ("q3-2026", "utf-8", "gpt-4") that names no readable ticket was really
-    asking: the route the question takes without the single-ticket rule, else the refusal fallback."""
+# --- a ticket found by its title -------------------------------------------------------------
+
+_TITLE_ASKS = re.compile(
+    r"\bwhat(?:'s|s| is) blocking\b|\bwhat blocks\b|\bwho(?:'s| is) (?:working on|assigned to)\b|\bstatus of\b"
+    r"|^\s*is (?:the )?.+ (?:fixed|resolved|done|shipped|blocked)\s*\??\s*$",
+    re.IGNORECASE,
+)
+# Words that say what is asked about a ticket, not which ticket.
+_ASKING_WORDS = frozenset(
+    {"blocking", "blocks", "blocked", "block", "status", "fixed", "resolved", "done", "shipped", "working", "assigned", "ticket", "issue", "state"}
+)
+_NAMED_ELSEWHERE = ("Service", "Document", "Person", "Team", "Decision")
+TITLE_HITS = 3
+# The best title hit is taken as the ticket when it scores this much more than the next.
+STRONG_HIT = 1.5
+
+
+def _words(question: str) -> str:
+    return " ".join(word for word in resolve.tokens(question) if len(word) > 1 and word not in resolve.STOPWORDS and word not in _ASKING_WORDS)
+
+
+def _titled(graph, question: str, scopes: list[str]) -> list[tuple[str, str, str, float]]:
+    """Readable tickets whose title holds every word asked about, best first: (id, key, title, score)."""
+    words = [word for word in _words(question).split() if len(word) > 2]
+    if not words:
+        return []
+    query = " ".join(f"{word}*" if len(word) >= 4 else word for word in words)
+    try:
+        rows = graph.ro_query(
+            f"""
+            CALL db.idx.fulltext.queryNodes('Ticket', $q) YIELD node AS t, score
+            WHERE {SCOPED.format(var="t")} AND t.name IS NOT NULL
+            RETURN t.id, t.name, coalesce(t.title, ''), score
+            ORDER BY score DESC
+            LIMIT $k
+            """,
+            {"q": query, "scopes": list(scopes), "k": TITLE_HITS + 1},
+        ).result_set
+    except Exception:  # no full-text index yet: nothing found by title
+        return []
+    # Every word must be in the title, so "the postgres upgrade" never lands on any ticket mentioning postgres.
+    return [row for row in rows if all(any(token.startswith(word[:4]) for token in resolve.tokens(row[2])) for word in words)][:TITLE_HITS]
+
+
+def _titled_list(hits: list) -> ToolResult:
+    result = ToolResult(tool=TOOL, answer="")
+    named = [f"{name} (“{title}”)" for _id, name, title, _score in hits]
+    result.answer = f"More than one ticket is titled like that: {join_names(named)}. Ask about one by its key."
+    return result
+
+
+def _not_a_ticket(question: str, scopes: list[str], miss: ToolResult, graph=None) -> ToolResult:
+    """What a key that names no readable ticket was asking.
+
+    A word-number token ("q3-2026", "utf-8") gets the route the question takes without the
+    single-ticket rule. When that finds nothing and the key looks like a tracker's ("PAY-999"), the
+    reply says so: the project it would be in is synced and the key is not in it, or no project by
+    that key is shared with Company Brain."""
     from src.domain.knowledge import ask_service, fallback  # ask_service imports this module
 
+    match = HANDLE.search(question or "")
+    if graph is not None and match and coverage.project(graph, match.group(0).rsplit("-", 1)[0], scopes) is not None:
+        # The key of a project that is synced: the ticket is missing from it, whatever else the words name.
+        return ToolResult(tool=TOOL, answer=_unknown_key(graph, question, scopes), found=False, candidates=miss.candidates)
     tool, args = ask_service.route(question, tickets=False)
-    if tool not in ("none", TOOL):
-        return ask_service._ROUTED[tool](args, scopes)
-    return fallback.before_refusing(question, scopes, miss)
+    answer = ask_service._ROUTED[tool](args, scopes) if tool not in ("none", TOOL) else fallback.before_refusing(question, scopes, miss)
+    if answer.found or graph is None:
+        return answer
+    unknown = _unknown_key(graph, question, scopes)
+    return ToolResult(tool=TOOL, answer=unknown, found=False, candidates=answer.candidates) if unknown else answer
+
+
+def _unknown_key(graph, question: str, scopes: list[str]) -> str | None:
+    """"I can't find PAY-999 in the graph; Jira PAY is synced (PAY-1 to PAY-17).", or None when the key is no tracker's."""
+    match = HANDLE.search(question or "")
+    if match is None:
+        return None
+    key = match.group(0).upper()
+    project = key.rsplit("-", 1)[0]
+    synced = coverage.project(graph, project, scopes)
+    if synced is not None:
+        source, low, high = synced
+        span = f" ({project}-{low} to {project}-{high})" if low is not None else ""
+        return f"I can't find {key} in the graph; {source} {project} is synced{span}. It may be newer than the last sync, or one the sync does not keep."
+    if match.group(0).split("-", 1)[0].isupper():
+        return f"I can't find {key} in the graph. It may be in a project that is not shared with Company Brain."
+    return None
 
 
 def read(graph, target: Entity, scopes: list[str], result: ToolResult) -> Ticket:

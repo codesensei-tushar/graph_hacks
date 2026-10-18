@@ -137,3 +137,61 @@ class FakeApiTest(unittest.TestCase):
         self.assertEqual(self.http.get("/console/api/me").json()["role"], "owner")
         self.pick("error")
         self.assertEqual(self.http.get("/console/api/connections").status_code, 503)
+
+    def test_teams_list_and_import_in_the_onboarding_shapes(self):
+        # docs/CONSOLE.md "## Teams" (#185): the list, check then merge, refusals, the size limit.
+        self.pick("empty")
+        self.assertEqual(self.http.get("/console/api/teams").json(), {"teams": []})
+        sales = (Path(__file__).resolve().parents[2] / "examples" / "teams" / "quillfern-sales.toml").read_text()
+        check = self.http.post("/console/api/teams/import", json={"file": sales, "check": True}, headers=self.csrf)
+        self.assertEqual(check.status_code, 200)
+        self.assertEqual(set(check.json()), {"mode", "company", "team", "contents", "counts"})
+        self.assertEqual((check.json()["mode"], check.json()["team"]), ("check", "sales"))
+        self.assertEqual(set(check.json()["counts"]), {"people", "runs", "decisions"})
+        self.assertEqual(self.http.get("/console/api/teams").json(), {"teams": []}, "a check writes nothing")
+        merge = self.http.post("/console/api/teams/import", json={"file": sales}, headers=self.csrf)
+        self.assertEqual(merge.json()["mode"], "merge")
+        self.assertLessEqual({"nodes", "nodes_created", "edges_created", "properties_set"}, set(merge.json()))
+        (team,) = self.http.get("/console/api/teams").json()["teams"]
+        self.assertEqual(set(team), {"id", "name", "summary", "members", "runs"})
+        self.assertEqual(team["name"], "Sales")
+        self.assertEqual(set(team["members"][0]), {"id", "name", "role"})
+        self.assertEqual(set(team["runs"][0]), {"id", "name", "kind", "owners"})
+        bad = self.http.post("/console/api/teams/import", json={"file": "[[runs]]\nname = 'X'\nkind = 'gizmo'\n", "check": True}, headers=self.csrf)
+        self.assertEqual(bad.status_code, 400)
+        self.assertEqual(bad.json()["error"], "refused")
+        self.assertTrue(all(isinstance(problem, str) for problem in bad.json()["problems"]))
+        big = self.http.post("/console/api/teams/import", json={"file": "#" * (256 * 1024 + 1)}, headers=self.csrf)
+        self.assertEqual(big.json(), {"error": "too_large", "limit_bytes": 256 * 1024})
+        self.pick("member")
+        self.assertEqual(self.http.post("/console/api/teams/import", json={"file": sales}, headers=self.csrf).status_code, 403)
+        self.assertEqual(len(self.http.get("/console/api/teams").json()["teams"]), 3)
+
+    def test_people_unlinked_and_link_in_the_onboarding_shapes(self):
+        # docs/CONSOLE.md "## People" (#190): no emails anywhere, at most 5 suggestions, admins only.
+        fixture = json.loads((FIXTURES / "people.json").read_text())
+        self.assertEqual(set(fixture), {"unlinked", "people"})
+        for account in fixture["unlinked"]:
+            self.assertEqual(set(account), {"id", "name", "source", "items", "suggestions"})
+            self.assertIn(account["source"], {"jira", "hubspot"})
+            self.assertLessEqual(len(account["suggestions"]), 5)
+            for suggestion in account["suggestions"]:
+                self.assertEqual(set(suggestion), {"person_id", "name", "reason"})
+                self.assertIn(suggestion["reason"], {"same_name", "same_email_domain"})
+        self.assertNotIn("@", json.dumps(fixture))
+        self.pick("default")
+        listed = self.http.get("/console/api/people/unlinked").json()
+        account = listed["unlinked"][0]
+        person = account["suggestions"][0]["person_id"]
+        linked = self.http.post("/console/api/people/link", json={"external_user_id": account["id"], "person_id": person}, headers=self.csrf)
+        self.assertEqual(linked.status_code, 200)
+        self.assertEqual(set(linked.json()), {"ok", "external_user_id", "person", "changed"})
+        self.assertEqual(set(linked.json()["person"]), {"id", "name"})
+        self.assertNotIn(account["id"], [a["id"] for a in self.http.get("/console/api/people/unlinked").json()["unlinked"]])
+        by_email = self.http.post("/console/api/people/link", json={"external_user_id": console_fake.LINKED_BY_EMAIL, "person_id": person}, headers=self.csrf)
+        self.assertEqual(by_email.status_code, 409)
+        self.assertEqual(self.http.post("/console/api/people/link", json={"external_user_id": "nope", "person_id": person}, headers=self.csrf).status_code, 404)
+        self.pick("member")
+        self.assertEqual(self.http.get("/console/api/people/unlinked").status_code, 403)
+        self.pick("linked")
+        self.assertEqual(self.http.get("/console/api/people/unlinked").json()["unlinked"], [])

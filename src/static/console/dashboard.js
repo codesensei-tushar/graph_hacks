@@ -11,6 +11,24 @@
   let me = null;
   let watcher = null;
   let slackCard = null; // the workspace card, once /console/api/slack answers
+  let unlinkedBy = {}; // connection id -> accounts linked to no person (admins only)
+  let lastConnections = null;
+
+  // An account id is "<connection id>:user:<account>", so each card can count its own.
+  async function loadUnlinked() {
+    if (!C.isAdmin(me)) return;
+    try {
+      const data = await C.api("GET", "/console/api/people/unlinked");
+      unlinkedBy = {};
+      for (const account of (data && data.unlinked) || []) {
+        const owner = account.id.split(":user:")[0];
+        unlinkedBy[owner] = (unlinkedBy[owner] || 0) + 1;
+      }
+      if (lastConnections) render(lastConnections);
+    } catch (error) {
+      unlinkedBy = {};
+    }
+  }
 
   const slackFirst = () => (slackCard ? [slackCard] : []);
 
@@ -103,6 +121,8 @@
     }
     if (status.tone === "error") link.append(el("p", { class: "conn-error" }, "The last sync failed. Open it to see what happened and sync again."));
     link.append(el("p", { class: "conn-note" }, "Everyone in your Slack workspace can ask about this."));
+    const unlinked = unlinkedBy[connection.id];
+    if (unlinked) link.append(el("p", { class: "conn-nudge" }, `${C.plural(unlinked, "account is", "accounts are")} not linked to a person yet. Open it to link them.`));
 
     const foot = el("div", { class: "conn-foot" });
     foot.append(el("span", {}, connection.created_by ? `Added by ${connection.created_by}` : `Added ${C.ago(connection.created_at)}`));
@@ -172,6 +192,7 @@
   }
 
   function render(connections) {
+    lastConnections = connections;
     list.removeAttribute("aria-busy");
     if (!connections.length) { empty(); return false; }
     list.replaceChildren(...slackFirst(), ...connections.map(card));
@@ -207,7 +228,24 @@
       return render(connections || []);
     }, $("#poll-note"));
     loadSlack();
+    nudgeTeams();
+    loadUnlinked();
     load();
+  }
+
+  // No team yet: answers cannot say who owns what, so the page says where to fix that.
+  async function nudgeTeams() {
+    try {
+      const data = await C.api("GET", "/console/api/teams");
+      if ((data && data.teams || []).length) return;
+    } catch (error) {
+      return;
+    }
+    if (!C.isAdmin(me)) {
+      $("#teams-nudge-sub").textContent = "An owner or admin of your company can add them on the Teams page.";
+      $("#teams-nudge-go").textContent = "See Teams";
+    }
+    $("#teams-nudge").hidden = false;
   }
 
   start();

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from src.connectors.graph import container_names
 from src.domain.github.repos import repo_names
 from src.domain.access.roles import ROLE_OWNER, role_at_least, role_of, set_role
-from src.domain.knowledge import agent, catalogue, smalltalk
+from src.domain.knowledge import agent, asker, catalogue, smalltalk
 from src.domain.knowledge import memories as knowledge_memories
 from src.domain.memory import memory_service
 from src.domain.memory.writeback import (
@@ -128,8 +128,10 @@ def _answer_from_graph(request: TurnRequest) -> TurnOutcome:
     question = " ".join([request.question, *request.live_updates]).strip()
     # The same keyword choice and thread fallback the agent uses, minus the model call.
     bot_ids = frozenset(filter(None, [getattr(request.workspace, "bot_user_id", None)]))
-    choice = agent.choose_with_keywords(question)
+    # I, me and my are the asker, as in the agent turn; an unknown asker is told how to link, in Slack.
+    choice = asker.for_the_asker(agent.choose_with_keywords(question), question, request.asker_slack_user_id, request.read_tags)
     result, choice = agent.run_choice(choice, question, request.read_tags, request.thread, bot_ids)
+    result = asker.in_slack(result)
     # Only memories that mention what the answer is about, or something one hop from it.
     memories = result.memories or (knowledge_memories.attached(result, request.read_tags) if result.found else [])
     memories = [memory.to_dict() for memory in memories]

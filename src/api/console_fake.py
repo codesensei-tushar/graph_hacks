@@ -18,6 +18,7 @@ watched: a container finishes, the count goes up, and the pill turns "Up to date
 import json
 import re
 import time
+import tomllib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from src.domain.knowledge import ask_api
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "console"
-SCENARIOS = ("default", "attention", "empty", "member", "new", "error", "signedout")
+SCENARIOS = ("default", "attention", "empty", "member", "new", "error", "signedout", "linked")
 COOKIE = "console_fixture"
 AGO = re.compile(r"^-(\d+)s$")
 
@@ -66,7 +67,20 @@ def _fresh(scenario: str) -> dict:
         me["slack_connected"] = False
     if scenario in ("empty", "new"):
         connections = []
-    return {"scenario": scenario, "me": me, "connections": _stamp(connections, now), "removing": {}, "seq": 0}
+    teams = [] if scenario in ("empty", "new") else _load("teams.json")["teams"]
+    people = _load("people.json")
+    # "linked": the default company with every account already linked to a person.
+    unlinked = [] if scenario in ("empty", "new", "linked") else people["unlinked"]
+    return {
+        "scenario": scenario,
+        "me": me,
+        "connections": _stamp(connections, now),
+        "teams": teams,
+        "unlinked": unlinked,
+        "people": people["people"],
+        "removing": {},
+        "seq": 0,
+    }
 
 
 def _scenario(request: Request) -> dict:
@@ -365,6 +379,146 @@ def slack(request: Request):
     if not state["me"]["org"]:
         return JSONResponse({"detail": "no_org"}, status_code=403)
     return _stamp(_load("slack.json"), datetime.now(UTC))
+
+
+KINDS = ("service", "system", "process", "product", "account", "policy", "playbook")
+LIMIT_BYTES = 256 * 1024
+
+
+def _parse_team(text: str) -> tuple[dict | None, list[str]]:
+    """A small stand-in for team_import's checks: enough to show a preview and real-looking problems."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        return None, [f"the file is not valid TOML: {str(error)[:120]}"]
+    problems = []
+    head = data.get("team") or {}
+    if not head.get("name"):
+        problems.append("the file needs a [team] section with the team's name")
+    members = data.get("members") or []
+    runs = data.get("runs") or []
+    names = {m.get("name") for m in members}
+    for index, row in enumerate(runs, 1):
+        where = f"[[runs]] {index} ({row.get('name', '?')})"
+        if row.get("kind", "service") not in KINDS:
+            problems.append(f"kind in {where} is {row.get('kind')!r}; use one of {', '.join(KINDS)}")
+        owner = row.get("owner")
+        if owner and owner not in names:
+            problems.append(f"owner in {where}: '{owner}' is not a person in this file")
+    team_id = head.get("id") or re.sub(r"[^a-z0-9]+", "-", str(head.get("name", "")).lower()).strip("-")
+    team = {
+        "id": team_id,
+        "name": head.get("name", ""),
+        "summary": head.get("summary", ""),
+        "members": [{"id": f"person-{m.get('id') or m.get('name', '').lower()}", "name": m.get("name", ""), "role": m.get("role")} for m in members],
+        "runs": [
+            {
+                "id": f"service-{r.get('id') or r.get('name', '').lower()}",
+                "name": r.get("name", ""),
+                "kind": r.get("kind", "service"),
+                "owners": [{"id": f"person-{r['owner'].lower()}", "name": r["owner"]}] if r.get("owner") else [],
+            }
+            for r in runs
+        ],
+        "decisions": len(data.get("decisions") or []),
+    }
+    return team, problems
+
+
+def _counted(team: dict) -> tuple[dict, str]:
+    runs: dict[str, int] = {}
+    for row in team["runs"]:
+        runs[row["kind"]] = runs.get(row["kind"], 0) + 1
+    counts = {"people": len(team["members"]), "runs": runs, "decisions": team["decisions"]}
+    word = lambda n, one, many: f"{n} {one if n == 1 else many}"  # noqa: E731
+    parts = [word(counts["people"], "person", "people")]
+    parts += [word(runs[kind], kind, kind + "s") for kind in KINDS if kind in runs]
+    if counts["decisions"]:
+        parts.append(word(counts["decisions"], "decision", "decisions"))
+    return counts, f"{team['name']}: {', '.join(parts)}"
+
+
+@router.get("/console/api/teams")
+def teams(request: Request):
+    state = _scenario(request)
+    if denied := _denied(request, state):
+        return denied
+    if not state["me"]["org"]:
+        return JSONResponse({"detail": "no_org"}, status_code=403)
+    return {"teams": sorted(state["teams"], key=lambda t: t["name"])}
+
+
+@router.post("/console/api/teams/import")
+async def import_team(request: Request):
+    state = _scenario(request)
+    if denied := _denied(request, state, admin=True, mutation=True):
+        return denied
+    if not (request.headers.get("content-type") or "").startswith("application/json"):
+        return JSONResponse({"detail": "send JSON"}, status_code=415)
+    body = await request.json()
+    text, check = body.get("file"), body.get("check", False)
+    if not isinstance(text, str) or not text.strip():
+        return JSONResponse({"error": "file is the team file's text (TOML)"}, status_code=400)
+    if len(text.encode()) > LIMIT_BYTES:
+        return JSONResponse({"error": "too_large", "limit_bytes": LIMIT_BYTES}, status_code=413)
+    team, problems = _parse_team(text)
+    if problems:
+        return JSONResponse({"error": "refused", "problems": problems}, status_code=400)
+    counts, contents = _counted(team)
+    company = state["me"]["org"]["slug"]
+    if check:
+        return {"mode": "check", "company": company, "team": team["id"], "contents": contents, "counts": counts}
+    team.pop("decisions")
+    known = next((t for t in state["teams"] if t["id"] == team["id"]), None)
+    if known:
+        state["teams"].remove(known)
+    state["teams"].append(team)
+    created = 0 if known else 1 + len(team["members"]) + len(team["runs"]) + counts["decisions"]
+    edges = 0 if known else len(team["members"]) + len(team["runs"]) + sum(len(r["owners"]) for r in team["runs"])
+    return {
+        "mode": "merge",
+        "team": team["id"],
+        "contents": contents,
+        "counts": counts,
+        "company": company,
+        "nodes": 1 + len(team["members"]) + len(team["runs"]) + counts["decisions"],
+        "nodes_created": created,
+        "edges_created": edges,
+        "properties_set": 3 * created,
+    }
+
+
+@router.get("/console/api/people/unlinked")
+def people_unlinked(request: Request):
+    state = _scenario(request)
+    if denied := _denied(request, state, admin=True):
+        return denied
+    return {"unlinked": state["unlinked"], "people": state["people"]}
+
+
+# An account the fixtures treat as already linked by email, for the 409.
+LINKED_BY_EMAIL = "jira:01JB7Q2K9W:user:70bb1e44"
+
+
+@router.post("/console/api/people/link")
+async def people_link(request: Request):
+    state = _scenario(request)
+    if denied := _denied(request, state, admin=True, mutation=True):
+        return denied
+    if not (request.headers.get("content-type") or "").startswith("application/json"):
+        return JSONResponse({"detail": "send JSON"}, status_code=415)
+    body = await request.json()
+    account_id, person_id = body.get("external_user_id"), body.get("person_id")
+    if not isinstance(account_id, str) or not isinstance(person_id, str):
+        return JSONResponse({"error": "external_user_id and person_id are ids"}, status_code=400)
+    account = next((a for a in state["unlinked"] if a["id"] == account_id), None)
+    person = next((p for p in state["people"] if p["id"] == person_id), None)
+    if account_id == LINKED_BY_EMAIL:
+        return JSONResponse({"error": "linked_by_email"}, status_code=409)
+    if not account or not person:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    state["unlinked"].remove(account)
+    return {"ok": True, "external_user_id": account_id, "person": person, "changed": True}
 
 
 @router.get("/console/api/audit")

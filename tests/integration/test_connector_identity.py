@@ -14,7 +14,7 @@ import tests  # noqa: F401  pins the test graph and owner before src loads
 from src.connectors import graph
 from src.connectors.base import Container, Edge, ExternalUser, Install, Item, Page
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import agent, algorithms, ask_api, ask_service, catalogue, find, resolve  # noqa: E402
+from src.domain.knowledge import agent, algorithms, ask_api, ask_service, catalogue, find, people, resolve  # noqa: E402
 from src.domain.slack import agent_turn  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
 
@@ -98,13 +98,18 @@ class ConnectorIdentityTest(unittest.TestCase):
             self.assertIn("2 HubSpot users share this email", profile.answer)
             jira_side = _ask("what if Yash Patil leaves")
             self.assertNotIn("Evil Corp", jira_side.answer)
-            self.assertIn("share this email", jira_side.answer)
+            self.assertIn("Yash Patil (Jira)", jira_side.candidates)
+            # Not one identity now: the Jira and HubSpot "Yash Patil" are both offered, neither picked.
+            owned = _ask("which accounts does Yash Patil own")
+            self.assertFalse(owned.found)
+            self.assertEqual(sorted(owned.candidates), ["Yash Patil (HubSpot)", "Yash Patil (Jira)"])
         finally:
             falkordb_client.connect()[1].query("MATCH (n) WHERE n.id IN $ids DETACH DELETE n", {"ids": [mallory.id, evil.id]})
         # An email an admin asserted links a user to a person, but never merges identities.
         install = Install(source="hubspot", config={"people": "h1=yash@partner.example"})
-        with mock.patch("src.connectors.registry.all_installs", return_value=[(None, install)]):
-            self.assertTrue(_ask("who is Yash Patil").answer.startswith("Yash Patil (Jira) is a Jira user.") or _ask("who is Yash Patil").answer.startswith("Yash Patil (HubSpot) is a HubSpot user."))
+        with mock.patch("src.connectors.registry.all_installs", return_value=[(None, install)]), mock.patch.object(people, "_asserted_cache", (0.0, None)):
+            self.assertNotIn("Jira, HubSpot", _ask("who is Yash Patil").answer)
+            self.assertIn("Yash Patil (Jira)", find.find("Ticket", {"person": "Yash Patil"}, SLACK).candidates)
 
     # --- first names ---------------------------------------------------------------------------
 
@@ -131,7 +136,7 @@ class ConnectorIdentityTest(unittest.TestCase):
 
     def test_in_slack_i_and_me_are_the_asker(self):
         request = types.SimpleNamespace(asker_slack_user_id="UARJUN", read_tags=SLACK)
-        with mock.patch.object(agent_turn, "asker_person_ref", return_value="person:arjun"):
+        with mock.patch("src.domain.knowledge.asker.person_ref", return_value="person:arjun"):
             for question, tool in (("what team am I on", "person_profile"), ("what if I leave", "if_person_leaves"), ("my open tickets", "find")):
                 with self.subTest(question=question):
                     choice = agent_turn.for_the_asker(agent.choose_with_keywords(question), question, request)
