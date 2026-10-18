@@ -61,6 +61,54 @@ def combine(first: tuple[str, ToolResult], rest: tuple[str, ToolResult]) -> Tool
     return combined
 
 
+# One verb, several things: "who knows auth and postgres", "who owns billing, auth, postgres and search".
+# Each thing gets the same question; one block each, at most this many, then a note for the rest.
+MAX_OBJECTS = 5
+_JOINER = re.compile(r"^\s*(?:,\s*(?:and\s+)?|\s+and\s+|\s*&\s*)(?:the\s+)?$", re.IGNORECASE)
+_TOKEN = re.compile(r"[a-z0-9]+")
+
+
+def objects(text: str, labels: tuple[str, ...], scopes: list[str]) -> list[tuple[str, str]] | None:
+    """The question asked once per thing when it names two or more things joined by "and" or commas:
+    [(thing's name, the question with only that thing), ...]. None when it names one thing, or names
+    several that are not a list ("how is maya connected to the invoice worker")."""
+    rows = resolve.load_rows(_graph(), labels, scopes)
+    matches = resolve._kept_matches(text, rows, labels)
+    if len(matches) < 2 or len({match.entity for match in matches}) != len(matches):
+        return None
+    spans = [token.span() for token in _TOKEN.finditer((text or "").lower())]
+    places = [(spans[match.start][0], spans[match.end - 1][1]) for match in matches]
+    for (_start, end), (start, _end) in zip(places, places[1:]):
+        if not _JOINER.match(text[end:start]):
+            return None
+    prefix, suffix = text[: places[0][0]], text[places[-1][1] :]
+    return [(match.entity.name, f"{prefix}{text[start:end]}{suffix}") for match, (start, end) in zip(matches, places)]
+
+
+def _graph():
+    from src.db.falkordb_client import connect
+
+    return connect()[1]
+
+
+def each(parts: list[tuple[str, ToolResult]], dropped: list[str]) -> ToolResult:
+    """One answer for a question asked about several things: one block per thing, the union of their
+    edges, and a note naming any thing past the cap so nothing asked is silently left out."""
+    results = [result for _name, result in parts]
+    combined = ToolResult(
+        tool=" + ".join(dict.fromkeys(result.tool for result in results)),
+        answer=SEPARATOR.join(result.answer for result in results),
+        found=any(result.found for result in results),
+    )
+    for result in results:
+        combined.extend(result.path)
+        combined.memories += [memory for memory in result.memories if memory not in combined.memories]
+    combined.parts = [{"question": name, "tool": result.tool, "answer": result.answer, "found": result.found} for name, result in parts]
+    if dropped:
+        combined.answer += f"{SEPARATOR}(Answered for the first {len(parts)}; ask about {resolve.join_names(dropped)} separately.)"
+    return combined
+
+
 def offer(rest: str, result: ToolResult) -> ToolResult:
     """A rest that cannot be answered is offered as the next question, after an answer to the first part."""
     if result.found:

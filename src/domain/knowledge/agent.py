@@ -45,6 +45,12 @@ THREAD_CONTEXT_MESSAGES = 6
 THREAD_MESSAGE_CHARS = 300
 THREAD_NAMED_LIMIT = 5
 THREAD_LABELS = ("Service", "Document", "Ticket", "Decision")
+# Tools asked once per thing when a question lists several ("who knows auth and postgres"), with the
+# labels each takes. path_between and connectors take two things on purpose and are not here.
+PER_OBJECT = {
+    "who_owns": ask_service.ANSWER_LABELS, "who_knows": ask_service.ANSWER_LABELS, "blast_radius": ("Service",),
+    "reading_list": ("Service",), "if_person_leaves": ("Person",), "person_profile": ("Person",),
+}
 
 # The footer names the tool: "Tool `who_knows`, picked by ..." in the blocks. Slack's plain-text
 # fallback of the same reply drops the backticks and, stripping italics, the underscores in the
@@ -384,7 +390,8 @@ def run_choice(
         # "who to contact": the people who know it. The keyword router reads "who to ping about the outage" as blast radius.
         rest_choice = ToolChoice("who_knows", {"name": rest}, rest_choice.via)
     asked = rest
-    if compound.names_nothing(rest, scopes, THREAD_LABELS):
+    # A person or a team named in the rest is its own subject: "and what if maya leaves".
+    if compound.names_nothing(rest, scopes, (*THREAD_LABELS, "Person", "Team")):
         subject = _subject_of(ran, first, scopes) if result.found else None
         if subject is None:
             # Nothing to ask it about: a search on "who to contact" would answer something else.
@@ -411,6 +418,15 @@ def _subject_of(ran: ToolChoice, first: str, scopes: list[str]) -> Entity | None
 def _run_noted(
     choice: ToolChoice, question: str, scopes: list[str], thread: list[dict] | None = None, bot_ids: frozenset[str] = frozenset()
 ) -> tuple[ToolResult, ToolChoice]:
+    named = choice.args.get("name") if choice.tool in PER_OBJECT else None
+    listed = compound.objects(named, PER_OBJECT[choice.tool], scopes) if isinstance(named, str) else None
+    if listed:
+        # "who knows auth and postgres": the same question about each, never one of them silently.
+        parts = []
+        for thing, asked in listed[: compound.MAX_OBJECTS]:
+            part, ran = _run_noted(ToolChoice(choice.tool, {**choice.args, "name": asked}, choice.via), asked, scopes, None, bot_ids)
+            parts.append((thing, part))
+        return compound.each(parts, [thing for thing, _asked in listed[compound.MAX_OBJECTS :]]), choice
     with resolve.noting_taken() as taken:
         result, ran = _run_choice(choice, question, scopes, thread, bot_ids)
     if result.found and taken:
