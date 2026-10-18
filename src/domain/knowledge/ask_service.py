@@ -42,6 +42,8 @@ SOURCE_NAMES = {"jira": "Jira", "hubspot": "HubSpot"}
 # Tickets about a service that who_knows lists: open ones first; then the ones with no sync
 # time (seeded, or filed from Slack: few, and written by hand); then the most recently updated.
 MAX_TICKETS = 8
+# Ticket-only assignees named in "Ask first" before the rest are counted.
+MAX_ASSIGNEES_NAMED = 2
 _UPDATED = "coalesce(ticket.source_updated_at, ticket.updated_at, '')"
 _TICKET_ORDER = (
     f"CASE WHEN coalesce(ticket.state, 'open') = 'closed' THEN 1 ELSE 0 END, CASE WHEN {_UPDATED} = '' THEN 0 ELSE 1 END, {_UPDATED} DESC, ticket.name"
@@ -584,9 +586,16 @@ def knowers(graph, target: Entity, scopes: list[str]) -> ToolResult:
     else:
         named = kinds.capitalized(kinds.subject(target.name, target.kind))
         parts = [f"{named} is {kinds.owned(target.kind)} {join_names(owners)}." if owners else f"{named} has no named owner."]
-    ranked = rank_people(result.path, target)
+    ranked = rank_people_tiered(result.path, target)
     if ranked:
-        first, *rest = [f"{name} ({reasons})" for name, _score, reasons in ranked]
+        # Assignees whose only tie is tickets come after everyone who knows the thing, a few by name.
+        named = [entry for entry in ranked if entry[4] == 0]
+        assignees = [entry for entry in ranked if entry[4] == 1]
+        named += assignees[:MAX_ASSIGNEES_NAMED]
+        first, *rest = [f"{name} ({reasons})" for _who, name, _score, reasons, _tier in named]
+        if len(assignees) > MAX_ASSIGNEES_NAMED:
+            more = len(assignees) - MAX_ASSIGNEES_NAMED
+            rest.append(f"{more} more ticket assignee{'s' if more != 1 else ''}")
         parts.append(f"Ask first: {first}" + (f", then {join_names(rest)}" if rest else "") + ".")
     if open_tickets:
         parts.append(f"Open tickets: {join_names(open_tickets + ([f'{more_open} more'] if more_open else []))}.")
@@ -616,8 +625,17 @@ def rank_people_keyed(path: list[PathStep], target: Entity) -> list[tuple[tuple[
     person the company knows is someone else until it is linked. Work on tickets that lead to the
     target counts once per person, at its heaviest edge.
     """
+    return [(who, name, score, reasons) for who, name, score, reasons, _tier in rank_people_tiered(path, target)]
+
+
+def rank_people_tiered(path: list[PathStep], target: Entity) -> list[tuple[tuple[str, str], str, int, str, int]]:
+    """``rank_people_keyed`` with each one's tier: 0 for a person, or an account with its own edge to
+    the thing (owns, worked on, knows, wrote); 1 for an account whose only tie is tickets (a Jira
+    assignee). Tier 0 always ranks first: one assigned ticket never puts a contractor ahead of the
+    engineer who knows the service."""
     scores: dict[tuple[str, str], int] = {}
     ticket_work: dict[tuple[str, str], int] = {}
+    direct: set[tuple[str, str]] = set()
     names: dict[tuple[str, str], str] = {}
     reasons: dict[tuple[str, str], dict[str, list[str]]] = {}
     for step in path:
@@ -633,17 +651,23 @@ def rank_people_keyed(path: list[PathStep], target: Entity) -> list[tuple[tuple[
             scores.setdefault(who, 0)
         else:
             scores[who] = scores.get(who, 0) + weight
+            if step.to_label != "Ticket":
+                direct.add(who)
         verb, what = _reason(step, target)
         objects = reasons.setdefault(who, {}).setdefault(verb, [])
         if what not in objects:
             objects.append(what)
     for who, weight in ticket_work.items():
         scores[who] += weight
+
+    def tier(who: tuple[str, str]) -> int:
+        return 1 if who[0] in ACCOUNT_LABELS and who not in direct else 0
+
     ranked = []
-    for who in sorted(scores, key=lambda who: (-scores[who], names[who], who)):
+    for who in sorted(scores, key=lambda who: (tier(who), -scores[who], names[who], who)):
         # "worked on it and TKT-102, wrote notebook#52": one clause per verb, "it" first.
         clauses = [f"{verb} {join_names(sorted(objects, key=lambda what: what != 'it'))}" for verb, objects in reasons[who].items()]
-        ranked.append((who, names[who], scores[who], ", ".join(clauses)))
+        ranked.append((who, names[who], scores[who], ", ".join(clauses), tier(who)))
     return ranked
 
 

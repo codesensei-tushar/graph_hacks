@@ -134,7 +134,7 @@ class RiskMapTest(_Graph):
 
     def test_pagerank_is_load_bearing_s_number(self):
         rows = _rows(_map())
-        self.assertIn(f"Postgres carries the most weight (PageRank {rows['Postgres']['pagerank']:.2f})", algorithms.load_bearing().answer)
+        self.assertIn(f"Postgres carries the most weight (PageRank {rows['Postgres']['pagerank']:.2f}, 1st of", algorithms.load_bearing().answer)
         self.assertGreater(rows["Postgres"]["pagerank"], rows["Graph Store"]["pagerank"])
 
     def test_the_path_cites_owners_teams_dependents_and_the_other_team(self):
