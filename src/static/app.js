@@ -60,7 +60,7 @@
       catalogue = { company, name: data.company_name || null };
       renderChips(data.examples || []);
       renderGraphLine();
-      renderTools(data.tools || []);
+      renderTools(data.tools || [], data.writes || []);
       $("#onboard-slack").hidden = !(data.writes || []).includes("onboard_team");
       renderBeat();
     } catch (error) {
@@ -116,16 +116,111 @@
     else if (catalogue.name) line.textContent = `This page reads the live graph of ${catalogue.name}, a synthetic company built for the demo${what}.`;
   }
 
-  function renderTools(tools) {
-    const count = $("#tool-count");
-    count.replaceChildren(el("b", {}, String(tools.length)), ` read-only tool${tools.length === 1 ? "" : "s"}`);
+  // The catalogue for builders: one card per read-only tool, read live from /api/ask/tools, with
+  // its first sentence and its arguments. Each card has an id, so a proof row can link to it.
+  // The architecture diagram takes its counts from the same call.
+  function renderTools(tools, writes) {
+    const reads = plural(tools.length, "read-only tool", "read-only tools");
+    $("#tool-count").replaceChildren(el("b", {}, String(tools.length)), reads.slice(String(tools.length).length));
+    const archReads = $("#arch-reads");
+    if (archReads) archReads.textContent = reads;
+    const archWrites = $("#arch-writes");
+    if (archWrites && writes.length) archWrites.textContent = `${plural(writes.length, "write tool", "write tools")}`;
     const list = $("#tool-list");
     list.replaceChildren();
     for (const tool of tools) {
       const first = tool.description.split(/(?<=\.)\s/)[0];
-      const item = el("li", { title: tool.description });
-      item.append(el("code", {}, tool.name), el("span", {}, first));
-      list.append(item);
+      const card = el("li", { class: "tool-card", id: `tool-${tool.name}`, title: tool.description });
+      card.dataset.search = `${tool.name} ${tool.name.replace(/_/g, " ")} ${tool.description} ${(tool.args || []).join(" ")}`.toLowerCase();
+      card.append(el("code", { class: "tool-name" }, tool.name), el("p", { class: "tool-does" }, first));
+      const args = el("p", { class: "tool-args" });
+      if ((tool.args || []).length) {
+        args.append(el("span", { class: "label" }, "args"));
+        for (const arg of tool.args) args.append(el("code", {}, arg));
+      } else {
+        args.append(el("span", { class: "label" }, "no arguments"));
+      }
+      card.append(args);
+      list.append(card);
+    }
+    const note = $("#tool-writes");
+    if (writes.length) {
+      note.replaceChildren(`${plural(writes.length, "more tool writes", "more tools write")} the graph: `);
+      writes.forEach((name, index) => note.append(index ? ", " : "", el("code", {}, name)));
+      note.append(". They run in Slack only, after someone approves a card that names the target, and are never served over MCP.");
+      note.hidden = false;
+    }
+    watchFilter(tools.length);
+  }
+
+  function watchFilter(total) {
+    const input = $("#tool-filter");
+    const count = $("#tool-count");
+    const full = count.cloneNode(true);
+    input.disabled = false;
+    input.addEventListener("input", () => {
+      const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+      let shown = 0;
+      for (const card of $("#tool-list").children) {
+        const match = words.every((word) => (card.dataset.search || "").includes(word));
+        card.hidden = !match;
+        if (match) shown += 1;
+      }
+      $("#tool-empty").hidden = shown > 0;
+      if (!words.length) count.replaceChildren(...full.cloneNode(true).childNodes);
+      else count.replaceChildren(el("b", {}, String(shown)), ` of ${plural(total, "read-only tool", "read-only tools")}`);
+    });
+  }
+
+  // How it works: the diagram shows one way in at a time when a button asks it to.
+  function watchRoutes() {
+    const figure = $("#arch");
+    const group = $("#arch-routes");
+    if (!figure || !group) return;
+    group.hidden = false;
+    for (const button of group.querySelectorAll("button")) {
+      button.addEventListener("click", () => {
+        figure.dataset.route = button.dataset.route;
+        for (const other of group.querySelectorAll("button")) other.setAttribute("aria-pressed", String(other === button));
+      });
+    }
+  }
+
+  // For builders: the snippets name this server, tabs pick one, and each has a copy button.
+  function watchQuickstart() {
+    const box = $("#quickstart");
+    if (!box) return;
+    for (const span of box.querySelectorAll(".origin")) span.textContent = location.origin;
+    const tabs = [...box.querySelectorAll('[role="tab"]')];
+    const select = (tab, focus) => {
+      for (const other of tabs) {
+        const on = other === tab;
+        other.setAttribute("aria-selected", String(on));
+        other.tabIndex = on ? 0 : -1;
+        document.getElementById(other.getAttribute("aria-controls")).hidden = !on;
+      }
+      if (focus) tab.focus();
+    };
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => select(tab, false));
+      tab.addEventListener("keydown", (event) => {
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (event.key === "Home") { select(tabs[0], true); event.preventDefault(); }
+        else if (event.key === "End") { select(tabs[tabs.length - 1], true); event.preventDefault(); }
+        else if (step) { select(tabs[(index + step + tabs.length) % tabs.length], true); event.preventDefault(); }
+      });
+    });
+    box.querySelector('[role="tablist"]').hidden = false;
+    select(tabs[0], false);
+    for (const button of box.querySelectorAll(".copy")) {
+      let shown = null;
+      button.addEventListener("click", async () => {
+        const copied = await copyOut(button.parentElement.querySelector("code").textContent, button);
+        button.textContent = copied ? "Copied" : "Not copied";
+        button.classList.toggle("copied", copied);
+        clearTimeout(shown);
+        shown = setTimeout(() => { button.textContent = "Copy"; button.classList.remove("copied"); }, 1600);
+      });
     }
   }
 
@@ -377,6 +472,15 @@
   // The answer's own address, the one a shared link opens on (/?q=...). "Copied" shows for a
   // moment. Without the async clipboard (a plain-http host) the older copy command is tried;
   // if that fails too the button says so, and the address bar already holds the same link.
+  async function copyOut(text, from) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      return copyText(text, from);
+    }
+  }
+
   function copyText(text, from) {
     const area = el("textarea", { readonly: "", "aria-hidden": "true", style: "position:fixed;top:0;left:0;opacity:0" });
     area.value = text;
@@ -397,13 +501,7 @@
     copy.append(el("span", { class: "label" }, "Copy link"), el("span", { class: "done" }, "Copied"));
     let shown = null;
     copy.addEventListener("click", async () => {
-      let copied = false;
-      try {
-        await navigator.clipboard.writeText(link);
-        copied = true;
-      } catch (error) {
-        copied = copyText(link, copy);
-      }
+      const copied = await copyOut(link, copy);
       copy.querySelector(".done").textContent = copied ? "Copied" : "Not copied";
       copy.classList.add("copied");
       clearTimeout(shown);
@@ -621,7 +719,9 @@
         question.append(askIt);
         line.append(question);
         const toolCell = el("td", { class: "name", "data-label": "Tool" });
-        toolCell.append(el("code", {}, row.tool));
+        const toolLink = el("a", { href: `#tool-${row.tool}`, title: `${row.tool} in the catalogue` });
+        toolLink.append(el("code", {}, row.tool));
+        toolCell.append(toolLink);
         line.append(toolCell);
         line.append(el("td", { "data-label": "With the graph" }, outcome(row.with_graph)));
         line.append(el("td", { "data-label": "Without" }, outcome(row.without_graph)));
@@ -688,6 +788,8 @@
   loadTeams();
   watchProof();
   watchHero();
+  watchRoutes();
+  watchQuickstart();
   const initial = new URLSearchParams(location.search).get("q");
   if (initial) { input.value = initial; ask(initial, true, "start"); }
 })();

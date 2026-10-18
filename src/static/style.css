@@ -636,7 +636,7 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 .flow p { margin: 0; color: var(--ink-2); font-size: var(--fs-md); }
 
 .bento { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.bento .card { display: flex; flex-direction: column; grid-column: span 2; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: inset 0 1px 0 var(--highlight); padding: 20px; }
+.bento .card { display: flex; flex-direction: column; grid-column: span 2; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: inset 0 1px 0 var(--highlight); padding: 20px; }
 .bento .card:nth-child(4), .bento .card:nth-child(5) { grid-column: span 3; }
 .bento h3 { margin: 0 0 6px; font-size: var(--fs-base); font-weight: 600; }
 .bento .card > p { margin: 0 0 16px; color: var(--ink-2); font-size: var(--fs-md); }
@@ -663,6 +663,44 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 .edge-vis .nd.knowledge { --c: var(--knowledge); }
 .edge-vis .rel { color: var(--ink-3); white-space: nowrap; }
 
+/* The architecture: three ways in, the catalogue, the graph, and the path back in the walk's colour. */
+.arch { margin: 8px 0 36px; }
+.arch-routes { display: inline-flex; gap: 2px; margin: 0 0 12px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.arch-routes button {
+  min-height: 30px; padding: 0 14px; border: 0; border-radius: 999px; cursor: pointer; background: transparent;
+  font: 500 var(--fs-xs)/1 var(--mono); color: var(--ink-2); transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.arch-routes button:hover { color: var(--ink); background: var(--surface-2); }
+.arch-routes button[aria-pressed="true"] { color: var(--path-ink); background: color-mix(in oklab, var(--path) 16%, var(--surface)); }
+.arch-frame {
+  overflow-x: auto; border: 1px solid var(--line); border-radius: 18px; padding: 16px;
+  background: color-mix(in oklab, var(--surface) 90%, transparent);
+  box-shadow: 0 1px 0 var(--highlight) inset, 0 28px 64px -44px var(--horizon);
+}
+.arch-frame:focus-visible { outline-offset: 2px; }
+.arch-frame svg { display: block; width: 100%; max-width: 1160px; min-width: 880px; height: auto; margin: 0 auto; font-family: var(--font); }
+.arch figcaption { margin: 12px 0 0; color: var(--ink-2); font-size: var(--fs-sm); max-width: 60em; }
+.arch-cols text { font: 500 var(--fs-xs) var(--mono); letter-spacing: 0.08em; text-transform: uppercase; fill: var(--ink-2); text-anchor: middle; }
+.arch-nodes rect { fill: var(--surface); stroke: var(--line-2); stroke-width: 1.2; }
+.arch-nodes .catalogue rect { fill: color-mix(in oklab, var(--path) 6%, var(--surface)); stroke: color-mix(in oklab, var(--path) 55%, var(--line-2)); }
+.arch-nodes .graph rect { fill: color-mix(in oklab, var(--horizon) 8%, var(--surface)); stroke: color-mix(in oklab, var(--horizon) 55%, var(--line-2)); }
+.arch-nodes .writes rect { stroke-dasharray: 5 4; }
+.arch-nodes .t { font: 600 var(--fs-md) var(--font); fill: var(--ink); }
+.arch-nodes .s, .arch-nodes .b { font: 400 var(--fs-sm) var(--font); fill: var(--ink-2); }
+.arch-nodes .m { font: 400 var(--fs-xs) var(--mono); fill: var(--ink-3); }
+.arch-links path { fill: none; stroke: var(--ink-3); stroke-width: 1.5; marker-end: url(#arch-arrow); }
+.arch-links .dashed { stroke-dasharray: 5 4; }
+.arch-links text { font: 400 var(--fs-xs) var(--mono); fill: var(--ink-3); }
+.arch-links text.mid { text-anchor: middle; }
+.arch-head { fill: var(--ink-3); }
+.arch-head-path { fill: var(--path); }
+.arch-back path { fill: none; stroke: var(--path); stroke-width: 2.4; stroke-linejoin: round; }
+.arch-back text { font: 500 var(--fs-xs) var(--mono); fill: var(--path-ink); text-anchor: middle; }
+/* One way in at a time: everything off the chosen route fades back. */
+.arch [data-routes] { transition: opacity var(--fast) var(--ease); }
+.arch:not([data-route="all"]) [data-routes] { opacity: 0.16; }
+.arch[data-route="slack"] [data-routes~="slack"], .arch[data-route="page"] [data-routes~="page"], .arch[data-route="mcp"] [data-routes~="mcp"] { opacity: 1; }
+
 .model { margin: 28px 0 0; }
 .model figcaption { margin: 0 0 12px; color: var(--ink-2); font-size: var(--fs-md); max-width: 46em; }
 .model figcaption b { color: var(--ink); font-weight: 600; }
@@ -683,16 +721,64 @@ table.proof tr.kept td.verdict { color: var(--ink); }
 
 /* --- Builders (2.6) ------------------------------------------------------------------------------ */
 
-.builders { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.tool-panel .tool-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 32px; }
-.builders-side { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 12px; align-items: start; }
-.builders-side .code { margin: 0; }
-.tool-count { margin: 0 0 14px; font-size: var(--fs-base); color: var(--ink-2); min-height: 1.6em; }
+/* For builders (a dark band): a quick start with copy buttons, then the live tool catalogue. */
+.quickstart {
+  margin: 8px 0 0; border: 1px solid var(--line-2); border-radius: 18px; overflow: hidden;
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 30px 60px -36px rgba(36, 40, 150, 0.6);
+}
+.qs-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 10px 0; border-bottom: 1px solid var(--line); }
+.qs-tabs button {
+  min-height: 36px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; cursor: pointer;
+  background: transparent; color: var(--ink-2); font: 500 var(--fs-sm)/1 var(--font);
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.qs-tabs button:hover { color: var(--ink); background: var(--surface-2); }
+.qs-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--path); }
+.qs-pane { padding: 18px 20px 20px; }
+.qs-pane + .qs-pane { border-top: 1px solid var(--line); }
+.qs-tabs:not([hidden]) ~ .qs-pane + .qs-pane { border-top: 0; }
+.qs-say { margin: 0 0 12px; color: var(--ink-2); font-size: var(--fs-md); max-width: 52em; }
+.snippet { position: relative; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.snippet pre { margin: 0; padding: 14px 88px 14px 16px; overflow-x: auto; font: var(--fs-sm)/1.6 var(--mono); color: var(--ink); tab-size: 4; }
+.snippet pre:focus-visible { outline-offset: -2px; }
+.snippet .copy {
+  position: absolute; top: 8px; right: 8px; min-width: 72px; min-height: 32px; padding: 0 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2); font: 500 var(--fs-xs)/1 var(--mono);
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.snippet .copy:hover { color: var(--ink); border-color: var(--path); }
+.snippet .copy.copied { color: var(--path-ink); border-color: var(--path); }
+
+.catalogue-panel { margin: 40px 0 28px; }
+.tool-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin: 0 0 16px; }
+.tool-count { margin: 0; font-size: var(--fs-base); color: var(--ink-2); min-height: 1.6em; }
 .tool-count b { font: 600 var(--fs-xl) var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; margin-right: 4px; }
-.tool-list { margin: 0; padding: 0; list-style: none; }
-.tool-list li:not(.sk-tool) { display: flex; gap: 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); min-width: 0; }
-.tool-list code { flex: none; color: var(--path-ink); font-size: var(--fs-sm); }
-.tool-list span { flex: 1; min-width: 0; color: var(--ink-2); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-filter input {
+  width: min(340px, 100%); height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--line-2);
+  background: var(--surface); color: var(--ink); font: 400 var(--fs-sm)/1 var(--font);
+}
+.tool-filter input::placeholder { color: var(--ink-3); }
+.tool-filter input:focus-visible { outline: 2px solid var(--path); outline-offset: 2px; }
+.tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.tool-grid .sk-tool { height: 112px; margin: 0; border-radius: 14px; }
+.tool-card {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px 16px; scroll-margin-top: calc(var(--header) + 24px);
+  border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.tool-card:hover { border-color: var(--line-2); }
+/* These set a display, which would beat the hidden attribute the filter and the no-script state use. */
+.tool-card[hidden], .arch-routes[hidden], .qs-tabs[hidden] { display: none; }
+/* A proof row's tool name links here; the card it lands on is lit. */
+.tool-card:target { border-color: var(--path); box-shadow: 0 0 0 3px var(--glow); }
+.tool-name { color: var(--path-ink); font-size: var(--fs-sm); font-weight: 500; }
+.tool-does { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+.tool-args { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: auto 0 0; }
+.tool-args .label { font: 400 var(--fs-xs) var(--mono); color: var(--ink-3); }
+.tool-args code { padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: var(--fs-xs); color: var(--ink-2); }
+.tool-empty, .tool-writes { margin: 16px 0 0; color: var(--ink-2); font-size: var(--fs-sm); }
+.tool-writes code { color: var(--ink); }
 .links { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .links li { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; }
 .links a { display: block; font-weight: 600; color: var(--ink); text-decoration: none; min-height: 24px; }
@@ -741,6 +827,11 @@ footer.site a { color: var(--ink-2); }
 .foot-links { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 14px !important; }
 .foot-links a { display: inline-flex; align-items: center; min-height: 32px; }
 
+.proof-more { margin: 18px 0 0; color: var(--ink-2); font-size: var(--fs-sm); }
+.proof-more a, #proof-table td.name a { color: var(--path-ink); }
+#proof-table td.name a { text-decoration: none; }
+#proof-table td.name a:hover code { text-decoration: underline; text-underline-offset: 3px; }
+
 /* --- The dark band (the proof): its own tokens, entered and left through blurred indigo waves ---- */
 
 section.block.band-dark {
@@ -770,7 +861,8 @@ section.block.band-dark {
 /* --- Small screens ------------------------------------------------------------------------------ */
 
 @media (max-width: 1080px) {
-  .team-more, .builders-side { grid-template-columns: minmax(0, 1fr); }
+  .team-more { grid-template-columns: minmax(0, 1fr); }
+  .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .flow li:nth-child(3) { padding-left: 0; border-left: 0; }
@@ -812,9 +904,9 @@ section.block.band-dark {
   .flow li + li { border-top: 1px solid var(--line); margin-top: 16px; }
   .bento { grid-template-columns: minmax(0, 1fr); }
   .bento .card, .bento .card:nth-child(1), .bento .card:nth-child(4), .bento .card:nth-child(5) { grid-column: auto; }
-  .links, .tool-panel .tool-list { grid-template-columns: minmax(0, 1fr); }
-  .tool-list li:not(.sk-tool) { flex-direction: column; gap: 2px; }
-  .tool-list span { white-space: normal; }
+  .links, .tool-grid { grid-template-columns: minmax(0, 1fr); }
+  .tool-filter, .tool-filter input { width: 100%; }
+  .snippet pre { padding-right: 16px; padding-top: 52px; }
   .panel { padding: 18px 16px; }
   /* The proof table becomes one card per question. */
   table.proof, table.proof tbody, table.proof tr, table.proof td { display: block; width: 100%; }

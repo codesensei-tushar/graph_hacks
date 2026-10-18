@@ -122,7 +122,7 @@ class NoTypedNumbersTest(unittest.TestCase):
         page = _parse("index.html")
         self.assertEqual(len(page.stat_cells), 4)
         self.assertEqual([cell.strip() for cell in page.stat_cells], ["", "", "", ""])
-        for element_id in ("live-count", "proof-line", "proof-refusal", "proof-body", "tool-count", "tool-list", "team-cards", "chips"):
+        for element_id in ("live-count", "proof-line", "proof-refusal", "proof-body", "tool-count", "tool-list", "team-cards", "chips", "arch-reads", "arch-writes"):
             self.assertNotRegex(page.text_by_id[element_id], r"\d", element_id)
 
 
@@ -303,3 +303,33 @@ class TypeScaleTest(unittest.TestCase):
             css = re.sub(r"/\*.*?\*/", "", self.css, flags=re.S)
             rules = [rule for rule in re.findall(r"([^{}]+)\{([^{}]*)\}", css) if re.search(rf"font-weight:\s*{weight}\b|font:\s*{weight}\s", rule[1])]
             self.assertTrue(rules and all(selector.strip().startswith(".hero h1") for selector, _ in rules), weight)
+
+
+class BuildersTest(unittest.TestCase):
+    """How it works and For builders: the diagram counts nothing by hand, the proof links into the
+    catalogue, and the quick start's command is the README's."""
+
+    def setUp(self):
+        self.html = (STATIC / "index.html").read_text()
+        self.app_js = (STATIC / "app.js").read_text()
+
+    def test_the_architecture_is_described_for_screen_readers(self):
+        self.assertIn('aria-labelledby="arch-title arch-desc"', self.html)
+        for way_in in ("Slack", "this page", "MCP clients", "FalkorDB", "approves a card"):
+            self.assertIn(way_in, self.html[self.html.index('<desc id="arch-desc">'):self.html.index("</desc>", self.html.index('<desc id="arch-desc">'))])
+
+    def test_a_proof_row_links_to_its_tool_card(self):
+        self.assertIn("href: `#tool-${row.tool}`", self.app_js)
+        self.assertIn("id: `tool-${tool.name}`", self.app_js)
+        self.assertIn('href="#tools"', self.html)
+
+    def test_the_claude_code_command_is_the_readmes(self):
+        readme = (ROOT / "README.md").read_text()
+        command = re.search(r"claude mcp add --transport http company-brain https://\S+/mcp", readme).group(0)
+        page = re.sub(r"<[^>]+>", "", self.html)
+        self.assertIn(command, page)
+
+    def test_every_snippet_has_a_copy_button(self):
+        panes = re.findall(r'<div class="qs-pane" id="(qs-[a-z]+)"', self.html)
+        self.assertEqual(panes, ["qs-claude", "qs-any", "qs-python", "qs-http"])
+        self.assertEqual(self.html.count('<button class="copy" type="button">Copy</button>'), len(panes))
