@@ -136,6 +136,9 @@ class JsonClientTest(unittest.TestCase):
         self.assertEqual(http.retry_after_seconds("Fri, 01 Jan 2100 00:00:00 GMT"), 3600.0)
         self.assertEqual(RetryLater(999_999_999).seconds, 3600.0)
         self.assertEqual(RetryLater(float("nan")).seconds, 0.0)
+        self.assertEqual(RetryLater(float("inf")).seconds, 3600.0)
+        for value in ("inf", "nan", "1e400", "-5", "Fri, 31 Dec 9999 23:59:59 GMT", "Mon, 01 Jan 2001 00:00:00 GMT"):
+            self.assertTrue(0 <= http.retry_after_seconds(value) <= 3600, value)
         self._serve(_error(429, {"Retry-After": "999999999"}))
         with self.assertRaises(RetryLater) as raised:
             self.client.get("x")

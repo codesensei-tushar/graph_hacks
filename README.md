@@ -352,7 +352,7 @@ WHERE mine.id IN $owners AND theirs.id IN $anchor_people AND mine.id <> theirs.i
 RETURN 'Decision' AS label, mine.id AS mine, theirs.id AS theirs, work.id AS id, work.name AS name, type(m) AS mine_rel, type(t) AS their_rel
 ```
 
-**path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable (when every shortest route runs through something the asker cannot read, a breadth-first search over readable nodes, one hop at a time, finds the shortest route they can); the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
+**path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable (when every shortest route runs through something the asker cannot read, a breadth-first search over readable nodes, one hop at a time and at most 500 nodes, finds the shortest route they can, or says how many hops it searched); the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
 
 ```cypher
 MATCH (a {id: $a}), (b {id: $b})

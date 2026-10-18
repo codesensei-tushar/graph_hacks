@@ -37,7 +37,7 @@ id with the install: `install.item_id(ext)` is `<source>:<install>:<ext>`, `inst
 and `install.container_id(ext)` add `user:` and `container:`. The graph writer refuses ids from
 outside the install, so a connector cannot touch a seeded or team-imported node.
 
-**Records** (`Page` holds `items`, `users`, `edges`, `deleted_ids`, `next_cursor`, `has_more`, `retry_after`):
+**Records** (`Page` holds `items`, `users`, `edges`, `deleted_ids`, `next_cursor`, `has_more`, `retry_after`, `poll_cursor`):
 
 | Record | Written as |
 | --- | --- |
@@ -61,7 +61,11 @@ PAY-13). An edge whose item is not in the page is only added.
 scheduler step; otherwise the next fetch is `poll_seconds` away. `retry_after` is the least wait
 before the next fetch either way. A container keeps at most `sync.MAX_ITEMS_PER_CONTAINER`
 items; past that, new items are dropped and existing ones still update. Reaching it ends the
-backfill: the cursor is kept and the next page waits for the next poll.
+backfill, and the next fetch waits for the next poll. Set `poll_cursor` on every backfill page to
+where incremental polling should resume (the newest update the backfill has seen, e.g.
+`updated >= 2026-10-05 10:00`): at the cap the container's cursor becomes the latest
+`poll_cursor` given, so the items it kept stay current. Without one, the backfill cursor is kept
+and each poll reads the next older page, all of it dropped, until the backfill is walked.
 
 **Pull requests.** `graph.link_references(pull_request_id, handles, source, rel="REFERENCES")`
 links a pull request `-[:REFERENCES]->` (or, with `rel="CLOSES"`, `-[:CLOSES]->`) the tickets
@@ -113,7 +117,8 @@ ExternalUser` is one of its `readers()` reads it. With readers unknown, nobody d
   `RetryLater` waits as asked, up to an hour, without moving the cursor; a 401 waits an hour; other failures
   wait 1, 5, 15, then 60 minutes, per container, so one broken project does not hold up the
   rest. A container keeps at most 1000 items. No step is put off past an hour (or the poll
-  interval, if longer); at startup a job parked further out is re-armed.
+  interval, if longer); at startup a job parked further out is re-armed, and a container whose
+  due time is further out than that is due now.
 - **Webhooks.** `POST /connectors/<source>/webhook`: 404 unless the source is configured and
   accepts webhooks, 413 over 1 MB, 401 unless `verify_webhook` passes, then answered at once.
   The page is written in the background. A delivery is identified by its body's SHA-256

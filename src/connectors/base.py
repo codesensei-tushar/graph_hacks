@@ -194,6 +194,11 @@ class Page:
     means the next fetch starts over. ``has_more`` asks for the next page right away, otherwise the
     next fetch waits ``poll_seconds``. ``retry_after`` (seconds) is the least wait before the next
     fetch either way. Ids in ``deleted_ids`` are removed with their edges.
+
+    ``poll_cursor``, on a backfill page, is where incremental polling should resume (the newest
+    update the backfill has seen). A container that reaches ``sync.MAX_ITEMS_PER_CONTAINER``
+    ends its backfill and polls from the latest one given, so the items it kept stay current;
+    without one it keeps ``next_cursor`` and pages on through older items one poll at a time.
     """
 
     items: list[Item] = field(default_factory=list)
@@ -203,6 +208,7 @@ class Page:
     next_cursor: str | None = None
     has_more: bool = False
     retry_after: float | None = None
+    poll_cursor: str | None = None
 
 
 @dataclass(frozen=True)

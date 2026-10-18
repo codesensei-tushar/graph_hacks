@@ -132,13 +132,14 @@ def sync_step(source: str) -> dict:
         return {"status": "no_containers", "next_in": float(connector.poll_seconds)}
 
     now = _now_ms()
+    ceiling = max_delay(source)
     states = {container.id: graph.get_state(container.id) for container in containers}
-    container = _next_container(containers, states, now)
+    container = _next_container(containers, states, now, ceiling)
     if container is None:
-        return {"status": "idle", "next_in": _next_in(states, now, connector)}
+        return {"status": "idle", "next_in": _next_in(states, now, connector, ceiling)}
     report = _fetch_one(connector, install, container, states[container.id], failures)
     states[container.id] = graph.get_state(container.id)
-    report["next_in"] = _next_in(states, _now_ms(), connector)
+    report["next_in"] = _next_in(states, _now_ms(), connector, ceiling)
     return report
 
 
@@ -164,18 +165,25 @@ def _current_containers(connector: Connector, install: Install) -> list[Containe
     return containers
 
 
-def _next_container(containers: list[Container], states: dict[str, dict], now: int) -> Container | None:
+def _due_at(state: dict, now: int, ceiling: float) -> int:
+    """When a container is due. One put off further than any step may be (written before waits
+    were clamped, or by a clock that jumped) is due now."""
+    due = int(state.get("due_at") or 0)
+    return 0 if due - now > ceiling * 1000 else due
+
+
+def _next_container(containers: list[Container], states: dict[str, dict], now: int, ceiling: float) -> Container | None:
     """The due container fetched least recently, whether it has pages waiting or its poll came round."""
-    due = [container for container in containers if int(states[container.id].get("due_at") or 0) <= now]
+    due = [container for container in containers if _due_at(states[container.id], now, ceiling) <= now]
     if not due:
         return None
-    return min(due, key=lambda container: (int(states[container.id].get("last_fetch_at") or 0), int(states[container.id].get("due_at") or 0)))
+    return min(due, key=lambda container: (int(states[container.id].get("last_fetch_at") or 0), _due_at(states[container.id], now, ceiling)))
 
 
-def _next_in(states: dict[str, dict], now: int, connector: Connector) -> float:
+def _next_in(states: dict[str, dict], now: int, connector: Connector, ceiling: float) -> float:
     if not states:
         return float(connector.poll_seconds)
-    soonest = min(int(state.get("due_at") or 0) for state in states.values())
+    soonest = min(_due_at(state, now, ceiling) for state in states.values())
     return max(MORE_DELAY_SECONDS if any(state.get("has_more") for state in states.values()) else 1.0, (soonest - now) / 1000)
 
 
@@ -201,15 +209,21 @@ def _fetch_one(connector: Connector, install: Install, container: Container, sta
         log.warning("[connectors] fetch failed container=%s: %s", container.id, _error(error))
         return {"status": "failed", "container": container.id}
 
-    # At the cap a backfill ends: paging on would only drop what it reads. The cursor is kept.
+    # At the cap a backfill ends: paging on would only drop what it reads. Polling resumes from the
+    # newest point the backfill saw (``poll_cursor``), so the kept items stay current; a connector
+    # that gives none keeps its backfill cursor and pages on through older items one poll at a time.
     capped = graph.count_items(container.id) >= MAX_ITEMS_PER_CONTAINER
     more = bool(page.has_more) and not capped
+    poll_cursor = page.poll_cursor if page.poll_cursor is not None else state.get("poll_cursor")
+    cursor = poll_cursor if page.has_more and capped and poll_cursor is not None else page.next_cursor
     wait = max(MORE_DELAY_SECONDS if more else float(connector.poll_seconds), clamp_wait(page.retry_after or 0))
     items = int(state.get("items") or 0) + written["items"]
     graph.set_state(
         container.id,
         install,
-        cursor=page.next_cursor,
+        cursor=cursor,
+        # Kept only while a backfill runs; once it ends, the cursor is the poll cursor.
+        poll_cursor=poll_cursor if more else None,
         has_more=more,
         due_at=now + int(wait * 1000),
         last_fetch_at=now,
@@ -238,7 +252,7 @@ def sync_now(source: str, full: bool = False) -> bool:
             continue
         fields = {"due_at": 0, "failures": 0}
         if full:
-            fields.update(cursor=None, has_more=False, backfilled=False)
+            fields.update(cursor=None, poll_cursor=None, has_more=False, backfilled=False)
         graph.set_state(state["id"], install, **fields)
     schedule(source, 0)
     return True
