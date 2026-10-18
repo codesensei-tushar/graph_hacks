@@ -5,7 +5,8 @@ It retries what is worth retrying and gives up in words ``sync.py`` understands:
 - 429 or 503 with a short ``Retry-After`` (up to ``MAX_INLINE_WAIT`` seconds): wait and retry;
   a longer one raises ``RetryLater``, so the scheduler thread is never held for long.
 - other 5xx and network errors: retried after 1 s, then 2 s, then ``ConnectorError``.
-- 401: ``CredentialsRejected``. Any other 4xx: ``HttpError`` with the status.
+- 401: ``CredentialsRejected``. Any other 4xx, and any redirect: ``HttpError`` with the status.
+- a ``Retry-After`` is never honoured past ``base.MAX_RETRY_AFTER_SECONDS``.
 
 Credentials travel only in the headers given to the constructor, only to the base URL's
 origin (a pagination link to another host is refused), and never into a log line or an
@@ -22,7 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from src.connectors.base import ConnectorError, CredentialsRejected, RetryLater
+from src.connectors.base import ConnectorError, CredentialsRejected, RetryLater, clamp_wait
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +34,17 @@ MAX_INLINE_WAIT = 5.0
 DEFAULT_RETRY_AFTER = 60.0
 _RETRY_STATUSES = frozenset({500, 502, 503, 504})
 
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: urllib would resend the Authorization header to wherever it
+    points, any host, even over http. The 3xx comes back as an ``HttpError`` instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 # Seams for tests.
-_urlopen = urllib.request.urlopen
+_urlopen = urllib.request.build_opener(_NoRedirects).open
 _sleep = time.sleep
 
 
@@ -55,18 +65,18 @@ def bearer(token: str) -> dict[str, str]:
 
 
 def retry_after_seconds(value: str | None) -> float | None:
-    """``Retry-After`` as seconds: a number, or an HTTP date. None when absent or unreadable."""
+    """``Retry-After`` as seconds, at most ``base.MAX_RETRY_AFTER_SECONDS``: a number, or an HTTP date.
+    None when absent or unreadable."""
     if not value:
         return None
     try:
-        return max(0.0, float(value))
+        seconds = float(value)
     except ValueError:
-        pass
-    try:
-        when = email.utils.parsedate_to_datetime(value)
-    except (TypeError, ValueError):
-        return None
-    return max(0.0, when.timestamp() - time.time())
+        try:
+            seconds = email.utils.parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError):
+            return None
+    return clamp_wait(seconds)
 
 
 def _origin(url: str) -> tuple[str, str]:

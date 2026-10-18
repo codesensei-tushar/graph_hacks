@@ -1,14 +1,16 @@
 """Slack mrkdwn for brain replies. Every answer cites its graph path and where memories came from."""
 
-from src.domain.memory.writeback import scope_label
+from src.connectors import registry
+from src.domain.memory.writeback import ORG_INTERNAL_CONTAINER_TAG, scope_label
 
 MAX_PATH_STEPS = 20
 MAX_MEMORY_SNIPPET = 220
 
 HELP_TEXT = "\n".join(
     [
-        "*Ask me about the company.* Who owns something, why a decision was made, what breaks if a service goes down.",
+        "*Ask me about the company.* Who owns something, why a decision was made, what breaks if a service goes down, what changed lately, or who knows about a topic.",
         "",
+        "• In a thread, follow up with `and last month?`, `only decisions` or `what about platform?`; a question that names nothing is about what the thread is about",
         "• `remember: <note>` saves a note to this conversation's memory",
         "• `ticket: <title>` files a ticket in the company graph after you approve it",
         "• `decision: <what was decided>` records a decision, and what it replaces, after you approve it",
@@ -20,6 +22,14 @@ HELP_TEXT = "\n".join(
         "_In a public channel I only use public memory. In a private channel I add that channel. In a DM I also use every private channel you're in and every private repo your linked GitHub account can see._",
     ]
 )
+
+
+def cited_tags(read_tags: list[str]) -> list[str]:
+    """The read set as a reply names it. "connected tools" (``org_internal``) is named only while a
+    connector is configured; without one it holds nothing, and the footer reads as it always did."""
+    if registry.installs():
+        return list(read_tags)
+    return [tag for tag in read_tags if tag != ORG_INTERNAL_CONTAINER_TAG]
 
 
 def _clip(text: str, size: int) -> str:
@@ -63,7 +73,7 @@ def format_answer(
                 where = f"<#{memory['channel_id']}>"
             learned = f", learned {memory['learned_at']}" if memory.get("learned_at") else ""
             parts.append(f"• “{_clip(memory['text'], MAX_MEMORY_SNIPPET)}” — {memory['author']}, {where}{learned}")
-    footer = f"Read from: {', '.join(scope_label(tag, channel_names) for tag in read_tags)}"
+    footer = f"Read from: {', '.join(scope_label(tag, channel_names) for tag in cited_tags(read_tags))}"
     if chosen_by == "approval":
         footer = f"Tool `{result.get('tool', 'graph')}`, run after your approval. {footer}"
     elif chosen_by:
@@ -76,7 +86,7 @@ def format_answer(
 
 
 def format_scopes(read_tags: list[str], write_tag: str | None, channel_names: dict[str, str]) -> str:
-    lines = ["*From here I can read:*", *[f"• {scope_label(tag, channel_names)}" for tag in read_tags]]
+    lines = ["*From here I can read:*", *[f"• {scope_label(tag, channel_names)}" for tag in cited_tags(read_tags)]]
     if write_tag:
         lines += ["", f"*New memories from here go to:* {scope_label(write_tag, channel_names)}"]
     else:

@@ -131,8 +131,9 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
 
     # A team file can name each member's Slack user, so Slack answers and mentions find the person.
     for slack_user, person in getattr(company, "SLACK_USERS", ()):
+        # Named after the person when first written, as a memory's speaker is; a name Slack gave it stays.
         graph.query(
-            "MERGE (u:SlackUser {id: $u}) WITH u MATCH (p:Person {id: $p}) MERGE (u)-[:IS]->(p)",
+            "MATCH (p:Person {id: $p}) MERGE (u:SlackUser {id: $u}) ON CREATE SET u.name = p.name MERGE (u)-[:IS]->(p)",
             {"u": slack_user, "p": person},
         )
 
@@ -193,6 +194,12 @@ def seed_company(company: ModuleType = company_brain) -> SeedReport:
         ensure_indexes = None
     if ensure_indexes is not None:
         ensure_indexes()
+    try:
+        from src.domain.knowledge.search import ensure_search_indexes
+    except ImportError:
+        ensure_search_indexes = None
+    if ensure_search_indexes is not None:
+        ensure_search_indexes(real_graph)
 
     report.nodes = int(real_graph.query("MATCH (n) RETURN count(n)").result_set[0][0])
     return report

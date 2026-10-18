@@ -39,6 +39,18 @@ EDGE_RELS = frozenset({"OPENED", "ASSIGNED", "OWNS", "WORKED_ON", "ABOUT", "BLOC
 # so who_owns, if_person_leaves and the team pages see them like any other ownership.
 PERSON_RELS = frozenset({"OWNS", "WORKED_ON"})
 STATES = ("open", "closed")
+# The longest wait a source can ask for (Retry-After, RetryLater, Page.retry_after). A bigger or
+# broken value would park the sync for years; past an hour, the source is asked again.
+MAX_RETRY_AFTER_SECONDS = 60 * 60
+
+
+def clamp_wait(seconds) -> float:
+    """A wait the sync may honour: 0 to ``MAX_RETRY_AFTER_SECONDS``; unreadable reads as 0."""
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if seconds != seconds else min(max(0.0, seconds), float(MAX_RETRY_AFTER_SECONDS))
 
 
 class ConnectorError(RuntimeError):
@@ -49,8 +61,9 @@ class RetryLater(ConnectorError):
     """The source asked to wait (429, Retry-After, a long 503). The step is retried after ``seconds``; nothing advances."""
 
     def __init__(self, seconds: float, message: str = "rate limited"):
+        seconds = clamp_wait(seconds)
         super().__init__(f"{message}; retry in {int(seconds)}s")
-        self.seconds = float(seconds)
+        self.seconds = seconds
 
 
 class CredentialsRejected(ConnectorError):
@@ -181,6 +194,11 @@ class Page:
     means the next fetch starts over. ``has_more`` asks for the next page right away, otherwise the
     next fetch waits ``poll_seconds``. ``retry_after`` (seconds) is the least wait before the next
     fetch either way. Ids in ``deleted_ids`` are removed with their edges.
+
+    ``poll_cursor``, on a backfill page, is where incremental polling should resume (the newest
+    update the backfill has seen). A container that reaches ``sync.MAX_ITEMS_PER_CONTAINER``
+    ends its backfill and polls from the latest one given, so the items it kept stay current;
+    without one it keeps ``next_cursor`` and pages on through older items one poll at a time.
     """
 
     items: list[Item] = field(default_factory=list)
@@ -190,6 +208,7 @@ class Page:
     next_cursor: str | None = None
     has_more: bool = False
     retry_after: float | None = None
+    poll_cursor: str | None = None
 
 
 @dataclass(frozen=True)

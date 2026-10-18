@@ -42,6 +42,9 @@ RESERVED_PROPS = frozenset(
 )
 # Labels an edge may join; read back from the graph, so checked before they go into a query.
 _EDGE_END_LABELS = ITEM_LABELS | {"ExternalUser"}
+# Edge properties graph.py writes itself: which item owns the edge, where it came from, and the
+# account it was written for. ``state`` is a review's, read by the GitHub tools.
+RESERVED_EDGE_PROPS = frozenset({"item", "source", "install", "via", "user", "state"})
 _PROP_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # Where a pull request keeps the ticket handles it names, as "<source>:<HANDLE>", per relationship.
 _REFERENCE_PROPS = {"REFERENCES": "ticket_references", "CLOSES": "ticket_closes"}
@@ -75,11 +78,11 @@ def _check(install: Install, node_id: str) -> str:
     return node_id
 
 
-def _props(props) -> dict:
+def _props(props, reserved: frozenset[str] = RESERVED_PROPS) -> dict:
     """Extra properties a connector may set: plain names not taken, plain values."""
     kept = {}
     for name, value in (props or {}).items():
-        if not _PROP_NAME.match(str(name)) or name in RESERVED_PROPS:
+        if not _PROP_NAME.match(str(name)) or name in reserved:
             log.warning("[connectors] property %r refused", name)
             continue
         if isinstance(value, list):
@@ -345,7 +348,7 @@ def _write_edge(graph, install: Install, edge, owner: str, label_of: dict[str, s
         SET r += $props
         RETURN count(r)
         """,
-        {"from": start, "to": edge.to_id, "item": owner, "source": install.source, "install": install.key, "via": via, "props": _props(edge.props)},
+        {"from": start, "to": edge.to_id, "item": owner, "source": install.source, "install": install.key, "via": via, "props": _props(edge.props, RESERVED_EDGE_PROPS)},
     ).result_set
     return bool(rows and rows[0][0])
 

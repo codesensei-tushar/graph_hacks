@@ -17,7 +17,9 @@ DEFAULT_K = 5
 MAX_K = 10
 SNIPPET = 48
 
-_LIVE = "NOT coalesce(m.is_forgotten, false)"
+# A memory nobody forgot. Shared with what_changed.
+LIVE = "NOT coalesce(m.is_forgotten, false)"
+_LIVE = LIVE  # the old name, for code written before what_changed shared it
 
 
 def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResult:
@@ -32,7 +34,7 @@ def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResul
     rows = graph.ro_query(
         f"""
         MATCH (m:Memory)-[:MENTIONS]->(e {{id: $id}})
-        WHERE m.scope IN $scopes AND {_LIVE}
+        WHERE m.scope IN $scopes AND {LIVE}
         OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
         RETURN m.id AS id, m.text AS text, m.scope AS scope, m.channel_id AS channel_id, m.created_at AS learned_at,
                0 AS hops, e.id AS via_id, e.name AS via, labels(e)[0] AS via_label, '' AS bridge, true AS forward,
@@ -41,7 +43,7 @@ def related_memories(question: str, scopes: list[str], k=DEFAULT_K) -> ToolResul
         MATCH (e {{id: $id}})-[r]-(n)
         WHERE (n:Service OR n:Document OR n:Ticket OR n:Decision) AND {resolve.SCOPED.format(var="n")}
         MATCH (m:Memory)-[:MENTIONS]->(n)
-        WHERE m.scope IN $scopes AND {_LIVE} AND NOT (m)-[:MENTIONS]->(e)
+        WHERE m.scope IN $scopes AND {LIVE} AND NOT (m)-[:MENTIONS]->(e)
         OPTIONAL MATCH (a:SlackUser)-[:SAID]->(m)
         RETURN m.id AS id, m.text AS text, m.scope AS scope, m.channel_id AS channel_id, m.created_at AS learned_at,
                1 AS hops, n.id AS via_id, n.name AS via, labels(n)[0] AS via_label, type(r) AS bridge, startNode(r) = e AS forward,

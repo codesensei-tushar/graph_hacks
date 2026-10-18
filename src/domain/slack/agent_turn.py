@@ -9,6 +9,9 @@ channel, and the message time (milliseconds, like every timestamp in the graph) 
 the arguments the model filled in.
 """
 
+import re
+
+from src.db.falkordb_client import connect
 from src.domain.knowledge import catalogue
 from src.domain.knowledge.agent import ToolChoice, choose_tool, run_choice
 from src.domain.knowledge.dto import MemoryLine, ToolResult, ToolSpec, day_from
@@ -18,6 +21,8 @@ from src.domain.slack import format
 from src.domain.slack.compute import TurnApproval, TurnOutcome, TurnRequest, channel_names
 
 MEMORY_LINES = 3
+# "what did I miss", "catch me up": the asker's own things, when Slack knows who they are.
+_FIRST_PERSON = re.compile(r"\b(?:i|me|my|mine)\b", re.IGNORECASE)
 
 
 def answer_turn(request: TurnRequest) -> TurnOutcome:
@@ -30,10 +35,30 @@ def answer_turn(request: TurnRequest) -> TurnOutcome:
     spec = catalogue.get_tool(choice.tool)
     if spec.needs_approval:
         return suspend_for_approval(request, spec, choice)
+    choice = for_the_asker(choice, question, request)
     result, choice = run_choice(choice, question, request.read_tags, request.thread, bot_ids)
     # A refusal shows no memories, so it never reads like a guess.
     memories = result.memories or (recall_memories(question, request) if result.found else [])
+    # One the answer already quotes (what_changed tells each in full) is not listed twice.
+    memories = [memory for memory in memories if not memory.text or memory.text not in result.answer]
     return TurnOutcome(reply=render_reply(result, choice, memories, request.read_tags, channel_names(request.read_tags)))
+
+
+def for_the_asker(choice: ToolChoice, question: str, request: TurnRequest) -> ToolChoice:
+    """``what_changed`` asked in the first person reads around the asker's own things, when they are a person in the graph."""
+    if choice.tool != "what_changed" or choice.args.get("person") or not _FIRST_PERSON.search(question):
+        return choice
+    person = asker_person(request.asker_slack_user_id)
+    return ToolChoice(choice.tool, {**choice.args, "person": person}, choice.via) if person else choice
+
+
+def asker_person(slack_user_id: str | None) -> str | None:
+    """The name of the person a Slack user is, through the workspace's IS link."""
+    if not slack_user_id:
+        return None
+    _, graph = connect()
+    rows = graph.ro_query("MATCH (:SlackUser {id: $id})-[:IS]->(p:Person) RETURN p.name LIMIT 1", {"id": slack_user_id}).result_set
+    return rows[0][0] if rows else None
 
 
 def suspend_for_approval(request: TurnRequest, spec: ToolSpec, choice: ToolChoice) -> TurnOutcome:

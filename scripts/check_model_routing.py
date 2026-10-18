@@ -1,7 +1,7 @@
 """Check the model's tool routing on the demo questions, once, by hand.
 
 The only place this project spends model calls on purpose: one structured call per
-question (28 in all, fast profile), printing the tool and arguments the model chose
+question (45 in all, fast profile), printing the tool and arguments the model chose
 next to what the keyword router would do and what the recording script expects. Run
 it after changing a tool description or the routing prompt, read the table, and paste
 it into the pull request. It is not a test and must never run in CI.
@@ -78,6 +78,47 @@ QUESTIONS = [
     # blast_radius the other way: what a service itself depends on.
     ("deps 1", "what does the invoice worker depend on", DEPENDENCIES, None),
     ("deps 2", "what are billing's dependencies", DEPENDENCIES, None),
+    # Risk across every team, not one person leaving or one service failing.
+    ("risk 1", "what are our riskiest services", "risk_map", None),
+    ("risk 2", "where are we one person away from an outage", "risk_map", None),
+    # Company-level reads across teams and across decisions.
+    ("org 1", "which teams depend on platform", "team_dependencies", None),
+    ("org 2", "which decisions are stale", "decision_health", None),
+    # reading_list: what to read before a change, and the neighbour it must not take.
+    ("read 1", "what should I read before touching the invoice worker", "reading_list", None),
+    ("read 2", "which docs describe the auth service", "reading_list", None),
+    ("read 3", "I'm about to change billing, which documents should I read first", "reading_list", None),
+    (
+        "read 4",
+        "what should I read before touching it",
+        "reading_list",
+        [
+            {"user": "ULENA", "text": f"{BOT} what breaks if billing goes down"},
+            {"user": "UBOT", "bot_id": "B1", "text": "If Billing Service goes down, these stop with it: API Gateway and Invoice Worker (1 hop).\n\n_Tool `blast_radius`, picked by the model. Read from: public channels_"},
+        ],
+    ),
+    ("read 5", "what should I know about billing", "who_knows", None),
+    # search: words that name no node. "who knows about refunds" may go to who_knows, which falls back to search.
+    ("search 1", "search for webhooks", "search", None),
+    ("search 2", "anything about pdf layout", "search", None),
+    # what_changed: a dated window around a thing, a team or the company.
+    ("changed 1", "what changed this week", "what_changed", None),
+    ("changed 2", "what's new in payments", "what_changed", None),
+    ("changed 3", "billing is failing, what changed", "what_changed", None),
+    ("changed 4", "what did the sales team decide recently", ("what_changed", {"only": ("decisions",)}), None),
+    # The chain over a thread: a search, then what changed around the service it found.
+    (
+        "chain 1",
+        "what changed there this month?",
+        "what_changed",
+        [
+            {"user": "ULENA", "text": f"{BOT} who knows about refunds"},
+            {"user": "UBOT", "bot_id": "B1", "text": "“refunds” comes up in the Billing runbook, about Billing Service. Ask first: Arjun Mehta (wrote the Billing runbook).\n\n*Path* (`search`, 2 edges)\n• Arjun Mehta -[AUTHORED]-> Billing runbook\n• Billing runbook -[DESCRIBES]-> Billing Service\n\n_Tool `search`, picked by the model. Read from: public channels_"},
+        ],
+    ),
+    ("chain 2", "what's around the billing service", "explore", None),
+    ("chain 3", "catch me up on what I missed this week", "what_changed", None),
+    ("chain 4", "which tickets are open", "find", None),
 ]
 
 

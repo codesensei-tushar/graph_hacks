@@ -57,6 +57,9 @@ class ToolResult:
     depth: int | None = None
     # Memories the answer drew on, each with the date it was learned.
     memories: list[MemoryLine] = field(default_factory=list)
+    # A table for a page to draw, for tools that rank many things at once (risk_map):
+    # {"kind", "columns", "rows", "scoring"}.
+    grid: dict | None = None
 
     def add(self, step: PathStep) -> None:
         """Append an edge unless the path already has it."""
@@ -80,6 +83,8 @@ class ToolResult:
             result["depth"] = self.depth
         if self.memories:
             result["memories"] = [memory.to_dict() for memory in self.memories]
+        if self.grid is not None:
+            result["grid"] = self.grid
         return result
 
 

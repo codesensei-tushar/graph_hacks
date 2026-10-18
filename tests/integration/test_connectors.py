@@ -12,6 +12,7 @@ import dataclasses
 import hashlib
 import hmac
 import json
+import time
 import unittest
 import uuid
 from unittest import mock
@@ -39,7 +40,7 @@ from src.connectors.base import (  # noqa: E402
 from src.core import scheduler  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import ask_api, catalogue, graph_overview, mcp_tools, team_page  # noqa: E402
+from src.domain.knowledge import algorithms, ask_api, catalogue, graph_overview, mcp_tools, team_page  # noqa: E402
 from src.domain.memory.read_scope import resolve_brain_read_container_tags  # noqa: E402
 from src.domain.memory.writeback import SlackMemoryScope  # noqa: E402
 from src.seed import quillfern, seed  # noqa: E402
@@ -84,6 +85,8 @@ class FakeConnector(Connector):
         self.fail_next: Exception | None = None
         self.reject = False
         self.retry_after: float | None = None
+        # Set: backfill pages say where polling should resume, and a poll from there finds nothing new.
+        self.poll_from: str | None = None
         self.calls: list[tuple[str, str | None]] = []
 
     def check_credentials(self, install):
@@ -102,10 +105,14 @@ class FakeConnector(Connector):
         if self.fail_next is not None:
             error, self.fail_next = self.fail_next, None
             raise error
+        if cursor and cursor.startswith("poll:"):
+            return Page(next_cursor=cursor)
         issues = self.projects[container.external_id]
         start = int(cursor or 0)
         chunk = issues[start : start + PAGE_SIZE]
         page = Page(next_cursor=str(start + len(chunk)), has_more=start + len(chunk) < len(issues), retry_after=self.retry_after)
+        if self.poll_from is not None:
+            page.poll_cursor = self.poll_from
         for issue in chunk:
             self._emit(install, container, issue, page)
         return page
@@ -240,6 +247,40 @@ class ConnectorFrameworkTest(unittest.TestCase):
         self.assertEqual(_count("MATCH (:ExternalUser {id: 'fake:default:user:u-zed'})-[:IS]->() RETURN count(*)"), 0)
         self.assertEqual(_count("MATCH (n:Person) RETURN count(n)"), len(quillfern.PEOPLE) + 1)  # no Person was created
 
+    def test_a_connector_edge_prop_never_overrides_the_frameworks(self):
+        _drain()
+        edge = Edge("WORKED_ON", "fake:default:user:u-zed", "fake:default:company:1005", props={"via": "x", "item": "y", "source": "z", "install": "w", "stage": "won"})
+        graph.write_page(INSTALL, Page(edges=[edge]))
+        props = _rows("MATCH (:ExternalUser {id: 'fake:default:user:u-zed'})-[r:WORKED_ON]->(:Service {id: 'fake:default:company:1005'}) RETURN properties(r)")[0][0]
+        self.assertEqual(
+            {name: props[name] for name in ("via", "item", "source", "install", "stage")},
+            {"via": "fake:default:user:u-zed", "item": "fake:default:company:1005", "source": "fake", "install": "fake:default", "stage": "won"},
+        )
+
+    def test_an_unlinked_owner_is_named_with_its_tool(self):
+        _drain()
+        slack_tags = resolve_brain_read_container_tags(SlackMemoryScope(kind="shared", channel_id="CPUB"))
+        result = catalogue.get_tool("who_owns").run({"name": "who owns Globex"}, slack_tags)
+        self.assertEqual(result.answer, "The Globex account is owned by Zed Contractor (Fake).")
+        self.assertIn("Zed Contractor (Fake) -[OWNS]-> Globex", [step.cite() for step in result.path])
+        linked = catalogue.get_tool("who_owns").run({"name": "who owns Acme Corp"}, slack_tags)
+        self.assertEqual(linked.answer, "The Acme Corp account is owned by Arjun Mehta.")
+
+    def test_a_team_brief_names_the_accounts_its_members_own(self):
+        _drain()
+        slack_tags = resolve_brain_read_container_tags(SlackMemoryScope(kind="shared", channel_id="CPUB"))
+        page = team_page.team_page("payments", slack_tags)
+        self.assertEqual(([account.name for account in page.accounts], page.accounts_total), (["Acme Corp"], 1))
+        self.assertIn("Arjun Mehta -[OWNS]-> Acme Corp", [step.cite() for step in page.path])
+        self.assertEqual(page.to_dict()["accounts_total"], 1)
+        brief = catalogue.get_tool("onboarding_brief").run({"name": "brief me on the payments team"}, slack_tags)
+        self.assertIn("Its members also own 1 account: Acme Corp (owned by Arjun Mehta).", brief.answer)
+        # The public page never shows them, and no RUNS edge was made.
+        self.assertEqual(team_page.team_page("payments").accounts, [])
+        public = catalogue.get_tool("onboarding_brief").run({"name": "brief me on the payments team"}, ["org_shared"])
+        self.assertNotIn("Acme", public.answer + repr([step.cite() for step in public.path]))
+        self.assertEqual(_count("MATCH (:Team)-[:RUNS]->(:Service {id: 'fake:default:company:1004'}) RETURN count(*)"), 0)
+
     def test_ownership_moves_to_the_person_once_linked(self):
         _drain()
         _rows("CREATE (:Person {id: 'zed', name: 'Zed Contractor', email: 'zed@contractor.example'})")
@@ -250,6 +291,7 @@ class ConnectorFrameworkTest(unittest.TestCase):
     # --- cursors, retries, failures ----------------------------------------------------------
 
     def test_cursor_resumes_after_a_restart(self):
+        del FAKE.projects["SEC"]  # one container, so the next fetch is OPS again
         first = sync.sync_step("fake")
         self.assertEqual(first["status"], "synced")
         cursor = graph.get_state(first["container"])["cursor"]
@@ -349,6 +391,107 @@ class ConnectorFrameworkTest(unittest.TestCase):
         self.assertEqual(_count("MATCH (n {id: 'fake:default:2001'}) RETURN count(n)"), 0)
         self.assertEqual(_count("MATCH (c:Container {id: 'fake:default:container:SEC'}) RETURN count(c)"), 0)
 
+    def test_a_capped_backfill_ends_and_the_containers_take_turns(self):
+        FAKE.projects["SEC"] += [
+            {"id": "2002", "key": "SEC-2", "title": "Audit logins"},
+            {"id": "2003", "key": "SEC-3", "title": "Pin TLS"},
+        ]
+        _drain()
+        # Two pages each way, alternating: a long backfill never holds up another container.
+        self.assertEqual(FAKE.calls[:4], [("OPS", None), ("SEC", None), ("OPS", "2"), ("SEC", "2")])
+        FAKE.calls.clear()
+        sync.sync_now("fake", full=True)
+        with mock.patch.object(sync, "MAX_ITEMS_PER_CONTAINER", 2):
+            _drain()
+        # At the cap the backfill stops: one page each, the cursor kept for the next poll.
+        self.assertEqual(sorted(FAKE.calls), [("OPS", None), ("SEC", None)])
+        state = graph.get_state("fake:default:container:OPS")
+        self.assertEqual((state["has_more"], state["capped"], state["cursor"]), (False, True, "2"))
+        self.assertGreaterEqual(state["due_at"] - state["last_fetch_at"], FAKE.poll_seconds * 1000)
+
+    def test_at_the_cap_polling_resumes_from_the_poll_cursor(self):
+        FAKE.poll_from = "poll:2026-10-05T10:00:00Z"
+        with mock.patch.object(sync, "MAX_ITEMS_PER_CONTAINER", 2):
+            _drain()
+            state = graph.get_state("fake:default:container:OPS")
+            self.assertEqual((state["cursor"], state["has_more"], state["backfilled"]), ("poll:2026-10-05T10:00:00Z", False, True))
+            self.assertNotIn("poll_cursor", state)
+            FAKE.calls.clear()
+            sync.sync_now("fake")
+            _drain()
+        # The next poll asks for what changed since the backfill's newest, not for older pages.
+        self.assertIn(("OPS", "poll:2026-10-05T10:00:00Z"), FAKE.calls)
+
+    def test_a_container_parked_too_far_out_is_due_now(self):
+        _drain()
+        now = int(time.time() * 1000)
+        graph.set_state("fake:default:container:OPS", INSTALL, due_at=now + 60_000)
+        graph.set_state("fake:default:container:SEC", INSTALL, due_at=now + 10**12)
+        report = sync.sync_step("fake")
+        self.assertEqual((report["status"], report["container"]), ("synced", "fake:default:container:SEC"))
+
+    def test_huge_waits_are_clamped_and_a_parked_job_is_re_armed(self):
+        FAKE.retry_after = 999_999_999
+        report = sync.sync_step("fake")
+        state = graph.get_state(report["container"])
+        self.assertLessEqual(state["due_at"] - state["last_fetch_at"], sync.MAX_RETRY_AFTER_SECONDS * 1000)
+        with mock.patch.object(FAKE, "check_credentials", side_effect=RetryLater(999_999_999)):
+            sync._containers.clear()
+            scheduler.schedule.reset_mock()
+            sync.run_sync({"source": "fake"})
+        self.assertLessEqual(scheduler.schedule.call_args.args[0], sync.max_delay("fake"))
+        self.assertEqual(sync.max_delay("fake"), 3600.0)
+        for due, rearmed in ((None, True), (10.0, False), (999_999_999.0, True)):
+            scheduler.schedule.reset_mock()
+            with mock.patch.object(scheduler, "due_at", return_value=None if due is None else time.time() + due):
+                self.assertEqual(sync.schedule_all(), ["fake"] if rearmed else [], due)
+            self.assertEqual(scheduler.schedule.called, rearmed)
+
+    def test_a_hidden_shortcut_never_hides_a_readable_route(self):
+        public = ["org_shared"]
+        before = algorithms.path_between("Kofi Mensah", "Lena Fischer", public).answer
+        tickets = algorithms.path_between("TKT-101", "TKT-102", public).answer
+        self.assertIn("reaches Lena Fischer in 4 hops", before)
+        _drain()
+        kofi = ExternalUser(id=INSTALL.user_id("k"), source="fake", external_id="k", name="kofi", email="kofi@quillfern.example.com")
+        item = Item(label="Ticket", id=INSTALL.item_id("77"), external_id="77", container="fake:default:container:OPS", name="OPS-77",
+                    title="Notify retries", about=("Notification Service",))
+        blocker = Item(label="Ticket", id=INSTALL.item_id("78"), external_id="78", container="fake:default:container:OPS", name="OPS-78")
+        graph.write_page(INSTALL, Page(items=[item, blocker], users=[kofi], edges=[Edge("WORKED_ON", kofi.id, item.id)]))
+        _rows("MATCH (b:Ticket {id: 'fake:default:78'}), (one:Ticket {id: 'TKT-101'}), (two:Ticket {id: 'TKT-102'}) CREATE (one)-[:BLOCKS]->(b)-[:BLOCKS]->(two)")
+        # Shorter routes now run through Jira tickets; the public reader still gets the route it may read.
+        self.assertEqual(algorithms.path_between("Kofi Mensah", "Lena Fischer", public).answer, before)
+        self.assertEqual(algorithms.path_between("TKT-101", "TKT-102", public).answer, tickets)
+        inside = ["org_shared", "org_internal"]
+        self.assertIn("Kofi Mensah reaches Lena Fischer in 3 hops: Kofi Mensah → OPS-77", algorithms.path_between("Kofi Mensah", "Lena Fischer", inside).answer)
+        self.assertIn("TKT-101 -[BLOCKS]-> OPS-78", [step.cite() for step in algorithms.path_between("TKT-101", "TKT-102", inside).path])
+        # The search over readable nodes is bounded, looks nodes up by label, and says how far it got.
+        queries = []
+        real = type(falkordb_client.connect()[1]).ro_query
+
+        def counting(graph_self, query, params=None, *args, **kwargs):
+            queries.append(query)
+            return real(graph_self, query, params, *args, **kwargs)
+
+        with mock.patch.object(type(falkordb_client.connect()[1]), "ro_query", counting), mock.patch.object(algorithms, "MAX_SEARCHED", 3):
+            capped = algorithms.path_between("Kofi Mensah", "Lena Fischer", public)
+        self.assertEqual(capped.answer, "No path between Kofi Mensah and Lena Fischer within 1 hop in what you can read.")
+        self.assertFalse([query for query in queries if "MATCH (n)-[r]-(m)" in query or "MATCH (a {id" in query])
+
+    def test_an_unconnected_pair_costs_no_search(self):
+        _rows("CREATE (:Service {id: 'island', name: 'Island Service'})")
+        queries = []
+        real = type(falkordb_client.connect()[1]).ro_query
+
+        def counting(graph_self, query, params=None, *args, **kwargs):
+            queries.append(query)
+            return real(graph_self, query, params, *args, **kwargs)
+
+        with mock.patch.object(type(falkordb_client.connect()[1]), "ro_query", counting):
+            result = algorithms.path_between("Kofi Mensah", "Island Service", ["org_shared"])
+        self.assertEqual(result.answer, "No path between Kofi Mensah and Island Service within 6 hops in what you can read.")
+        self.assertFalse([query for query in queries if "-[r]-(m)" in query])
+
     def test_a_container_keeps_at_most_the_cap(self):
         with mock.patch.object(sync, "MAX_ITEMS_PER_CONTAINER", 3):
             _drain()
@@ -388,7 +531,7 @@ class ConnectorFrameworkTest(unittest.TestCase):
         inside = who.run({"name": "OPS-1"}, slack_tags)
         self.assertTrue(inside.found)
         self.assertIn("Arjun Mehta -[ASSIGNED]-> OPS-1", [step.cite() for step in inside.path])
-        self.assertIn("Zed Contractor -[OPENED]-> OPS-1", [step.cite() for step in inside.path])
+        self.assertIn("Zed Contractor (Fake) -[OPENED]-> OPS-1", [step.cite() for step in inside.path])
         self.assertTrue(who.run({"name": "who owns the Acme Corp account"}, slack_tags).found)
 
         self.assertFalse(ask_api.answer_question("who knows OPS-1").found)

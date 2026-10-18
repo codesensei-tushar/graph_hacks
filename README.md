@@ -2,24 +2,29 @@
 
 [![Deploy](https://github.com/codesensei-tushar/graph_hacks/actions/workflows/deploy.yml/badge.svg)](https://github.com/codesensei-tushar/graph_hacks/actions/workflows/deploy.yml)
 
-Hackathon project for Graph Hacks track 03. FalkorDB holds how a company is connected. An agent answers from that graph and shows the path behind each answer.
+**Ask how your company works. Every answer shows the path it walked.**
 
-Ask it in Slack and it answers from the graph, then prints the edges it walked:
+Company Brain keeps a company's people, teams, what they run, documents, tickets, decisions and chat in one FalkorDB graph. A Slack agent, the live page and any MCP client answer by walking it, and print every edge they used as `A -[REL]-> B`. The agent never writes Cypher: it picks one of a fixed catalogue of hand-written, parameterised queries, resolves names against the graph first, and when the graph does not know something it says so instead of guessing.
 
-| You ask | It walks |
-| --- | --- |
-| Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, tickets and docs, and pull requests and reviews once GitHub is connected |
-| Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[BASED_ON]-> Document`, the decision it `SUPERSEDES`, and the chat it came from |
-| What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
-| Who should know about notebook#45? | `PullRequest -[TOUCHES]-> Service`, then back two `DEPENDS_ON` hops: the owners of what it changes and of what depends on it who were not on the pull request, each tagged by whether they have worked with its author |
-| A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
-| What if Priya Shah leaves? | What only they own or know, ranked by what depends on it, and who is next in line by the same edges `who_knows` ranks |
+[![“who knows billing” on the ask page: the ranked answer, the path drawn as a graph, and the same edges as A -[REL]-> B lines, including the pull request a teammate reviewed.](docs/images/01-who-should-look.png)](https://brain.noobsurd.space/?q=who%20knows%20billing)
 
-Rows 4 and 6 need the demo replay's pull requests and Sales team; the live site answers the questions in [Try it in two minutes](#try-it-in-two-minutes).
+<sub>Taken on the local replay of the synthetic company, which adds a GitHub history. The live site answers the same question from the seeded graph, without the pull request.</sub>
 
-If the thing you named is not in the graph, it says so and offers the nearest matches. It never guesses.
+Graph Hacks 2026: track 03, Company Brain, also entered in tracks 01 and 02.
 
-Engineering was first; any team joins the same graph from one TOML file. A `Service` node has a `kind`, so a Sales team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as the billing service, worded for what they are: a process stalls, a playbook no longer applies. The import only merges, and people Slack already knows are matched by email, never duplicated. Every read-only tool is also served over MCP and returns the path it walked. See [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md).
+## For judges: verify it in two minutes
+
+| | Do this | You should see |
+| --- | --- | --- |
+| 1 | Open [brain.noobsurd.space](https://brain.noobsurd.space) and click an example question | The answer, the path drawn edge by edge, and the same edges as `A -[REL]-> B` lines |
+| 2 | Open [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves) | What rests on one person alone, and who is next in line |
+| 3 | Ask [`who knows the payments gateway`](https://brain.noobsurd.space/?q=who%20knows%20the%20payments%20gateway) | A refusal that names the nearest things the graph does hold. It never guesses |
+| 4 | Scroll to [Take FalkorDB out](https://brain.noobsurd.space/#proof) on the page | The same questions run twice: five of six capabilities collapse without the graph, and the refusal stays a refusal |
+| 5 | Open a team: [/team/payments](https://brain.noobsurd.space/team/payments) | Its people, what it runs, what it depends on in other teams and who depends on it, where its risk sits, and the edges behind every line |
+| 6 | `claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp` | The same read-only tools over MCP, with no token, each result with the path it walked |
+| 7 | `python scripts/replay_workspace.py --graph company_demo`, with FalkorDB running | The whole demo through the real routes, with no Slack app and no model key |
+
+`python scripts/check_live.py` runs the live checks in one go: every example question, the questions in the next section, the team page, the deep link and MCP.
 
 ## Try it in two minutes
 
@@ -32,7 +37,9 @@ Engineering was first; any team joins the same graph from one TOML file. A `Serv
 | `why did we move the memory layer off postgres` | The decision, who proposed and approved it, the RFC and ticket it rests on, and the chat it came from |
 | `who knows the payments gateway` | Something the graph does not know: "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." It never guesses. |
 
-Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, its open tickets, and the edges behind every line. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
+Every answer ends with questions to ask next, and you can click any node in its drawing to ask about it.
+
+Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, the teams it depends on and the ones that depend on it, where its risk sits, and the edges behind every line. The team names at the top switch between teams. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
 
 **Over MCP.** The same read-only tools, with the same cited results, from any MCP client. No token needed: read-only, the company-wide scope, 30 calls a minute per address, shared with the ask page. A token, where one was issued, lifts the limit.
 
@@ -48,45 +55,36 @@ Any other client: streamable HTTP at `https://brain.noobsurd.space/mcp`. A Pytho
 python scripts/replay_workspace.py --graph company_demo
 ```
 
-In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 15 replies, from "who owns billing" through the Sales questions to the heads-up a new pull request posts, and ends with `fake Slack calls=144 bot messages=17`: the 15 replies and the two Approve cards.
+In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 17 replies, from "who owns billing" through "what changed this week" and its "only decisions" follow-up and the Sales questions to the heads-up a new pull request posts, and ends with `fake Slack calls=162 bot messages=19`: the 17 replies and the two Approve cards.
 
-- What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
-- Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
-- Blog post outline: [docs/BLOG.md](docs/BLOG.md)
-- Pitch deck, slide by slide: [docs/PITCH.md](docs/PITCH.md)
-- Site design brief: [docs/DESIGN.md](docs/DESIGN.md)
-- How to run the graph: [docs/SETUP.md](docs/SETUP.md)
-- Onboard any team from one file: [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md)
-- Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
-- GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
-- What is built and what is next: [docs/SLACK.md#what-is-next](docs/SLACK.md#what-is-next)
-- Production deploy, CI/CD and operations: [docs/DEPLOY.md](docs/DEPLOY.md)
-- Replay the synthetic company for a demo or a test: [docs/SETUP.md](docs/SETUP.md#replay-the-synthetic-company)
+## What it answers
 
-AI assistance: parts of this project were written with Claude Code (Anthropic), including the production infrastructure, deploy pipeline and their docs.
+Ask it in Slack and it answers from the graph, then prints the edges it walked:
 
-```bash
-docker compose up -d
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python scripts/seed_graph.py
-uvicorn src.main:app --reload
-```
+| You ask | It walks |
+| --- | --- |
+| Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, tickets and docs, and pull requests and reviews once GitHub is connected |
+| Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[BASED_ON]-> Document`, the decision it `SUPERSEDES`, and the chat it came from |
+| What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
+| Who should know about notebook#45? | `PullRequest -[TOUCHES]-> Service`, then back two `DEPENDS_ON` hops: the owners of what it changes and of what depends on it who were not on the pull request, each tagged by whether they have worked with its author |
+| A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
+| What if Priya Shah leaves? | What only they own or know, ranked by what depends on it, and who is next in line by the same edges `who_knows` ranks |
 
-To see the seven demo answers with no Slack app and no model key, run the synthetic company through the real routes against a local fake of the Slack API. It seeds the fictional Quillfern into a graph of its own and prints every reply with the edges it walked:
+Rows 4 and 6 need the demo replay's pull requests and Sales team; the live site answers the questions in [Try it in two minutes](#try-it-in-two-minutes).
 
-```bash
-python scripts/replay_workspace.py --graph company_demo
-```
+![Blast radius on the ask page at one hop, then two hops out: the depth in the path header changes, and the invoice worker appears through Billing and Notifications.](docs/images/05-blast-radius.png)
 
-That is the complete local setup the rules accept in place of a live deployment: Docker, Python 3.11 or newer, and the two commands above. Verified from a clean clone on Python 3.13 with only `requirements.txt` installed.
+If the thing you named is not in the graph, it says so and offers the nearest matches. It never guesses.
 
-The interface is Slack. Create the app from [`slack_app/manifest.yaml`](slack_app/manifest.yaml) and follow [docs/SLACK.md](docs/SLACK.md). The same read-only catalogue is also a page at [http://localhost:8000/](http://localhost:8000/), which draws the path behind each answer and runs the same questions with the graph switched off. Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health). Graph browser: [http://localhost:3000](http://localhost:3000).
+![The refusal on the ask page: nothing in the graph matches “payments gateway” as one thing, the nearest names, and no path.](docs/images/03-refusal.png)
+
+Engineering was first; any team joins the same graph from one TOML file. A `Service` node has a `kind`, so a Sales team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as the billing service, worded for what they are: a process stalls, a playbook no longer applies. The import only merges, and people Slack already knows are matched by email, never duplicated. Every read-only tool is also served over MCP and returns the path it walked. See [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md).
 
 ## Graph data model
 
 A `Service` node is anything a team owns: a service, a system, a process, a product, an account, a policy or a playbook. Its `kind` changes only how replies read ("the Renewals process stalls", "the Refund policy is owned by ...").
+
+![The FalkorDB Browser on the replay graph: Billing Service in the centre with its DEPENDS_ON, OWNS and TOUCHES edges, and two Memory nodes that MENTION it.](docs/images/02-browser-graph.png)
 
 ```mermaid
 flowchart LR
@@ -118,6 +116,14 @@ flowchart LR
     PullRequest -- CLOSES --> Ticket
     GitHubUser -- "OPENED / ASSIGNED" --> Ticket
   end
+  subgraph connectors[Connected tools: Jira, HubSpot; scope org_internal or a restricted project's]
+    ExternalUser -- IS --> Person
+    ExternalUser -- "OPENED / ASSIGNED" --> Ticket
+    ExternalUser -- CAN_READ --> Container
+    Ticket -- IN_CONTAINER --> Container
+    Ticket -- BLOCKS --> Ticket
+    PullRequest -- "REFERENCES / CLOSES" --> Ticket
+  end
   subgraph slack[Slack and memory, scope per room]
     SlackUser -- IS --> Person
     SlackUser -- MEMBER_OF --> Channel
@@ -131,7 +137,7 @@ flowchart LR
 
 One FalkorDB graph (`company`) holds everything: the seeded company, what Slack and GitHub add at runtime, every memory, and who may read what. Nodes carry `id` and `name`; the tool answers cite them. The Cypher that reads and writes each part is listed in the next section.
 
-**Scopes.** A node written from Slack or GitHub carries `scope`: `org_shared` (public channels, public repos), `slack_channel_<id>` (one private channel or group DM), `user_<slack id>` (one person's DMs with the bot), or `github_repo_<id>` (one private repo). Seeded nodes have no `scope` and count as `org_shared`. Every read filters `coalesce(n.scope, 'org_shared') IN $scopes`, where `$scopes` is the asker's read set.
+**Scopes.** A node written from Slack or GitHub carries `scope`: `org_shared` (public channels, public repos), `slack_channel_<id>` (one private channel or group DM), `user_<slack id>` (one person's DMs with the bot), or `github_repo_<id>` (one private repo). What a connected tool writes is `org_internal`: every Slack asker reads it, and the public ask page, the team pages and MCP, which read `org_shared` only, never do; a restricted project gets `connector_<hash>` instead, read only in its readers' DMs. Seeded nodes have no `scope` and count as `org_shared`. Every read filters `coalesce(n.scope, 'org_shared') IN $scopes`, where `$scopes` is the asker's read set, on every node it shows or walks through.
 
 **Company knowledge** (`src/seed/`, extended by Slack commands and GitHub webhooks):
 
@@ -171,17 +177,26 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 | `GitHubUser` | `id`, `login`, `name` | `-[:IS]->(Person)`, `-[:CAN_READ {user}]->(Repo)`, `-[:AUTHORED]->(PullRequest)`, `-[:REVIEWED {state}]->(PullRequest)`, `-[:REVIEW_REQUESTED]->(PullRequest)` (asked to review, until they do), `-[:OPENED\|ASSIGNED]->(Ticket)` |
 | `PullRequest` | `id`, `name`, `number`, `title`, `summary`, `state`, `merged`, `url`, `scope`, `updated_at` | `-[:IN_REPO]->(Repo)`, `-[:TOUCHES]->(Service)`, `-[:CLOSES]->(Ticket)` |
 
+**Connectors** (`src/connectors/`, see [docs/CONNECTORS.md](docs/CONNECTORS.md)). A connector returns records; `src/connectors/graph.py` is their only writer and MERGEs on ids of the form `<source>:<install>:<external id>`, so it never sets a property on a seeded, imported, Slack or GitHub node. A Jira issue is a `Ticket` and a CRM company a `Service` of kind `account`, each with `id`, `name` (the handle, `PAY-12`), `title`, `summary`, `url`, `state` (`open` or `closed`), `status` (the tool's own), `source`, `install`, `external_id`, `source_updated_at`, `synced_at` (ms) and `scope`. Name resolution matches them by handle, never by title.
+
+| Label | Properties | Edges out |
+| --- | --- | --- |
+| `Container` | `id`, `name`, `external_id`, `url`, `kind` (`project`, `portal`), `source`, `install`, `scope`, `restricted` | |
+| `ExternalUser` | `id`, `name`, `email`, `source`, `install`, `external_id`, `scope` | `-[:IS {via: 'email'}]->(Person)` when exactly one Person has the email, `-[:OPENED\|ASSIGNED]->(Ticket)`, `-[:OWNS\|WORKED_ON]->(Service)` while unlinked (linked, the edge comes from the Person), `-[:CAN_READ]->(Container)` |
+| `Ticket`, `Service` (from a connector) | as above | `-[:IN_CONTAINER]->(Container)`, `-[:ABOUT]->(Service)` (components and labels that name a service), `-[:BLOCKS]->(Ticket)` |
+| `ConnectorState` | `id` (a container's or the install's), `cursor`, `has_more`, `due_at`, `last_error`, `account`, scope `system` | |
+
 **Decisions stay current.** A decision recorded from Slack (`decision: <title>`, or the agent's `record_decision` tool, both behind an Approve card that names what the write will replace) gets `decided_at` and the room's `scope`, `SUPERSEDES` the standing decision it replaces, is `DECIDED_IN` the channel, and is `BASED_ON` the documents, tickets or pull requests it names. Nothing is deleted: asking about a superseded decision answers "*old* is no longer current" and then the current one, with both dates. Vector recall was left out on purpose for the hackathon; recall follows `MENTIONS` edges instead (see `related_memories` below).
 
-**Indexes** (`ensure_indexes` in `src/domain/memory/memory_service.py`): range indexes on `Memory.scope`, `Memory.id`, `Memory.custom_id`, `Tag.id`, `Tag.container`, `Scope.id`, `SlackUser.id`, `Channel.id`; a full-text index on `Memory.text`; the vector index on `Memory.embedding` once item 4 lands.
+**Indexes** (`ensure_indexes` in `src/domain/memory/memory_service.py`): range indexes on `Memory.scope`, `Memory.id`, `Memory.custom_id`, `Tag.id`, `Tag.container`, `Scope.id`, `SlackUser.id`, `Channel.id`; a full-text index on `Memory.text`. `ensure_search_indexes` in `src/domain/knowledge/search.py` adds full-text indexes on `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)` and `Decision(name, summary)` for `search`.
 
-**Short-lived state** lives as Redis keys in the same FalkorDB instance, so the app talks to one process: the scheduler's sorted set `brain:schedule`, approvals `brain:approval:*`, running turns `brain:thread-turn:*`, bot threads `brain:bot-thread:*`, the per-channel event ring `brain:slack-event:*`, channel-observe batches `brain:observe:*`, and the dedupe keys `slack:evt:*` and `github:delivery:*`.
+**Short-lived state** lives as Redis keys in the same FalkorDB instance, so the app talks to one process: the scheduler's sorted set `brain:schedule`, approvals `brain:approval:*`, running turns `brain:thread-turn:*`, bot threads `brain:bot-thread:*`, the per-channel event ring `brain:slack-event:*`, channel-observe batches `brain:observe:*`, and the dedupe keys `slack:evt:*`, `github:delivery:*` and `connector:delivery:*`.
 
 ## Cypher queries the product depends on
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a small schema: `tool`, an enum of the catalogue's names, and `args`, the chosen tool's arguments as JSON text (each tool's argument names, types and bounds are in the prompt, because the structured-output API rejects integer bounds and refuses the union of every tool's arguments as too complex). The choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
 
-**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (65 of them on 18 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (125 of them on 18 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; the edge clause `explore` and `neighbors` share, `($rel IS NULL OR type(r) = $rel)` with the direction test on `$dir`, a code constant whose type and direction arrive as parameters after an allowlist check in Python; fixed field lists for `RETURN`, including `find`'s fixed lists of cited edges; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; the risk map's optional id filter, the fixed text `AND s.id IN $ids` with the ids passed as a parameter; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |
@@ -194,8 +209,18 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `load_bearing` | Which services the company leans on most, by PageRank, with dependent counts | no |
 | `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
 | `recall` | Memories whose text matches the question, dated, no path | no |
+| `explore` | Everything around one node of any kind, or its id: what it links to, grouped by relationship and direction (owned by, depends on, tickets about it, replaced by), every edge cited; depth 2 counts the next ring. Also the second step before any refusal | no |
+| `find` | Lists by filter: open tickets, the tickets or decisions about a service, a team's services or processes, the standing decisions, pull requests by a person, documents describing a service, the people on a team. Labels and filters come from allowlists; every value is resolved to a node first | no |
+| `neighbors` | One relationship type, from an allowlist, followed out, in or both ways for 1 to 3 hops, grouped by hop, every edge cited. For the agent and MCP clients; no keyword route | no |
+| `search` | Words that name no node ("who knows about refunds", "search for webhooks"): full-text over documents, tickets, pull requests, decisions and chat, then the people on each hit ranked by their edges. Also the last step before any refusal | no |
 | `working_groups` | Who clusters together from shared work, by label propagation, and where that splits from the org chart | no |
 | `if_person_leaves` | What rests on one person alone if they leave, ranked by what depends on it, and who is next in line for each | no |
+| `risk_map` | Where risk concentrates across the company: every owned thing ranked by what depends on it times its gaps (one person, no document, owner on another team), with PageRank shown beside it, plus the full ranking as a table | no |
+| `person_profile` | Who a person is and what they hold: role and team, what they own, work on or know with what depends on each, documents, pull requests, open tickets, their decisions and whether each stands, who they work with most, and what rests on them alone | no |
+| `team_dependencies` | Which teams depend on which through what they run: for one team, who depends on it (or what it needs from others) with the links and the teams reached only through others; for the company, every pair of teams and the mutual ones | no |
+| `decision_health` | An audit of the decisions that stand: no evidence, no approver, two standing decisions about the same thing, work about it that it does not cite, age, and what replaced what | no |
+| `reading_list` | What to read before touching a service: the documents on it and everything it depends on, nearest first, the standing decisions and their sources, and what nothing documents, with who to ask | no |
+| `what_changed` | What changed lately around a service and what it depends on, a team, or the whole company: decisions, pull requests, tickets and what was said, dated, grouped by thing, newest first | no |
 | `decision_pressure` | Tickets and pull requests about a decision's service that the standing decision does not cite | no |
 | `ingest_ticket` | Files a ticket about a service, then answers who should look at it | yes, after Approve |
 | `record_decision` | Records a decision, links it to its services and sources, and supersedes the one it replaces | yes, after Approve; the card names what it replaces |
@@ -237,7 +262,15 @@ MATCH (gh:GitHubUser)-[rel:AUTHORED|REVIEWED]->(pr:PullRequest)-[:TOUCHES]->(ser
 WHERE coalesce(pr.scope, 'org_shared') IN $scopes
 OPTIONAL MATCH (gh)-[:IS]->(person:Person)
 RETURN coalesce(person.name, '@' + gh.login), type(rel), pr.name, service.name
+
+// Accounts in other tools (GitHub, Jira, HubSpot) on the thing itself, as their linked person when there is one.
+MATCH (account)-[rel:OPENED|ASSIGNED|OWNS|WORKED_ON]->(node {id: $id})
+WHERE labels(account)[0] IN ['GitHubUser', 'ExternalUser'] AND coalesce(account.scope, 'org_shared') IN $scopes
+OPTIONAL MATCH (account)-[:IS]->(person:Person)
+RETURN coalesce(person.name, CASE WHEN labels(account)[0] = 'GitHubUser' THEN '@' + account.login ELSE account.name END), type(rel), node.name
 ```
+
+At most eight tickets about a service are listed, open ones first, then the most recently updated, and the rest are counted ("Open tickets: PAY-12, PAY-9 and 14 more."). Jira assignees of those tickets count as `ASSIGNED`.
 
 **decision_trace** (the decision that stands today, who made it, what it rests on, where it was decided, and what it replaced). The question's decision is resolved, then `SUPERSEDES` is followed forward to the current one; a stale decision answers "*old* (decided <date>) is no longer current." first. A decision recorded from Slack quotes its reason from the message it came from: "Decided in #engineering on 17 Oct 2026 by Arjun Mehta: “we're moving billing retries to the invoice worker, decided in today's sync”", with the `RECORDED_FROM` edge in the path. Seeded decisions have no message and keep the date and proposer lines.
 
@@ -290,7 +323,8 @@ MATCH (d:Decision {id: $d}), (m:Memory {id: $m}) MERGE (d)-[:RECORDED_FROM]->(m)
 
 ```cypher
 MATCH path = (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
-WHERE all(n IN nodes(path) WHERE NOT coalesce(n.kind, 'service') IN $excluded)
+WHERE all(n IN nodes(path) WHERE coalesce(n.scope, 'org_shared') IN $scopes)
+  AND all(n IN nodes(path) WHERE NOT coalesce(n.kind, 'service') IN $excluded)
 RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name],
        coalesce(dependent.kind, 'service')
 ORDER BY length(path), dependent.name
@@ -326,7 +360,7 @@ WHERE mine.id IN $owners AND theirs.id IN $anchor_people AND mine.id <> theirs.i
 RETURN 'Decision' AS label, mine.id AS mine, theirs.id AS theirs, work.id AS id, work.name AS name, type(m) AS mine_rel, type(t) AS their_rel
 ```
 
-**path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable; the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
+**path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable (when every shortest route runs through something the asker cannot read, a breadth-first search over readable nodes, one hop at a time and at most 500 nodes, finds the shortest route they can, or says how many hops it searched); the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
 
 ```cypher
 MATCH (a {id: $a}), (b {id: $b})
@@ -345,9 +379,12 @@ RETURN [i IN range(0, length(path) - 1) | [
 
 ```cypher
 CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score
+WITH node, score
+WHERE NOT coalesce(node.kind, 'service') IN $excluded AND coalesce(node.scope, 'org_shared') IN $scopes
 RETURN node.id, node.name, score ORDER BY score DESC, node.name LIMIT $limit
 
-MATCH (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
+MATCH path = (dependent:Service)-[:DEPENDS_ON*1..6]->(service:Service {id: $id})
+WHERE all(n IN nodes(path) WHERE coalesce(n.scope, 'org_shared') IN $scopes)
 RETURN count(DISTINCT dependent)
 ```
 
@@ -391,6 +428,162 @@ OPTIONAL MATCH (other:Person)-[:OWNS]->(s)
 WHERE other.id <> $id
 RETURN s.id, s.name, coalesce(s.kind, 'service'), mine, count(other)
 ORDER BY s.name
+```
+
+**risk_map** (where we are one person away from an outage, across every team). Every owned thing the asker can see, of any kind, is checked for three gaps: at most one person knows it, no document describes it (accounts are exempt), and its owner is on a different team from the one that runs it. The people are `who_knows`' own "Ask first" list, and the dependents are counted through `DEPENDS_ON` as `if_person_leaves` and `blast_radius` count them, so the three tools agree. Each thing scores `(1 + dependents) x gaps`, ties broken by dependents and then name. PageRank, the number `load_bearing` ranks by, is shown beside the score but does not change the order. The reply tells three in full, names the rest, and cites each owner's `OWNS`, the running team's `RUNS`, what depends on it directly and, when the owner sits elsewhere, their `MEMBER_OF`. The full ranking comes back as a `grid` (columns, rows and the scoring rule) on `/api/ask` and over MCP, for a page to draw as a table.
+
+```cypher
+MATCH (s:Service)
+WHERE coalesce(s.scope, 'org_shared') IN $scopes
+OPTIONAL MATCH (team:Team)-[:RUNS]->(s)
+OPTIONAL MATCH (owner:Person)-[:OWNS]->(s)
+OPTIONAL MATCH (owner)-[:MEMBER_OF]->(home:Team)
+OPTIONAL MATCH (doc:Document)-[:DESCRIBES]->(s)
+WHERE coalesce(doc.scope, 'org_shared') IN $scopes
+RETURN s.id, s.name, coalesce(s.kind, 'service'), team, owners, count(DISTINCT doc)
+
+CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score RETURN node.id, score
+```
+
+**person_profile** (who a person is and what they hold: "who is arjun", "what does sara own", "what is kofi working on", "who works with lena"). The person is resolved first. Each part is then one scoped read, and the reply drops the parts that are empty:
+- role and teams (`MEMBER_OF`);
+- what they `OWNS`, `WORKED_ON` or `KNOWS`, strongest edge first, each with how much depends on it through `DEPENDS_ON`, counted as `if_person_leaves` counts it;
+- documents they `AUTHORED`;
+- pull requests and reviews through the GitHub account that `IS` them, open first;
+- open tickets they worked on or are assigned;
+- decisions they `PROPOSED` or `APPROVED`, each followed through `SUPERSEDES` to say whether it still stands or what replaced it;
+- the two people they work with most (one point per shared thing, review pair and decision pair);
+- how many things rest on them alone, which is `if_person_leaves`' own list.
+
+What they said comes back as dated memories through their Slack account (`SlackUser -[:IS]-> Person`). The `grid` holds one row per thing they hold (their edge, dependents, who else knows it, whether it rests on them alone), and the page draws it with the risk map's table. A question that names a person where `who_knows`, `who_owns`, `onboarding_brief` or `decision_trace` would refuse gets the profile instead; a "why" that names a person and no decision stays a refusal.
+
+```cypher
+MATCH (:Person {id: $id})-[rel:OWNS|WORKED_ON|KNOWS]->(s:Service)
+WHERE coalesce(s.scope, 'org_shared') IN $scopes
+OPTIONAL MATCH (team:Team)-[:RUNS]->(s)
+OPTIONAL MATCH (owner:Person)-[:OWNS]->(s)
+RETURN s.id, s.name, coalesce(s.kind, 'service'), collect(DISTINCT type(rel)), collect(DISTINCT team.name), collect(DISTINCT owner.name)
+
+MATCH (:Person {id: $id})<-[:IS]-(:GitHubUser)-[rel:AUTHORED|REVIEWED]->(pr:PullRequest)
+WHERE coalesce(pr.scope, 'org_shared') IN $scopes
+RETURN pr.id, pr.name, pr.state, type(rel)
+
+MATCH (:Person {id: $id})-[:OWNS|WORKED_ON|KNOWS]->(s:Service)<-[theirs:OWNS|WORKED_ON|KNOWS]-(other:Person)
+WHERE coalesce(s.scope, 'org_shared') IN $scopes AND other.id <> $id
+RETURN other.id, other.name, s.id, s.name, collect(DISTINCT type(theirs))
+```
+
+**team_dependencies** (which teams depend on which: "which teams depend on platform", "what does payments need from other teams", "cross-team dependencies"). `DEPENDS_ON` is aggregated across team boundaries through what each team `RUNS`, with accounts left out as in `blast_radius`. For a named team, it tells the teams whose things depend on its own, each with the links that tie them ("Billing Service → Auth Service"), the teams that reach it only through two or more hops (one cited route each), and any team it depends on in return, so the two depend on each other. Asked the other way, it tells what the team needs from each other team. With no team named, it gives the company view: every pair of teams, the busiest first, and the mutual pairs. The path cites each `RUNS` and `DEPENDS_ON` it counted, and the `grid` (teams, pairs with their links, mutual pairs) is ready for a matrix. A name that is not a team goes through the shared fallback before the refusal.
+
+```cypher
+MATCH (t1:Team)-[:RUNS]->(a:Service)-[:DEPENDS_ON]->(b:Service)<-[:RUNS]-(t2:Team)
+WHERE t1.id <> t2.id AND coalesce(t1.scope, 'org_shared') IN $scopes AND coalesce(a.scope, 'org_shared') IN $scopes
+  AND coalesce(b.scope, 'org_shared') IN $scopes AND coalesce(t2.scope, 'org_shared') IN $scopes
+  AND NOT coalesce(a.kind, 'service') IN $excluded AND NOT coalesce(b.kind, 'service') IN $excluded
+RETURN DISTINCT t1.id, t1.name, a.id, a.name, b.id, b.name, t2.id, t2.name
+```
+
+**decision_health** (an audit of every decision that stands: "which decisions are stale", "are any decisions in conflict"). A decision stands when no decision the reader can see supersedes it, so a private replacement never hides a standing decision from someone who cannot read it. Each standing decision is checked against its own edges:
+- **no evidence:** no `BASED_ON` or `CITES`;
+- **no approver:** no `APPROVED`;
+- **conflict:** a second standing decision is `ABOUT` the same thing;
+- **may be stale:** tickets `ABOUT` or pull requests that `TOUCHES` what it is about, which it does not cite. This is the same query `decision_pressure` runs for one decision, now shared as `decisions.uncited_work`.
+- **old:** decided more than 180 days ago.
+
+The reply names what needs attention and tells the history: each replaced chain, oldest first, with dates. A service or team in the question narrows the audit to it. The path cites what each check read, including the `SUPERSEDES` edges of the history, and the `grid` has one row per decision with its flags.
+
+```cypher
+MATCH (d:Decision)
+WHERE coalesce(d.scope, 'org_shared') IN $scopes
+OPTIONAL MATCH (newer:Decision)-[:SUPERSEDES]->(d)
+WHERE coalesce(newer.scope, 'org_shared') IN $scopes
+WITH d, count(newer) AS replaced
+OPTIONAL MATCH (d)-[:ABOUT]->(s:Service)
+WHERE coalesce(s.scope, 'org_shared') IN $scopes
+WITH d, replaced, collect(DISTINCT [s.id, s.name]) AS about
+OPTIONAL MATCH (d)-[cited:BASED_ON|CITES]->(source)
+WHERE coalesce(source.scope, 'org_shared') IN $scopes
+WITH d, replaced, about, collect(DISTINCT [source.id, source.name, labels(source)[0], type(cited)]) AS sources
+OPTIONAL MATCH (person:Person)-[role:PROPOSED|APPROVED]->(d)
+RETURN d.id, d.name, d.decided_at, replaced, about, sources, collect(DISTINCT [person.id, person.name, type(role)])
+```
+
+**reading_list** (what to read before touching a service). The service, of any kind, is resolved first. Then it walks what it depends on, nearest first, keeping one shortest route to each thing (ties broken by the names along it), and lists the documents that `DESCRIBES` any of them, with their authors. Each decision `ABOUT` them is followed forward through `SUPERSEDES` to the one this reader can see standing, so a private replacement never hides the public one from a public reader, and its `BASED_ON` sources come with it; a document a decision rests on joins the list. Whatever nothing documents is named with its owner, as who to ask. Over MCP it is the context a coding agent pulls before it edits a service.
+
+```cypher
+MATCH path = (:Service {id: $id})-[:DEPENDS_ON*1..6]->(d:Service)
+WHERE all(n IN nodes(path) WHERE coalesce(n.scope, 'org_shared') IN $scopes
+                             AND NOT coalesce(n.kind, 'service') IN $excluded)
+RETURN d.id, d.name, coalesce(d.kind, 'service'), length(path),
+       [n IN nodes(path) | n.id], [n IN nodes(path) | n.name]
+```
+
+**search** (words that name no node: "who knows about refunds", "search for webhooks", "anything about PDF layout"). Full-text indexes over `Document(name, summary)`, `Ticket(title, summary)`, `PullRequest(title, summary)`, `Decision(name, summary)` and `Memory.text` find where every word comes up together, filtered by the asker's scopes. The people on each hit rank who to ask: wrote it or proposed it 3, worked on, reviewed, approved or is assigned 2, opened it or said it in chat 1. Each hit's `DESCRIBES`, `ABOUT`, `TOUCHES` or `MENTIONS` edge names what it is about, a replaced decision says what replaced it, and chat messages come back dated. Names and aliases of owned things are not indexed; they stay with the resolver.
+
+**Before any refusal** (`fallback.before_refusing`). `who_knows`, `who_owns`, `onboarding_brief`, `decision_trace` (unless the question asks why) and `blast_radius` each refuse when the question does not name the kind of thing they take. Instead of refusing straight away they hand the refusal to one ordered list of steps, and the first that answers wins: a person the question names (`person_profile`), then any other node a name resolves to (`explore`), then `search` when the question asks about a topic ("about", "help with", "expert on") and the words come up. Nothing found returns the refusal word for word, so "who knows the payments gateway" is still refused with the nearest names.
+
+```cypher
+CALL db.idx.fulltext.queryNodes($label, $q) YIELD node, score
+WHERE coalesce(node.scope, 'org_shared') IN $scopes
+RETURN node.id, coalesce(node.name, node.title, node.id), score
+ORDER BY score DESC, node.id
+LIMIT $limit
+// then, per hit: who is on it, and what it is about
+MATCH (person:Person)-[rel:AUTHORED|WORKED_ON|PROPOSED|APPROVED]->(hit {id: $id}) WHERE $label IN labels(hit)
+RETURN person.id AS id, person.name AS name, 'Person' AS label, type(rel) AS rel
+UNION
+MATCH (gh:GitHubUser)-[rel:AUTHORED|REVIEWED|OPENED|ASSIGNED]->(hit {id: $id}) WHERE $label IN labels(hit)
+OPTIONAL MATCH (gh)-[:IS]->(person:Person)
+RETURN coalesce(person.id, gh.id) AS id, coalesce(person.name, '@' + gh.login) AS name,
+       CASE WHEN person IS NULL THEN 'GitHubUser' ELSE 'Person' END AS label, type(rel) AS rel
+```
+
+The indexes are created by `ensure_search_indexes` on every start and after every seed, one field per call (`CALL db.idx.fulltext.createNodeIndex($label, $field)`). It reads `db.indexes()` first and creates only what is missing, so a second start is a no-op. A failure is logged and never stops the app; until the next start the search finds nothing for that label and the asking tool keeps its refusal.
+
+**what_changed** (what changed lately, and where). The question picks the scope: a team means everything it `RUNS`; a service means itself and what it depends on, up to three `DEPENDS_ON` hops (fewer if the question names a depth), so "billing is failing, what changed" finds the pull request one hop upstream and cites the route to it; nothing named means the whole company, or, asked in Slack in the first person ("what did I miss"), what the asker owns, works on or knows. It reads four kinds of dated change through the asker's scopes: decisions by `decided_at`, with who `PROPOSED` them, what they `SUPERSEDES` and, through `SUPERSEDES` forward, whether one has since replaced them; memories by `created_at`, with who `SAID` them and what they `MENTIONS`; pull requests by GitHub's `updated_at`, with `TOUCHES` and the `AUTHORED` GitHub user's person; tickets by GitHub's `updated_at` or, for one filed from Slack, its `created_at`. Time words pick the window (today, this week, this month, recently, the last N days), a week by default, widened once to a month when the week is empty, and said so. More than one thing changed reads as a digest first ("Billing Service: 2 changes; Auth Service (1 hop up): 1"), then the changes newest first; a service's answer ends with who owns what changed.
+
+```cypher
+MATCH (d:Decision)
+WHERE coalesce(d.scope, 'org_shared') IN $scopes
+OPTIONAL MATCH (d)-[:ABOUT]->(s:Service)
+WHERE coalesce(s.scope, 'org_shared') IN $scopes
+WITH d, collect(DISTINCT [s.id, s.name]) AS about
+OPTIONAL MATCH (p:Person)-[:PROPOSED]->(d)
+WITH d, about, collect(DISTINCT [p.id, p.name]) AS proposers
+OPTIONAL MATCH (d)-[:SUPERSEDES]->(old:Decision)
+WHERE coalesce(old.scope, 'org_shared') IN $scopes
+RETURN d.id, d.name, d.decided_at, about, proposers, collect(DISTINCT [old.id, old.name])
+```
+
+**explore** (everything around one thing: "explore billing", "what do we know about the sales team", "everything on TKT-102"). The name resolves against services, people, teams, documents, tickets, decisions and pull requests, or is taken as a node id when one matches (`search` returns ids, so an MCP client can chain the two); "the sales team" is the team even where "sales" is also something's alias. Then one hop out, three hand-written reads with the same `$ids`: the edges to every shown label (services, people, teams, documents, tickets, decisions, pull requests, chats, memories, repos, channels), the edges to a GitHub or Slack account shown as the person it `IS` (or `@login` when it is linked to nobody), and, for a person, what their accounts did. Identity, access and filing edges (`IS`, `CAN_READ`, `IN_SCOPE`, `HAS_TAG`, `FILED_UNDER`, `PARENT`, `LINKS`, `PART_OF`) and scopes, tags and workspace records are never shown, and a forgotten memory never is. Each group reads in plain words by edge type and direction ("owned by Arjun Mehta; depends on Auth Service and Postgres; depended on by API Gateway and Invoice Worker; tickets about it: TKT-102"), eight names a group, and a memory group counts its memories and returns them dated. A decision shown is checked with `decisions.current_decision` and says "(replaced)" when a later one the asker can read replaced it, and an explored decision opens with whether it still stands. Depth 2 walks one more hop from the first ring and counts what it finds by label ("Two hops out there are 17 more: 3 services, 1 person, ..."), citing at most ten of those edges, at most forty in all. The depth is a loop bound in Python, never part of a query. As the second step before a refusal it explores any node that is not a person, unless the question asks for decisions and the node is not one: "what decisions have we made about postgres" stays refused.
+
+```cypher
+MATCH (n)-[r]-(m)
+WHERE n.id IN $ids AND labels(m)[0] IN $shown AND NOT type(r) IN $hidden AND ($rel IS NULL OR type(r) = $rel)
+  AND ($dir = 'both' OR ($dir = 'out' AND startNode(r) = n) OR ($dir = 'in' AND endNode(r) = n))
+  AND coalesce(m.scope, 'org_shared') IN $scopes AND NOT coalesce(m.is_forgotten, false)
+RETURN n.id, type(r), startNode(r) = n, labels(m)[0], m.id, coalesce(m.name, m.id), m.kind
+// an account reached is shown as its person
+MATCH (n)-[r]-(a) WHERE n.id IN $ids AND labels(a)[0] IN $accounts AND ...
+OPTIONAL MATCH (a)-[:IS]->(p:Person)
+RETURN n.id, type(r), startNode(r) = n, CASE WHEN p IS NULL THEN labels(a)[0] ELSE 'Person' END,
+       coalesce(p.id, a.id), coalesce(p.name, '@' + a.login, a.name, a.id), null
+// a person's accounts' edges are theirs
+MATCH (n:Person)<-[:IS]-(a)-[r]-(m) WHERE n.id IN $ids AND labels(a)[0] IN $accounts AND ...
+RETURN n.id, type(r), startNode(r) = a, labels(m)[0], m.id, coalesce(m.name, m.id), m.kind
+```
+
+**neighbors** (one relationship type, for the agent and MCP clients). The same three reads with `$rel` set to a type from an allowlist of 22 (`OWNS`, `DEPENDS_ON`, `MEMBER_OF`, `SUPERSEDES`, `CITES`, ...) and `$dir` to `out`, `in` or `both`, both checked in Python before anything runs, so a type off the list is refused without a query. The walk goes hop by hop from what the last hop reached, up to three hops clamped in Python, and each node is reported at the hop it was first reached, with every edge that reached it cited: "Following DEPENDS_ON into Auth Service: API Gateway, Billing Service, Notification Service and Search Service (1 hop); then Invoice Worker (2 hops)." That is the set `blast_radius` names for two hops, and a test holds them equal.
+
+**find** (lists: "which tickets are open", "list the services in payments", "what decisions have we made"). The label is one of `Service`, `Ticket`, `Decision`, `PullRequest`, `Document`, `Person` and `Team`, and each takes a fixed set of filters: services by `kind`, `team` (`RUNS`) and `owner` (`OWNS`); tickets by `state` (open unless `closed`), `about`, `team` (`ABOUT` then `RUNS`) and `person` (`WORKED_ON`, or `ASSIGNED` to a linked GitHub account); decisions by `about`, `team`, `standing` (through `current_decision`), `proposer` and `approver`; pull requests by `state` (`open`, `closed`, `merged`), `touches`, `author` and `reviewer` (through every GitHub account linked to the person); documents by `describes`, `author` and `team`; people by `team` and `holds` (`OWNS`, `WORKED_ON` or `KNOWS` a service); teams by nothing. A filter that names a thing is resolved to a node id first and refused with the nearest names when nothing matches; a state, kind or yes/no is checked against its list. Each filter is one hand-written query that takes the id as `$value` and returns the nodes that pass with the edges that make them pass; the list is the intersection, so no WHERE clause is ever assembled. Up to 25 are named, decisions newest first and the rest by name: "1 standing decision about Memory Layer: *Move the memory layer off Postgres* (15 Sep 2026)." When no filter walks an edge, each one's placing edge is cited instead (a ticket's `ABOUT`, a person's `MEMBER_OF`), so the page can draw the list. No match is an answer too: "No closed tickets." The keyword router reads the label from the noun, `open`, `closed` or `merged` from the words, the thing after "about", "for" or "on", and the team after "in".
+
+```cypher
+MATCH (x) WHERE labels(x)[0] = $label AND x.name IS NOT NULL AND coalesce(x.scope, 'org_shared') IN $scopes
+RETURN x.id, x.name, coalesce(x.title, ''), x.kind, x.state, x.merged, x.decided_at, coalesce(x.role, '')
+// one per filter given, e.g. tickets about what a team runs
+MATCH (x:Ticket)-[r:ABOUT]->(s:Service)<-[:RUNS]-(t:Team {id: $value})
+WHERE coalesce(x.scope, 'org_shared') IN $scopes AND coalesce(s.scope, 'org_shared') IN $scopes
+RETURN x.id, [[x.id, x.name, labels(x)[0], type(r), s.id, s.name, 'Service'], [t.id, t.name, 'Team', 'RUNS', s.id, s.name, 'Service']]
 ```
 
 **decision_pressure** (is this decision still the last word). The standing decision, followed through `SUPERSEDES`, then the tickets and pull requests on the same service that it does not cite. "Why did we" stays on `decision_trace`.
@@ -438,7 +631,7 @@ MATCH (m:Memory {id: $id}) MERGE (u:SlackUser {id: $author}) MERGE (u)-[:SAID]->
 MATCH (m:Memory {id: $memory}), (n {id: $node}) MERGE (m)-[:MENTIONS]->(n)
 ```
 
-**Read set** (what a conversation may see). A public channel reads `org_shared`. A private channel adds its own scope. A DM adds the person's scope, every private channel they are a member of, and every private repo they can read:
+**Read set** (what a conversation may see). A public channel reads `org_shared` and `org_internal`. A private channel adds its own scope. A DM adds the person's scope, every private channel they are a member of, every private repo they can read, and every restricted connector project their linked account may read:
 
 ```cypher
 MATCH (:SlackUser {id: $user})-[:MEMBER_OF]->(c:Channel {is_private: true}) RETURN c.id
@@ -446,6 +639,10 @@ MATCH (:SlackUser {id: $user})-[:MEMBER_OF]->(c:Channel {is_private: true}) RETU
 MATCH (:SlackUser {id: $user})-[:IS]->(:Person)<-[:IS]-(:GitHubUser)-[:CAN_READ]->(r:Repo)
 WHERE r.scope STARTS WITH 'github_repo_'
 RETURN DISTINCT r.scope
+
+MATCH (:SlackUser {id: $user})-[:IS]->(:Person)<-[:IS]-(:ExternalUser)-[:CAN_READ]->(c:Container)
+WHERE c.restricted = true AND c.scope STARTS WITH 'connector_'
+RETURN DISTINCT c.scope
 ```
 
 **GitHub ingest** (webhooks and the install backfill). A pull request links to every service whose `paths` prefix covers a changed file; `closes #n` in the body becomes `CLOSES`; the collaborator list replaces the repo's `CAN_READ` edges on every sync:
@@ -468,6 +665,10 @@ MATCH (u:GitHubUser {id: $user}), (r:Repo {id: $repo}) MERGE (u)-[c:CAN_READ]->(
 ```bash
 curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "https://brain.noobsurd.space/api/proof?format=text"
 ```
+
+The ask page runs the same report without a token for the company-wide scope, through `GET /api/ask/proof`, and shows it in its "Take FalkorDB out" section.
+
+![The proof table from GET /api/proof: five capabilities collapse without the graph, and the refusal stays a refusal.](docs/images/06-proof-table.png)
 
 ### Onboarding a team
 
@@ -497,7 +698,7 @@ curl -X POST -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" --data-binary @your-t
 
 Every read-only tool in the catalogue is also an MCP tool, served at `/mcp` over streamable HTTP (stateless, JSON responses). Same names, same descriptions, the same argument schemas, and the same result: the answer, the cited path, `found`, and the nearest `candidates` on a miss, as structured content. Tools that write the graph (`ingest_ticket`, `record_decision`, `onboard_team`) are not exposed; they need a human's Approve in Slack.
 
-MCP callers read the company-wide `org_shared` scope only. There is no Slack identity to widen it from, so private channels and private repos stay out of reach, under the same permission model the Slack agent uses.
+MCP callers read the company-wide `org_shared` scope only. There is no Slack identity to widen it from, so private channels, private repos and everything connected tools write (`org_internal`) stay out of reach, under the same permission model the Slack agent uses.
 
 `/mcp` is public, like the ask page. Each request is gated four ways:
 
@@ -520,6 +721,50 @@ async with create_mcp_http_client() as http:
 ```
 
 The mapping is `src/domain/knowledge/mcp_tools.py`; the mount, caller gate and session lifespan are `src/api/mcp.py`. `tests/integration/test_mcp_server.py` runs this exact exchange against a local server.
+
+**Before a coding agent edits a service**, it can ask for the reading list: `session.call_tool("reading_list", {"name": "invoice worker"})` returns the documents on the service and on everything it depends on, nearest first, the decisions that stand about them and what each rests on, and who owns what nothing documents. On Quillfern that is the invoice format spec, the billing runbook and the auth session design, the billing retries decision with TKT-102, and Lena Fischer and Sara Lindqvist for the notification service and Postgres. Every line comes with the edges it was read from, so the agent can cite why it read what it read.
+
+**How the tools chain.** The server's instructions give a client the order to work in: names resolve exactly or are refused, so when the words name nothing it starts with `search`, whose hits each name the service they are about, then asks about that name with `who_knows`, `reading_list` or `what_changed` (which also reads what the service depends on). Every call's structured result also carries `next`: the calls worth making about the services the answer pointed at, such as `{"tool": "what_changed", "arguments": {"name": "Billing Service"}}` after a search for refunds, so a client chains on real names. Both are built from the catalogue (`mcp_tools.instructions`, `mcp_tools.next_calls`), so a tool the server does not list is never suggested.
+
+## Run it locally
+
+```bash
+docker compose up -d
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python scripts/seed_graph.py
+uvicorn src.main:app --reload
+```
+
+To see the seven demo answers with no Slack app and no model key, run the synthetic company through the real routes against a local fake of the Slack API. It seeds the fictional Quillfern into a graph of its own and prints every reply with the edges it walked:
+
+```bash
+python scripts/replay_workspace.py --graph company_demo
+```
+
+That is the complete local setup the rules accept in place of a live deployment: Docker, Python 3.11 or newer, and the two commands above. Verified from a clean clone on Python 3.13 with only `requirements.txt` installed.
+
+The interface is Slack. Create the app from [`slack_app/manifest.yaml`](slack_app/manifest.yaml) and follow [docs/SLACK.md](docs/SLACK.md). The same read-only catalogue is also a page at [http://localhost:8000/](http://localhost:8000/), which draws the path behind each answer and runs the same questions with the graph switched off. Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health). Graph browser: [http://localhost:3000](http://localhost:3000).
+
+## Docs
+
+- What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
+- Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
+- Blog post outline: [docs/BLOG.md](docs/BLOG.md)
+- Pitch deck, slide by slide: [docs/PITCH.md](docs/PITCH.md)
+- Site design brief: [docs/DESIGN.md](docs/DESIGN.md)
+- How to run the graph: [docs/SETUP.md](docs/SETUP.md)
+- Onboard any team from one file: [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md)
+- Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
+- GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
+- What is built and what is next: [docs/SLACK.md#what-is-next](docs/SLACK.md#what-is-next)
+- Production deploy, CI/CD and operations: [docs/DEPLOY.md](docs/DEPLOY.md)
+- Replay the synthetic company for a demo or a test: [docs/SETUP.md](docs/SETUP.md#replay-the-synthetic-company)
+
+## AI assistance
+
+AI assistance: parts of this project were written with Claude Code (Anthropic), including the production infrastructure, deploy pipeline and their docs.
 
 ## License
 

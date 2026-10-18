@@ -30,9 +30,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import catalogue, resolve
+from src.domain.knowledge import catalogue, fallback, resolve
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
 from src.domain.knowledge.resolve import Entity, join_names
+
+_WHY = re.compile(r"\bwhy\b", re.IGNORECASE)
 
 ORG_SHARED = "org_shared"
 SCOPED = "coalesce({var}.scope, 'org_shared') IN $scopes"
@@ -327,12 +329,14 @@ def decision_trace(question: str, scopes: list[str]) -> ToolResult:
     _, graph = connect()
     resolution = _named_decision(graph, question, scopes)
     if not resolution.found:
-        return ToolResult(
+        miss = ToolResult(
             tool="decision_trace",
             answer=resolve.describe_miss(resolution, "decision"),
             found=False,
             candidates=resolution.candidate_names(),
         )
+        # "what has maya decided" can still be answered; "why did we pick kafka" asks for a reason the graph lacks.
+        return miss if _WHY.search(question) else fallback.before_refusing(question, scopes, miss)
     named = resolution.entity
     current = current_decision(graph, named.id, scopes) or _decision(graph, named.id)
     result = ToolResult(tool="decision_trace", answer="", candidates=resolution.candidate_names())
@@ -421,15 +425,42 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
         result.answer = " ".join(parts)
         return result
 
+    tickets, pull_requests, total = uncited_work(graph, current.id, service_ids, scopes)
+    for ticket_id, ticket, service_id, service in tickets:
+        result.add(PathStep(ticket, "ABOUT", service, from_id=ticket_id, to_id=service_id, from_label="Ticket", to_label="Service"))
+    for pr_id, pr, service_id, service in pull_requests:
+        result.add(PathStep(pr, "TOUCHES", service, from_id=pr_id, to_id=service_id, from_label="PullRequest", to_label="Service"))
+    uncited = [f"{name} (about {service})" for _id, name, _sid, service in tickets + pull_requests]
+    if total > len(uncited):
+        uncited.append(f"{total - len(uncited)} more")
+    if uncited:
+        parts.append(f"It does not cite {join_names(uncited)}.")
+    else:
+        parts.append(f"Nothing else about {service_names} has landed that it does not cite.")
+    result.answer = " ".join(parts)
+    return result
+
+
+# Uncited tickets, and uncited pull requests, named per decision before "and N more".
+MAX_UNCITED = 8
+
+
+def uncited_work(graph, decision_id: str, service_ids: list[str], scopes: list[str]) -> tuple[list, list, int]:
+    """Tickets ``ABOUT`` and pull requests that ``TOUCHES`` these services which the decision does
+    not ``BASED_ON`` or ``CITES``: rows of (id, name, service id, service name), at most
+    ``MAX_UNCITED`` of each, and how many there are in all. Open and recently updated tickets come
+    first (a synced tracker can hold hundreds about one service), then pull requests by name. What
+    ``decision_pressure`` tells for one decision and ``decision_health`` checks for every one."""
     tickets = graph.ro_query(
         f"""
         MATCH (ticket:Ticket)-[:ABOUT]->(service:Service)
         WHERE service.id IN $services AND {SCOPED.format(var="ticket")}
           AND NOT (:Decision {{id: $id}})-[:BASED_ON|CITES]->(ticket)
         RETURN ticket.id, ticket.name, service.id, service.name
-        ORDER BY ticket.name
+        ORDER BY CASE WHEN coalesce(ticket.state, 'open') = 'closed' THEN 1 ELSE 0 END,
+                 coalesce(ticket.source_updated_at, ticket.updated_at, '') DESC, ticket.name
         """,
-        {"services": service_ids, "scopes": scopes, "id": current.id},
+        {"services": service_ids, "scopes": scopes, "id": decision_id},
     ).result_set
     pull_requests = graph.ro_query(
         f"""
@@ -439,19 +470,9 @@ def decision_pressure(question: str, scopes: list[str]) -> ToolResult:
         RETURN pr.id, pr.name, service.id, service.name
         ORDER BY pr.name
         """,
-        {"services": service_ids, "scopes": scopes, "id": current.id},
+        {"services": service_ids, "scopes": scopes, "id": decision_id},
     ).result_set
-    for ticket_id, ticket, service_id, service in tickets:
-        result.add(PathStep(ticket, "ABOUT", service, from_id=ticket_id, to_id=service_id, from_label="Ticket", to_label="Service"))
-    for pr_id, pr, service_id, service in pull_requests:
-        result.add(PathStep(pr, "TOUCHES", service, from_id=pr_id, to_id=service_id, from_label="PullRequest", to_label="Service"))
-    uncited = [f"{name} (about {service})" for _id, name, _sid, service in tickets + pull_requests]
-    if uncited:
-        parts.append(f"It does not cite {join_names(uncited)}.")
-    else:
-        parts.append(f"Nothing else about {service_names} has landed that it does not cite.")
-    result.answer = " ".join(parts)
-    return result
+    return tickets[:MAX_UNCITED], pull_requests[:MAX_UNCITED], len(tickets) + len(pull_requests)
 
 
 # --- record --------------------------------------------------------------------------------

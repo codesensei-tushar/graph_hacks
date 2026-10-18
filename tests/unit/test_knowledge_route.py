@@ -2,7 +2,7 @@
 
 import unittest
 
-from src.domain.knowledge import algorithms, ask_service, coordination
+from src.domain.knowledge import algorithms, ask_service, coordination, what_changed
 
 
 class RouteTest(unittest.TestCase):
@@ -25,6 +25,8 @@ class RouteTest(unittest.TestCase):
             "who actually works together": ("working_groups", {}),
             "what breaks if arjun leaves": ("if_person_leaves", {"name": "what breaks if arjun leaves"}),
             "who should know about notebook#45": ("who_should_know", {"name": "who should know about notebook#45"}),
+            "what should I read before touching the invoice worker": ("reading_list", {"name": "what should I read before touching the invoice worker"}),
+            "what changed this week": ("what_changed", {"name": "what changed this week"}),
             "": ("none", {}),
         }
         for question, expected in cases.items():
@@ -168,6 +170,151 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("how is maya connected to the invoice worker")[0], "path_between")
         self.assertEqual(ask_service.route("who actually works together")[0], "working_groups")
         self.assertEqual(ask_service.route("who owns billing")[0], "who_owns")
+
+    def test_teams_depending_on_teams_and_the_health_of_decisions(self):
+        for question, direction in (
+            ("which teams depend on platform", "dependents"),
+            ("which team relies on payments", "dependents"),
+            ("who depends on the platform team", "dependents"),
+            ("what does payments need from other teams", "dependencies"),
+            ("what does the sales team use from other teams", "dependencies"),
+            ("what does the data team depend on", "dependencies"),
+            ("cross-team dependencies", "dependents"),
+            ("dependencies between teams", "dependents"),
+            ("show me team dependencies", "dependents"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("team_dependencies", {"name": question, "direction": direction}))
+        for question in (
+            "which decisions are stale",
+            "are any decisions in conflict",
+            "conflicting decisions",
+            "decisions that lack evidence",
+            "which decisions need attention",
+            "decision health",
+            "health of our decisions",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("decision_health", {"name": question}))
+        # One decision, one service: the tools that already answer them.
+        self.assertEqual(ask_service.route("is the billing retries decision still the last word")[0], "decision_pressure")
+        self.assertEqual(ask_service.route("what decisions have we made about billing")[0], "decision_trace")
+        self.assertEqual(ask_service.route("what does the invoice worker depend on"), ("blast_radius", {"name": "what does the invoice worker depend on", "direction": algorithms.DEPENDENCIES}))
+        self.assertEqual(ask_service.route("what breaks if auth goes down")[0], "blast_radius")
+
+    def test_who_signed_off_is_a_decision_and_summarising_a_team_is_its_brief(self):
+        for question in ("who approved moving the memory layer", "who proposed the billing retries", "who signed off on the graph store", "who decided to leave postgres"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("decision_trace", {"topic": question}))
+        for question in ("summarize the payments team", "summarise the sales team", "overview of the platform team", "tell me about the data team", "describe the payments team"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("onboarding_brief", {"name": question}))
+        # A service is not a team, and "who knows" is still who_knows.
+        self.assertEqual(ask_service.route("tell me about the billing service")[0], "who_knows")
+        self.assertEqual(ask_service.route("who knows the memory layer")[0], "who_knows")
+
+    def test_risk_across_the_company_is_the_risk_map_and_one_person_or_service_is_not(self):
+        for question in (
+            "what are our riskiest services",
+            "what's our biggest bus factor risk",
+            "bus factor across the company",
+            "where are we one person away from an outage",
+            "which services have no runbook",
+            "what is undocumented",
+            "what are our knowledge gaps",
+            "risk map",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("risk_map", {}))
+        for question, tool in (
+            ("the bus factor on arjun", "if_person_leaves"),
+            ("what's the bus factor on billing's owner", "if_person_leaves"),
+            ("who is the bus factor for billing", "who_knows"),
+            ("what is most at risk if arjun leaves", "if_person_leaves"),
+            ("which services are load bearing", "load_bearing"),
+            ("what breaks if auth goes down", "blast_radius"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+
+    def test_what_to_read_before_a_change_is_a_reading_list(self):
+        for question in (
+            "what should I read before touching the invoice worker",
+            "reading list for billing",
+            "what should I read to understand auth",
+            "what docs cover the invoice worker",
+            "which docs describe billing",
+            "what should a new engineer read about billing",
+            "docs before touching postgres",
+            "read up on the memory layer",
+            "which documents should I read before changing billing",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("reading_list", {"name": question}))
+        for question, tool in (
+            ("what should I know about billing", "who_knows"),
+            ("what should I know about the payments team", "onboarding_brief"),
+            ("who should review the billing runbook", "who_should_know"),
+            ("who should know if postgres changes", "who_should_know"),
+            ("what does the invoice worker depend on", "blast_radius"),
+            ("what have we said about billing", "related_memories"),
+            ("why did we move the memory layer off postgres", "decision_trace"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+
+    def test_what_changed_lately_routes_with_one_kind_when_it_names_one(self):
+        for question, only in (
+            ("what changed this week", None),
+            ("what's new", None),
+            ("what's new in payments", None),
+            ("what happened in payments this week", None),
+            ("what did the sales team decide recently", "decisions"),
+            ("what decisions did we make this month", "decisions"),
+            ("billing is failing, what changed", None),
+            ("recent changes to auth", None),
+            ("catch me up on platform", None),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("what_changed", {"name": question, **({"only": only} if only else {})}))
+        for question, tool in (
+            ("what decisions have we made about billing", "decision_trace"),
+            ("why did we move the memory layer off postgres", "decision_trace"),
+            ("what happens if arjun leaves", "if_person_leaves"),
+            ("what is new hire onboarding", "who_knows"),
+            ("what happened in billing", "who_knows"),
+            ("who should know if postgres changes", "who_should_know"),
+            ("what have we said about billing", "related_memories"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+        # Lists of what exists now are not a dated window.
+        for question in ("what decisions have we made", "which tickets are open", "what are the open tickets"):
+            with self.subTest(question=question):
+                self.assertNotEqual(ask_service.route(question)[0], "what_changed")
+
+    def test_time_words_pick_the_window_and_kind_words_the_filter(self):
+        for question, days in (
+            ("what changed today", 1),
+            ("what changed yesterday", 2),
+            ("what's new this week", 7),
+            ("what happened last month", 30),
+            ("what did we decide recently", 14),
+            ("what changed in the last 3 days", 3),
+            ("what changed in the past 900 days", 365),
+            ("what changed", None),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(what_changed.window_in(question), days)
+        for question, only in (
+            ("what did sales decide", "decisions"),
+            ("which tickets are open", "tickets"),
+            ("which prs are open", "pull_requests"),
+            ("what was said this week", "memories"),
+            ("what changed this week", None),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(what_changed.only_in(question), only)
 
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)

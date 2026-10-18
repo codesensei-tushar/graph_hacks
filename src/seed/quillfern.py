@@ -144,7 +144,7 @@ DECISIONS = [
         "id": "decision-memory-off-postgres",
         "name": "Move the memory layer off Postgres",
         "summary": "Store notebook links in the graph store instead of Postgres join tables, because multi-hop lookups timed out.",
-        "aliases": "memory layer off postgres, off postgres, leave postgres, left postgres, graph store, graph store migration, why move memory",
+        "aliases": "memory layer off postgres, off postgres, leave postgres, left postgres, graph store, graph store migration, why move memory, moving the memory layer, move the memory layer",
         "proposer": "kofi",
         "approver": "tomas",
         "about": "memory-layer",
@@ -172,6 +172,9 @@ CHATS = [{
     "author": "kofi",
     "about": "decision-memory-off-postgres",
 }]
+
+# Each person's Slack account (the ids in quillfern_workspace.USERS), so what they SAID is theirs.
+SLACK_USERS = [("UKOFI", "kofi"), ("USARA", "sara"), ("UTOMAS", "tomas"), ("UARJUN", "arjun"), ("UMAYA", "maya"), ("ULENA", "lena")]
 
 # Public-channel messages the bot kept as memories, in the shape Slack ingest writes them:
 # org_shared, SAID by the speaker's Slack user, MENTIONS what the text names. The first four

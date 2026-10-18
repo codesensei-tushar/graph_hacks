@@ -11,6 +11,14 @@ process, "stalls" rather than "goes down").
 
 A decision stands when no decision the reader can see supersedes it. Each standing decision
 names the one it replaced, with both dates, so the page shows that knowledge stays current.
+
+A team is tied to others by what it runs: ``DEPENDS_ON`` edges that cross into a thing another
+team ``RUNS``. The page lists those ties both ways (what this team depends on, and who depends
+on it) and draws the edges. It also carries the team's rows of the risk map, from the same
+query and scoring as the ``risk_map`` tool, so the team page and the tool agree row for row.
+
+A section with nothing in it is not shown as an empty box: the payload names the empty ones
+(``empty``), and the page says in one line what the graph does not hold yet for this team.
 """
 
 from dataclasses import dataclass, field
@@ -21,7 +29,7 @@ from src.domain.knowledge import kinds
 from src.domain.knowledge.ask_api import ANSWERS, graph_of
 from src.domain.knowledge.decisions import format_date, to_millis
 from src.domain.knowledge.dto import PathStep, day_from
-from src.domain.knowledge.resolve import ORG_SHARED, SCOPED
+from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, join_names
 
 DEFAULT_SCOPES = (ORG_SHARED,)
 KINDS = kinds.SERVICE_KINDS
@@ -38,7 +46,10 @@ KIND_TITLES = {
 MAX_TEAM_ID = 80
 DECISION_LIMIT = 8
 TICKET_LIMIT = 10
+ACCOUNT_LIMIT = 10
 MEMORY_LIMIT = 5
+# The sections a team can have nothing in, in page order, with the words the page uses for them.
+OPTIONAL_SECTIONS = (("links", "links to other teams"), ("decisions", "decisions"), ("tickets", "open tickets"), ("memories", "chat"))
 
 
 @dataclass(frozen=True)
@@ -138,6 +149,22 @@ class TeamMemory:
         return {"text": self.text, "learned_at": self.learned_at, "author": self.author, "about": self.about}
 
 
+@dataclass(frozen=True)
+class TeamLink:
+    """Another team this one is tied to by ``DEPENDS_ON``, with the pairs of things that tie them.
+
+    Each pair reads in the edge's direction: (the thing that depends, the thing it depends on),
+    each end as (id, name).
+    """
+
+    team_id: str
+    team: str
+    pairs: tuple[tuple[tuple[str, str], tuple[str, str]], ...]
+
+    def to_dict(self) -> dict:
+        return {"id": self.team_id, "name": self.team, "pairs": [[dependent[1], dependency[1]] for dependent, dependency in self.pairs]}
+
+
 @dataclass
 class TeamPage:
     id: str
@@ -149,13 +176,31 @@ class TeamPage:
     decisions: list[StandingDecision] = field(default_factory=list)
     tickets: list[OpenTicket] = field(default_factory=list)
     memories: list[TeamMemory] = field(default_factory=list)
+    # Accounts members own that the team does not run (a synced CRM's), the first few, and how many.
+    accounts: list[OwnedThing] = field(default_factory=list)
+    accounts_total: int = 0
+    # Teams whose things this team's things depend on, and teams whose things depend on this team's.
+    depends_on: list[TeamLink] = field(default_factory=list)
+    depended_on_by: list[TeamLink] = field(default_factory=list)
+    # The team's rows of the risk map, as the grid the page draws; None when it runs nothing.
+    risk: dict | None = None
     path: list[PathStep] = field(default_factory=list)
     # Questions the page offers; each is a read the ask box answers with a path.
     questions: list[str] = field(default_factory=list)
+    # One line a reader takes in first: who the team leans on, who leans on it, what rests on one person.
+    glance: str = ""
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
 
+    @property
+    def links(self) -> list[TeamLink]:
+        return [*self.depends_on, *self.depended_on_by]
+
+    def empty_sections(self) -> list[str]:
+        """The optional sections this team has nothing in, as the page names them, in page order."""
+        return [label for section, label in OPTIONAL_SECTIONS if not getattr(self, section)]
+
     def to_dict(self) -> dict:
-        nodes, edges = graph_of(self.path, {thing.id: thing.kind for group in self.owns for thing in group.items})
+        nodes, edges = graph_of(self.path, {thing.id: thing.kind for thing in [thing for group in self.owns for thing in group.items] + self.accounts})
         return {
             "id": self.id,
             "name": self.name,
@@ -165,11 +210,18 @@ class TeamPage:
             "owns": [group.to_dict() for group in self.owns],
             "decisions": [decision.to_dict() for decision in self.decisions],
             "tickets": [ticket.to_dict() for ticket in self.tickets],
+            "accounts": [account.to_dict() for account in self.accounts],
+            "accounts_total": self.accounts_total,
             "memories": [memory.to_dict() for memory in self.memories],
+            "depends_on": [link.to_dict() for link in self.depends_on],
+            "depended_on_by": [link.to_dict() for link in self.depended_on_by],
+            "risk": self.risk,
             "path": [step.to_dict() for step in self.path],
             "nodes": [node.to_dict() for node in nodes],
             "edges": [edge.to_dict() for edge in edges],
             "questions": list(self.questions),
+            "glance": self.glance,
+            "empty": self.empty_sections(),
             "scopes": list(self.scopes),
         }
 
@@ -261,6 +313,7 @@ def team_page(team_id: str, scopes=DEFAULT_SCOPES) -> TeamPage | None:
     ).result_set:
         page.members.append(Member(person_id, person_name, role, owned_by.get(person_id, [])))
 
+    page.accounts, page.accounts_total = _member_accounts(graph, params)
     page.decisions = _standing_decisions(graph, params)
     page.tickets = [
         OpenTicket(ticket_id, title, about)
@@ -274,8 +327,14 @@ def team_page(team_id: str, scopes=DEFAULT_SCOPES) -> TeamPage | None:
         ).result_set
     ]
     page.memories = _recent_memories(graph, params)
+    page.depends_on, page.depended_on_by = _team_links(graph, params)
+    if things:
+        from src.domain.knowledge import risk_map  # risk_map reaches the catalogue, which reaches this module
+
+        page.risk = risk_map.grid(risk_map.rows(graph, list(scopes), [thing.id for thing in things]))
     page.path = team_path(page)
     page.questions = team_questions(page)
+    page.glance = team_glance(page)
     return page
 
 
@@ -296,11 +355,52 @@ def team_path(page: TeamPage) -> list[PathStep]:
     for group in page.owns:
         for thing in group.items:
             steps.append(PathStep(page.name, "RUNS", thing.name, from_id=page.id, to_id=thing.id, from_label="Team", to_label="Service"))
-    for group in page.owns:
-        for thing in group.items:
-            for owner in thing.owners:
-                steps.append(PathStep(owner, "OWNS", thing.name, from_id=owner_ids.get(owner), to_id=thing.id, from_label="Person", to_label="Service"))
-    return steps
+    for thing in [thing for group in page.owns for thing in group.items] + page.accounts:
+        for owner in thing.owners:
+            steps.append(PathStep(owner, "OWNS", thing.name, from_id=owner_ids.get(owner), to_id=thing.id, from_label="Person", to_label="Service"))
+    # Then the ties to other teams: each DEPENDS_ON edge, and the other team running its end of it.
+    for link, ours_first in [*((link, True) for link in page.depends_on), *((link, False) for link in page.depended_on_by)]:
+        for (dependent_id, dependent), (dependency_id, dependency) in link.pairs:
+            steps.append(PathStep(dependent, "DEPENDS_ON", dependency, from_id=dependent_id, to_id=dependency_id, from_label="Service", to_label="Service"))
+            theirs_id, theirs = (dependency_id, dependency) if ours_first else (dependent_id, dependent)
+            steps.append(PathStep(link.team, "RUNS", theirs, from_id=link.team_id, to_id=theirs_id, from_label="Team", to_label="Service"))
+    return _unique(steps)
+
+
+def _unique(steps: list[PathStep]) -> list[PathStep]:
+    """Each edge once, in order of first appearance."""
+    seen: set[tuple] = set()
+    kept = []
+    for step in steps:
+        key = (step.from_name, step.rel, step.to_name)
+        if key not in seen:
+            seen.add(key)
+            kept.append(step)
+    return kept
+
+
+def _member_accounts(graph, params: dict) -> tuple[list[OwnedThing], int]:
+    """Accounts the team's members own that the team does not run: what a CRM sync brings in.
+    The first ``ACCOUNT_LIMIT`` by name, and how many there are. Nothing here adds a RUNS edge."""
+    match = f"""
+        MATCH (p:Person)-[:MEMBER_OF]->(t:Team {{id: $id}})
+        MATCH (p)-[:OWNS]->(s:Service)
+        WHERE {SCOPED.format(var="p")} AND {SCOPED.format(var="s")} AND {kinds.KIND_OF.format(var="s")} = 'account' AND NOT (t)-[:RUNS]->(s)
+    """
+    total = graph.ro_query(f"{match} RETURN count(DISTINCT s)", params).result_set
+    if not total or not total[0][0]:
+        return [], 0
+    rows = graph.ro_query(
+        f"""
+        {match}
+        WITH s, collect(DISTINCT p.name) AS owners
+        RETURN s.id, s.name, coalesce(s.summary, ''), owners
+        ORDER BY s.name
+        LIMIT {ACCOUNT_LIMIT}
+        """,
+        params,
+    ).result_set
+    return [OwnedThing(account_id, name, "account", summary, sorted(owners)) for account_id, name, summary, owners in rows], int(total[0][0])
 
 
 def team_questions(page: TeamPage) -> list[str]:
@@ -324,7 +424,75 @@ def team_questions(page: TeamPage) -> list[str]:
         questions.append(f"why {page.decisions[0].name[:1].lower()}{page.decisions[0].name[1:]}")
     if page.members and len(things) > 1:
         questions.append(f"how is {page.members[0].name} connected to {things[-1].name}")
+    # Then the two things only this page knows: who the riskiest thing rests on, and what it leans on elsewhere.
+    alone = [row for row in _risk_rows(page) if row["flags"].get("one_person") and row["owners"]]
+    if alone:
+        questions.append(f"what if {alone[0]['owners'][0]} leaves")
+    if page.depends_on:
+        dependent = page.depends_on[0].pairs[0][0][1]
+        questions.append(f"what does {dependent} depend on")
     return questions
+
+
+def team_glance(page: TeamPage) -> str:
+    """The team in one line, from the page's own rows: the teams it depends on and that depend on it,
+    each with the number of DEPENDS_ON edges between them, and how much of what it runs rests on
+    one person. Every number is a count of rows the page lists below it."""
+    edges = lambda link: f"{len(link.pairs)} edge{'s' if len(link.pairs) != 1 else ''}"  # noqa: E731
+    parts = []
+    if page.depends_on:
+        parts.append(f"{page.name} depends on {join_names([f'{link.team} ({edges(link)})' for link in page.depends_on])}")
+    if page.depended_on_by:
+        others = [f"{link.team} ({edges(link)})" for link in page.depended_on_by]
+        parts.append(f"{join_names(others)} depend{'s' if len(others) == 1 else ''} on {page.name}")
+    rows = _risk_rows(page)
+    if rows:
+        alone = [row["name"] for row in rows if row["flags"].get("one_person")]
+        if alone:
+            verb = "rests" if len(alone) == 1 else "rest"
+            parts.append(f"{len(alone)} of the {len(rows)} things it runs {verb} on one person: {join_names(alone)}")
+        else:
+            parts.append(f"none of the {len(rows)} things it runs rests on one person")
+    return " ".join(f"{part[:1].upper()}{part[1:]}." for part in parts)
+
+
+def _risk_rows(page: TeamPage) -> list[dict]:
+    return list((page.risk or {}).get("rows") or [])
+
+
+def _team_links(graph, params: dict) -> tuple[list[TeamLink], list[TeamLink]]:
+    """The other teams this team depends on, and the ones that depend on it, by ``DEPENDS_ON``."""
+    depends_on = graph.ro_query(
+        f"""
+        MATCH (:Team {{id: $id}})-[:RUNS]->(s:Service)-[:DEPENDS_ON]->(u:Service)<-[:RUNS]-(other:Team)
+        WHERE other.id <> $id AND {SCOPED.format(var="s")} AND {SCOPED.format(var="u")} AND {SCOPED.format(var="other")}
+        RETURN DISTINCT other.id, other.name, s.id, s.name, u.id, u.name
+        ORDER BY other.name, s.name, u.name
+        """,
+        params,
+    ).result_set
+    depended_on_by = graph.ro_query(
+        f"""
+        MATCH (:Team {{id: $id}})-[:RUNS]->(s:Service)<-[:DEPENDS_ON]-(d:Service)<-[:RUNS]-(other:Team)
+        WHERE other.id <> $id AND {SCOPED.format(var="s")} AND {SCOPED.format(var="d")} AND {SCOPED.format(var="other")}
+        RETURN DISTINCT other.id, other.name, d.id, d.name, s.id, s.name
+        ORDER BY other.name, d.name, s.name
+        """,
+        params,
+    ).result_set
+    return group_links(depends_on), group_links(depended_on_by)
+
+
+def group_links(rows: list) -> list[TeamLink]:
+    """Rows of (team id, team name, dependent id, dependent, dependency id, dependency) as one link
+    per team, in row order."""
+    teams: dict[str, tuple[str, list]] = {}
+    for team_id, team, dependent_id, dependent, dependency_id, dependency in rows:
+        pairs = teams.setdefault(team_id, (team, []))[1]
+        pair = ((dependent_id, dependent), (dependency_id, dependency))
+        if pair not in pairs:
+            pairs.append(pair)
+    return [TeamLink(team_id, team, tuple(pairs)) for team_id, (team, pairs) in teams.items()]
 
 
 def _standing_decisions(graph, params: dict) -> list[StandingDecision]:
