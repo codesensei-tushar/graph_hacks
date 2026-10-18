@@ -44,6 +44,7 @@ PAGES = {
     "/console/connect/jira/site": "site.html",
     "/console/connectors/{connection_id}/projects": "projects.html",
     "/console/connectors/{connection_id}": "connection.html",
+    "/console/ask": "ask.html",
 }
 
 # The public header's link, hidden in the files; shown when the console runs.
@@ -103,5 +104,10 @@ def install(app: FastAPI) -> None:
     if fixtures_enabled():
         from src.api import console_fake
 
+        # First in line, ahead of the real /auth and /console/api routes main.py mounted earlier.
+        before = len(app.router.routes)
         console_fake.install(app)
+        fake = app.router.routes[before:]
+        del app.router.routes[before:]
+        app.router.routes[0:0] = fake
     app.include_router(router)

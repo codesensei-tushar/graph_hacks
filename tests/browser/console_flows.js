@@ -37,7 +37,14 @@ const [base, shots] = process.argv.slice(2);
     assert.equal(await page.getAttribute("#step-org", "data-state"), "done");
     assert.equal(await page.textContent("#top-org"), "Acme Robotics");
     await page.screenshot({ path: `${shots}/start-step2-light-desktop.png`, fullPage: true });
-    step("start: company created, step 2 open");
+    step("start: company created (pending), step 2 open");
+    await page.click("#step-slack .btn-slack");
+    await page.waitForSelector("#step-tool[data-state=current]");
+    assert.equal(await page.getAttribute("#step-slack", "data-state"), "done");
+    await page.click("#step-tool .btn >> text=Connect HubSpot");
+    await page.waitForURL(/\/console\/connectors\/hubspot/);
+    await page.waitForSelector("#banner.ok");
+    step("start: Slack install confirms the owner; Connect HubSpot lands on its page");
     await ctx.close();
   }
 
@@ -136,6 +143,29 @@ const [base, shots] = process.argv.slice(2);
     const { ctx, page } = await fresh("new", "/console");
     await page.waitForURL(/\/console\/start$/);
     step("no company: /console goes to /console/start");
+    await ctx.close();
+  }
+
+  // 9. Ask: a question draws the shared answer; a follow-up asks again and becomes the address.
+  {
+    const { ctx, page } = await fresh("member", "/console/ask");
+    await page.waitForSelector("#ask-mode-text >> text=keywords");
+    await page.click("#starters [data-start='who owns ']");
+    assert.equal(await page.inputValue("#q"), "who owns ");
+    await page.type("#q", "billing");
+    await page.press("#q", "Enter");
+    await page.waitForSelector("#out .footer-line");
+    assert.match(page.url(), /\/console\/ask\?q=who%20owns%20billing$/);
+    assert.match(await page.textContent("#out .footer-line"), /who_owns/);
+    assert.ok(await page.locator("#out .canvas svg").count());
+    const next = page.locator("#out .next-list button").first();
+    const asked = await next.textContent();
+    await next.click();
+    await page.waitForFunction((q) => document.querySelector("#answer-q").textContent === q && document.querySelector("#out .footer-line"), asked);
+    assert.match(decodeURIComponent(page.url()), new RegExp(asked.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    await page.goBack();
+    await page.waitForFunction(() => document.querySelector("#answer-q").textContent === "who owns billing");
+    step(`ask: answer, Ask next ("${asked}"), Back`);
     await ctx.close();
   }
 
