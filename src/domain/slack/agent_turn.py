@@ -15,7 +15,7 @@ from src.db.falkordb_client import connect
 from src.domain.knowledge import catalogue
 from src.domain.knowledge.agent import ToolChoice, choose_tool, run_choice
 from src.domain.knowledge.dto import MemoryLine, ToolResult, ToolSpec, day_from
-from src.domain.memory.search_brain import search_brain
+from src.domain.knowledge.memories import attached
 from src.domain.memory.writeback import SHARED_TEAM_BRAIN_CONTAINER_TAG, scope_label, slack_memory_container_tag
 from src.domain.slack import format
 from src.domain.slack.compute import TurnApproval, TurnOutcome, TurnRequest, channel_names
@@ -37,8 +37,9 @@ def answer_turn(request: TurnRequest) -> TurnOutcome:
         return suspend_for_approval(request, spec, choice)
     choice = for_the_asker(choice, question, request)
     result, choice = run_choice(choice, question, request.read_tags, request.thread, bot_ids)
-    # A refusal shows no memories, so it never reads like a guess.
-    memories = result.memories or (recall_memories(question, request) if result.found else [])
+    # A refusal shows no memories, so it never reads like a guess; an answer shows only memories that
+    # mention what it is about or something one hop from it, never a loose text match.
+    memories = result.memories or (memories_about(result, request) if result.found else [])
     # One the answer already quotes (what_changed tells each in full) is not listed twice.
     memories = [memory for memory in memories if not memory.text or memory.text not in result.answer]
     return TurnOutcome(reply=render_reply(result, choice, memories, request.read_tags, channel_names(request.read_tags)))
@@ -88,9 +89,9 @@ def approval_summary(spec: ToolSpec, args: dict, scopes: list[str], visible_to: 
     return f"{what}. {shown}. Visible to {visible_to}."
 
 
-def recall_memories(question: str, request: TurnRequest) -> list[MemoryLine]:
-    found = search_brain(question, request.memory_scope, trace_id=request.trace_id)
-    return [memory_line(row) for row in (found.get("results") or [])[:MEMORY_LINES]]
+def memories_about(result: ToolResult, request: TurnRequest) -> list[MemoryLine]:
+    """The memories with a MENTIONS edge to the answer's subject or its neighbours (``knowledge.memories.attached``)."""
+    return attached(result, request.read_tags, MEMORY_LINES)
 
 
 def memory_line(row: dict) -> MemoryLine:

@@ -157,6 +157,28 @@ def same_word(a: str, b: str) -> bool:
     return len(long) - len(short) <= 1 or long == short + "es"
 
 
+def near_word(a: str, b: str) -> bool:
+    """A likely typo: five letters or more, the same first letter, and one edit apart (two for eight or more).
+    Only ever used to suggest a name, never to resolve one."""
+    if a == b or min(len(a), len(b)) < 5 or a[0] != b[0] or abs(len(a) - len(b)) > 2:
+        return False
+    allowed = 2 if min(len(a), len(b)) >= 8 else 1
+    return _edits(a, b, allowed) <= allowed
+
+
+def _edits(a: str, b: str, ceiling: int) -> int:
+    """Levenshtein distance, stopping once every row passes ``ceiling``."""
+    previous = list(range(len(b) + 1))
+    for i, char in enumerate(a, start=1):
+        current = [i]
+        for j, other in enumerate(b, start=1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (char != other)))
+        if min(current) > ceiling:
+            return ceiling + 1
+        previous = current
+    return previous[-1]
+
+
 def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> list[EntityRow]:
     # A synced item (Jira, HubSpot; it has ``external_id``) is matched by its handle only, never its
     # title: hundreds of free-text titles would match every question and make every word "known".
@@ -389,7 +411,8 @@ def _fuzzy_candidates(text: str, rows: list[EntityRow]) -> list[Candidate]:
     scored: list[tuple[float, Candidate]] = []
     for entity, key, key_words, kind in _keys(rows):
         real_words = [word for word in key_words if len(word) >= 4 and word not in STOPWORDS]
-        if not any(same_word(word, key_word) for word in named_words for key_word in real_words):
+        # A shared word, or a misspelt one: "biling" is one edit from "billing", "invoce" from "invoice".
+        if not any(same_word(word, key_word) or near_word(word, key_word) for word in named_words for key_word in real_words):
             continue
         score = max(SequenceMatcher(None, named, " ".join(key_words)).ratio(), FUZZY_FLOOR)
         scored.append((score, Candidate(entity, key, titled=kind == 3)))

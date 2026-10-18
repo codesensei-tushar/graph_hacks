@@ -6,8 +6,8 @@ writeback, or an approval suspension. That agent is not built yet.
 
 **Agent plug-in point.** Call ``register_turn_agent(fn)`` with a function that takes a
 ``TurnRequest`` and returns a ``TurnOutcome``. Until one is registered, the default
-below answers from the company graph (``domain/knowledge``) and scoped memory
-(``memory/search_brain``), and handles the built-in commands.
+below answers from the company graph (``domain/knowledge``) with the memories that mention
+what it answers about, and handles the built-in commands, greetings and thanks.
 
 Everything around this seam (turn control, steering, approvals, streaming, memory
 writeback, reactions) is the ported turn loop in ``turn_service.py``, so an agent only
@@ -22,9 +22,9 @@ from dataclasses import dataclass, field
 from src.connectors.graph import container_names
 from src.domain.github.repos import repo_names
 from src.domain.access.roles import ROLE_OWNER, role_at_least, role_of, set_role
-from src.domain.knowledge import agent, catalogue
+from src.domain.knowledge import agent, catalogue, smalltalk
+from src.domain.knowledge import memories as knowledge_memories
 from src.domain.memory import memory_service
-from src.domain.memory.search_brain import search_brain
 from src.domain.memory.writeback import (
     ORG_INTERNAL_CONTAINER_TAG,
     SHARED_TEAM_BRAIN_CONTAINER_TAG,
@@ -130,20 +130,11 @@ def _answer_from_graph(request: TurnRequest) -> TurnOutcome:
     bot_ids = frozenset(filter(None, [getattr(request.workspace, "bot_user_id", None)]))
     choice = agent.choose_with_keywords(question)
     result, choice = agent.run_choice(choice, question, request.read_tags, request.thread, bot_ids)
-    found = search_brain(question, request.memory_scope, trace_id=request.trace_id)
-    memories = [_memory_row(row) for row in (found.get("results") or [])[:3]]
+    # Only memories that mention what the answer is about, or something one hop from it.
+    memories = result.memories or (knowledge_memories.attached(result, request.read_tags) if result.found else [])
+    memories = [memory.to_dict() for memory in memories]
     names = channel_names(request.read_tags)
     return TurnOutcome(reply=format.format_answer(result.to_dict(), memories, request.read_tags, names, chosen_by=choice.via))
-
-
-def _memory_row(row: dict) -> dict:
-    metadata = row.get("metadata") or {}
-    return {
-        "text": row.get("memory") or row.get("content") or row.get("text") or "",
-        "scope": row.get("container_tag") or row.get("scope") or SHARED_TEAM_BRAIN_CONTAINER_TAG,
-        "channel_id": metadata.get("slack_channel_id") or row.get("channel_id"),
-        "author": row.get("author") or metadata.get("author_name") or metadata.get("author_id") or "someone",
-    }
 
 
 def channel_names(tags: list[str]) -> dict[str, str]:
@@ -163,6 +154,12 @@ def _command(request: TurnRequest) -> TurnOutcome | None:
 
     if not text or text.lower() in ("help", "?"):
         return TurnOutcome(reply=format.HELP_TEXT)
+    # "hi", "what can you do", "thanks!": help or an acknowledgement, never a graph question.
+    small = smalltalk.kind(text)
+    if small == smalltalk.HELP:
+        return TurnOutcome(reply=format.HELP_TEXT)
+    if small == smalltalk.THANKS:
+        return TurnOutcome(reply=smalltalk.THANKS_TEXT)
     if _SCOPES.match(text):
         return TurnOutcome(reply=format.format_scopes(request.read_tags, write_tag, names))
 

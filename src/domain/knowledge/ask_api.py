@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 
 from src.db import falkordb_client
 from src.db.falkordb_client import connect
-from src.domain.knowledge import agent, ask_service, catalogue, kinds
+from src.domain.knowledge import agent, ask_service, catalogue, kinds, smalltalk
 from src.domain.knowledge.dto import PathStep, ToolResult, ToolSpec
 from src.domain.knowledge.proof import ProofReport, run_proof
 
@@ -364,6 +364,9 @@ def answer_question(question: str, tool: str | None = None, use_model: bool = Fa
         raise QuestionTooLong(f"questions are limited to {MAX_QUESTION_CHARS} characters; this one has {len(question)}")
     if not question:
         return AskAnswer(question, "none", "keywords", "Ask a question about the company graph.", found=False, scopes=read_scopes)
+    if tool is None and (said := smalltalk.reply(question)) is not None:
+        # "hi", "what can you do", "thanks": help or an acknowledgement, not a refusal.
+        return AskAnswer(question, "help", "keywords", said, found=True, scopes=read_scopes)
     if use_model:
         # Admin only, and a model's choice can differ between calls: never cached.
         return _answer(question, tool, True, read_scopes)
