@@ -206,7 +206,7 @@ The submit page renders only in a browser, so the exact fields are unknown until
 
 **Description** (about 150 words; rewritten in round 6 for every team):
 
-> Company Brain is a Slack bot over a single FalkorDB graph. People, teams, what they run, documents, tickets, decisions and chat are nodes and edges. Slack and GitHub feed it live, and any team, not only engineering, joins from one TOML file. Ask who owns billing, why a decision was made, what breaks if auth goes down, or what rests on one person alone if they leave. It answers by walking the graph, then prints the edges it used as `A -[REL]-> B` lines. The agent never writes Cypher: it picks from a fixed catalogue of hand-written queries, resolves names against the graph first, and refuses to guess. Decisions are superseded, not overwritten, so "why did we" stays current. Every answer is filtered by the rooms and repos the asker can read. Every read-only tool is also served over MCP and cites its path. FalkorDB is the only store.
+> Company Brain is a Slack bot over a single FalkorDB graph. People, teams, what they run, documents, tickets, decisions and chat are nodes and edges. Slack and GitHub feed it live, and any team, not only engineering, joins from one TOML file. Ask who owns billing, why a decision was made, what breaks if auth goes down, what rests on one person alone if they leave, or where the company is one person away from an outage. It answers by walking the graph, then prints the edges it used as `A -[REL]-> B` lines. The agent never writes Cypher: it picks from a fixed catalogue of hand-written queries, resolves names against the graph first, and refuses to guess. Decisions are superseded, not overwritten, so "why did we" stays current. Every answer is filtered by the rooms and repos the asker can read. Every read-only tool is also served over MCP and cites its path. FalkorDB is the only store.
 
 **How FalkorDB is central** (one paragraph, in case the form asks):
 
@@ -503,8 +503,8 @@ From the track briefs on the hackathon page. The same build enters all three; th
 | Track 01 focus | What we show | Copy line |
 | --- | --- | --- |
 | Multi-hop reasoning | `blast_radius` at a chosen depth, `path_between` over `algo.SPpaths` | "Depth is a parameter; the route comes back with the answer." |
-| Graph queries and algorithms as agent tools | The catalogue, PageRank for load-bearing services, `algo.SPpaths` for routes, label propagation for working groups | "Ranking and routing are a `CALL`, not code." |
-| Tool selection through MCP | Live: every read-only tool at `/mcp`, public and rate-limited; a token lifts the limit (fourteen on 18 Oct, `who_should_know` and `if_person_leaves` included: production's `/api/ask/tools` lists them at `45f6b00`, and a local `/mcp` serves the same fourteen), same schemas, same cited results | "The same catalogue over MCP, read-only, `org_shared`." |
+| Graph queries and algorithms as agent tools | The catalogue, PageRank for load-bearing services, `algo.SPpaths` for routes, label propagation for working groups, and `risk_map`, which ranks every owned thing by what depends on it times its gaps (one person, no document, owner on another team) with PageRank beside it | "Ranking and routing are a `CALL`, not code." |
+| Tool selection through MCP | Live: every read-only tool at `/mcp`, public and rate-limited; a token lifts the limit (fifteen on 18 Oct with `risk_map`; `who_should_know` and `if_person_leaves` were listed by production's `/api/ask/tools` at `45f6b00`, and a local `/mcp` serves all fifteen), same schemas, same cited results | "The same catalogue over MCP, read-only, `org_shared`." |
 | Actions based on what the graph shows | Tickets filed after approval, routed to the people the graph ranks | "It acts, after a human clicks Approve on a card that names the target." |
 | Explainable results | Path lines, the picked-by footer, the proof route | "Explanation is the traversal." |
 

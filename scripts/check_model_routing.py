@@ -78,6 +78,9 @@ QUESTIONS = [
     # blast_radius the other way: what a service itself depends on.
     ("deps 1", "what does the invoice worker depend on", DEPENDENCIES, None),
     ("deps 2", "what are billing's dependencies", DEPENDENCIES, None),
+    # Risk across every team, not one person leaving or one service failing.
+    ("risk 1", "what are our riskiest services", "risk_map", None),
+    ("risk 2", "where are we one person away from an outage", "risk_map", None),
 ]
 
 

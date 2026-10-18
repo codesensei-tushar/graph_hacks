@@ -51,6 +51,7 @@ EXAMPLES: dict[str, list[str]] = {
         "is the billing retries decision still the last word",
         "who should know if postgres changes",
         "what have we said about billing",
+        "what are our riskiest services",
         "who knows the payments gateway",
     ],
     "company-brain": [
@@ -253,6 +254,8 @@ class AskAnswer:
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
     # Set when the question was a Slack write command: where the write happens instead.
     notice: str = ""
+    # The table a ranking tool returns (risk_map); None for every other tool.
+    grid: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -269,6 +272,7 @@ class AskAnswer:
             "edges": [edge.to_dict() for edge in self.edges],
             "memories": [dict(memory) for memory in self.memories],
             "scopes": list(self.scopes),
+            "grid": self.grid,
         }
 
 
@@ -378,6 +382,7 @@ def shape(question: str, result: ToolResult, picked_by: str, scopes: list[str]) 
         edges=edges,
         memories=[memory.to_dict() for memory in result.memories],
         scopes=list(scopes),
+        grid=result.grid,
     )
 
 

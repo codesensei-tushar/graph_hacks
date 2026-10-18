@@ -83,8 +83,10 @@ class AskApiTest(unittest.TestCase):
         self.assertEqual(answer.path, [{"from": "Arjun Mehta", "rel": "OWNS", "to": "Billing Service"}, {"from": "Billing Service", "rel": "DEPENDS_ON", "to": "Postgres"}])
         as_dict = answer.to_dict()
         self.assertEqual(
-            set(as_dict), {"notice", "question", "tool", "picked_by", "answer", "found", "candidates", "depth", "path", "nodes", "edges", "memories", "scopes"}
+            set(as_dict), {"notice", "question", "tool", "picked_by", "answer", "found", "candidates", "depth", "path", "nodes", "edges", "memories", "scopes", "grid"}
         )
+        # Only a ranking tool (risk_map) fills the grid.
+        self.assertIsNone(as_dict["grid"])
         self.assertEqual(len(as_dict["edges"]), len(as_dict["path"]))
 
     def test_a_write_tool_never_runs_whether_chosen_or_named(self):

@@ -52,6 +52,15 @@ _GROUPS = re.compile(
     r"|who works with (?:who|whom)|(?:people|who) (?:actually )?work together|collaborates? with (?:who|whom)|who collaborates)\b",
     re.IGNORECASE,
 )
+# Risk across the company, not one person or one service: "what are our riskiest services",
+# "bus factor across the company", "what is undocumented". Before _LEAVES, which also matches
+# "bus factor"; "the bus factor on arjun" names a person and stays there.
+_RISK = re.compile(
+    r"\brisk ?map\b|\briskiest\b|\b(?:biggest|worst|highest) (?:risks?|bus[- ]factor(?: risks?)?)\b"
+    r"|\bbus[- ]factor (?:risks?|map|heat ?map|across|overall|company[- ]wide)\b|\bknowledge gaps?\b|\bundocumented\b"
+    r"|\b(?:no|missing|without) (?:a )?(?:runbooks?|docs?|documentation)\b|\bone person (?:away )?from an outage\b",
+    re.IGNORECASE,
+)
 # A person leaving, not a service failing. "who is the only one who knows billing" names a
 # service and stays on who_knows; "what is Arjun the only one who knows" names a person, and so
 # does "the bus factor on arjun"; "the bus factor for billing" names a service and stays on who_knows.
@@ -96,6 +105,8 @@ def route(question: str) -> tuple[str, dict]:
         return "none", {}
     if _GROUPS.search(text):
         return "working_groups", {}
+    if _RISK.search(text):
+        return "risk_map", {}
     if _LEAVES.search(text):
         # Before blast radius: "what breaks if Arjun leaves" is about a person.
         return "if_person_leaves", {"name": text}
@@ -425,6 +436,13 @@ def if_person_leaves(question: str, scopes: list[str]) -> ToolResult:
     return bus_factor.if_person_leaves(question, scopes)
 
 
+def risk_map(scopes: list[str]) -> ToolResult:
+    """Lives in ``risk_map.py``, which ranks people with ``knowers`` here. Kept here for the keyword router."""
+    from src.domain.knowledge import risk_map as risk
+
+    return risk.risk_map(scopes)
+
+
 def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
     """Lives in ``brief.py``, which reads the team page (and so the ask API). Kept here for the keyword router."""
     from src.domain.knowledge import brief
@@ -446,6 +464,7 @@ _ROUTED = {
     "decision_trace": lambda args, scopes: decision_trace(args["topic"], scopes),
     "decision_pressure": lambda args, scopes: decision_pressure(args["topic"], scopes),
     "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
+    "risk_map": lambda args, scopes: risk_map(scopes),
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
