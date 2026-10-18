@@ -182,6 +182,37 @@
   // question again costs no request.
   const answered = new Map();
 
+  // A shared link asks while the hero is still loading: the chips, the graph line, the live graph
+  // and the stats can all grow above the answer after it has been scrolled to. Until the reader
+  // scrolls, clicks or presses a key, the answer is scrolled back under the header whenever it moves.
+  const READER_MOVES = ["wheel", "touchstart", "pointerdown", "keydown"];
+  let pinned = null;
+
+  function unpin() {
+    if (!pinned) return;
+    if (pinned.watcher) pinned.watcher.disconnect();
+    for (const type of READER_MOVES) window.removeEventListener(type, unpin, true);
+    pinned = null;
+  }
+
+  function pinAnswer() {
+    unpin();
+    const top = () => answerBox.getBoundingClientRect().top + window.scrollY;
+    const scroll = () => answerBox.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+    let at = top();
+    scroll();
+    const follow = () => {
+      const now = top();
+      if (Math.abs(now - at) < 1) return;
+      at = now;
+      scroll();
+    };
+    const watcher = "ResizeObserver" in window ? new ResizeObserver(follow) : null;
+    if (watcher) watcher.observe(document.body);
+    for (const type of READER_MOVES) window.addEventListener(type, unpin, { capture: true, passive: true });
+    pinned = { follow, watcher };
+  }
+
   function askFromPage(question) {
     input.value = question;
     ask(question, true);
@@ -195,7 +226,7 @@
     statusLine.textContent = "Walking the graph…";
     statusLine.classList.remove("error");
     history.replaceState(null, "", `?q=${encodeURIComponent(q)}`);
-    if (scroll) answerBox.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+    if (scroll) pinAnswer();
     try {
       const hit = answered.get(q);
       const fresh = hit && Date.now() - hit.at < CACHE_MS;
@@ -208,6 +239,7 @@
       statusLine.classList.add("error");
     } finally {
       button.disabled = false;
+      if (scroll && pinned) pinned.follow();
     }
   }
 
