@@ -66,6 +66,36 @@ Then:
 3. **Private keys → Generate a private key.** Keep the downloaded `.pem` outside the repo, for example `~/.config/company-brain/github-app.pem`.
 4. **Install App** → your account → **Only select repositories** → pick the repos.
 
+## Public repos by URL (no installation)
+
+A public repo can be read with no installation of the app at all, because GitHub answers public data to anyone. The operator adds one to any org. An org's owner or admin can add one to their own org from the console.
+
+- **Operator:** open `/ops/github/app`, enter the admin token, and under **Public repos** give the org (`quillfern` is the legacy org), the address (`https://github.com/<owner>/<repo>`) and how many pull requests to read (**0 = all of them**). Or use the API:
+
+  ```bash
+  curl -X POST "https://YOUR-HOST/ops/github/repos?org=quillfern" -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" \
+       -H 'Content-Type: application/json' -d '{"url": "https://github.com/codesensei-tushar/graph_hacks", "backfill_limit": 0}'
+  curl "https://YOUR-HOST/ops/github/repos?org=quillfern" -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN"   # progress
+  ```
+
+  `POST /ops/github/repos/<repo id>/sync` (optionally `{"backfill_limit": N}`) reads it again from the start, for example after the seed's `Service.paths` changed so `TOUCHES` is recomputed. `DELETE /ops/github/repos/<repo id>` removes it.
+- **Console:** the same calls under `/console/api/github/repos` act on the session's org. Members list; owners and admins add, sync and remove.
+
+Its pull requests, reviews and issues are `org_shared`: everyone in the org reads them. For the legacy org that includes the public ask page and MCP. No collaborators are read and no webhooks arrive. After the backfill, the repo is polled every 15 minutes for issues and pull requests updated since the last poll. If a repo turns private, or its name now points at another repo, reading stops and the status says so. A repo the org already reads through an installation is refused, and so is a private one (GitHub answers 404 for it).
+
+**The backfill** reads one page per scheduler job: 100 issues, or 10 pull requests with their changed files and reviews. A restart resumes it, and the shared scheduler thread is never held for long. Pull requests come newest first, `backfill_limit` deep (default 50; 0 = all). Every write is an upsert, so a page read twice changes nothing. A rate limit (`Retry-After`, or `X-RateLimit-Remaining: 0` until `X-RateLimit-Reset`) puts the page off until then, up to an hour. Any other failure backs off 1, 5, 15, then 60 minutes. Progress is on the `Repo` node (`bf_phase`, `bf_page`, `bf_pulls`, `bf_issues`, `bf_error`) and in the ops listing.
+
+**Rate limits.** Public reads use, in order:
+
+1. `GITHUB_PUBLIC_TOKEN`, if set: a token used only for this. A fine-grained token with public read access is enough. 5,000 requests an hour.
+2. An installation token of this app's installation **on its owner's own account**. Another company's installation is never used, because its rate limit is theirs.
+3. The app's client id and secret as basic auth. GitHub [documents this for OAuth apps](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) at 5,000 an hour; a refusal (401) moves on to the next option.
+4. Nothing: 60 requests an hour. The backfill still finishes, because it waits out each limit, but a repo of 220 pull requests takes about 8 hours this way. Each pull request costs 3 requests.
+
+**The demo repo (`codesensei-tushar/graph_hacks`, public, about 220 pull requests).** Add it to the legacy org with depth 0 as above. No GitHub install is needed. For the full backfill in minutes rather than hours, either set `GITHUB_PUBLIC_TOKEN`, or register the app (above) and install it once on the app owner's own account (any repo will do, even one).
+
+If the repo's live events (webhooks rather than the 15-minute poll) are wanted, or the repo were private, the app has to be installed on the account that owns it. `codesensei-tushar` is a user account, so only that user can install it: one click on the app's install link (`/ops/github/app` shows it), choosing the repo. The alternative would be moving the repo into a GitHub organization the operator administers; that is not planned.
+
 ## Configure
 
 Locally, in `.env` (edit the file; don't paste these into chats or tickets):
@@ -110,10 +140,10 @@ A failure is logged as `[github] coordination alert failed` and never affects in
 ## Graph
 
 ```
-(:Repo {id, full_name, private, installation_id, scope})
+(:Repo {id, full_name, private, installation_id, source, scope, bf_*})   source: installation | public
 (:GitHubUser {id, login})-[:CAN_READ]->(:Repo)                    collaborators
 (:GitHubUser)-[:IS]->(:Person)                                     linked account
-(:GitHubUser)-[:AUTHORED]->(:PullRequest)-[:IN_REPO]->(:Repo)
+(:GitHubUser)-[:AUTHORED]->(:PullRequest {created_at, merged_at, closed_at, updated_at})-[:IN_REPO]->(:Repo)
 (:GitHubUser)-[:REVIEWED {state}]->(:PullRequest)
 (:PullRequest)-[:TOUCHES]->(:Service)                              changed files under Service.paths
 (:PullRequest)-[:CLOSES]->(:Ticket)                                "closes #12" in the description
@@ -144,10 +174,11 @@ A seeded `Person` with a `github` login (like `tushar` in `src/seed/company_brai
 | `src/api/v1/github_app.py`, `src/static/ops/github-app.*` | The operator page: register the app (manifest flow) |
 | `src/domain/github/app_registration.py` | The manifest, its state, the code conversion |
 | `src/integrations/github/app_config.py` | Which app runs: env, else the stored one (encrypted in the control graph) |
+| `src/api/v1/github_repos.py`, `src/domain/github/public_repos.py` | Public repos by URL (ops and console) |
 | `src/api/v1/github.py` | `POST /github/webhook` (signature, dedupe on `X-GitHub-Delivery`, background work) and `GET /github/oauth/callback` |
 | `src/domain/github/webhooks.py` | What each event does |
 | `src/domain/github/ingest.py` | Pull requests, reviews, and issues into the graph |
-| `src/domain/github/backfill.py` | Install backfill and the hourly collaborator refresh |
+| `src/domain/github/backfill.py` | The stepped backfill (a page per job), the public-repo poll, batched removal, the hourly collaborator refresh |
 | `src/domain/github/repos.py` | Repo scopes and who may read them |
 | `src/domain/github/account_link.py` | `link github` |
 | `src/integrations/github/` | Signature check and the read-only REST client |

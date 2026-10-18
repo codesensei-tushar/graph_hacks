@@ -55,7 +55,7 @@ class GitHubAppRegistrationTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        tenancy.control_graph().delete()
+        tenancy.control_graph().query("MATCH (a:GitHubApp) DETACH DELETE a")
         for patch in reversed(cls.patches):
             patch.stop()
         app_config.forget()

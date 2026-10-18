@@ -94,7 +94,10 @@ def upsert_pull_request(repo: dict, pr: dict, files: list[dict] | None = None, r
         """
         MERGE (p:PullRequest {id: $id})
         SET p.name = $name, p.number = $number, p.title = $title, p.summary = $summary,
-            p.state = $state, p.merged = $merged, p.url = $url, p.scope = $scope, p.updated_at = $updated
+            p.state = $state, p.merged = $merged, p.url = $url, p.scope = $scope, p.updated_at = $updated,
+            p.created_at = coalesce($created, p.created_at),
+            p.merged_at = CASE WHEN $dated THEN $merged_at ELSE p.merged_at END,
+            p.closed_at = CASE WHEN $dated THEN $closed_at ELSE p.closed_at END
         WITH p
         MATCH (r:Repo {id: $repo})
         MERGE (p)-[:IN_REPO]->(r)
@@ -110,6 +113,12 @@ def upsert_pull_request(repo: dict, pr: dict, files: list[dict] | None = None, r
             "url": pr.get("html_url") or "",
             "scope": scope,
             "updated": pr.get("updated_at") or "",
+            # ISO 8601 as GitHub sends them; merged_at is null until it merges. A webhook payload
+            # without them (a review event) keeps what was stored.
+            "created": pr.get("created_at"),
+            "merged_at": pr.get("merged_at"),
+            "closed_at": pr.get("closed_at"),
+            "dated": "merged_at" in pr,
             "repo": str(repo["id"]),
         },
     )

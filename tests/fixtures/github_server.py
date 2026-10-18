@@ -10,6 +10,8 @@ What the GitHub App code calls, with the auth GitHub demands:
 - As an installation (its token): ``GET /installation/repositories`` and, for its repos only,
   ``/repos/{owner}/{repo}/collaborators|issues|pulls|pulls/{n}/files|pulls/{n}/reviews``, paged
   with ``per_page``/``page`` and a ``Link: rel="next"`` header as GitHub pages them.
+- Public repos (``add_public_repo``) answer ``/repos/...`` to anyone: no auth, the app's client id
+  and secret as basic auth, ``PUBLIC_TOKEN``, or any installation's token; ``auth_seen`` records which.
 - User sign-in: ``POST /login/oauth/access_token`` (form; ``user-code-<login>`` codes, once each)
   and, with that user token, ``GET /user`` and ``GET /user/installations``.
 
@@ -17,6 +19,7 @@ What the GitHub App code calls, with the auth GitHub demands:
 ``X-RateLimit-Remaining: 0`` and a reset one second away. ``calls`` records (method, path).
 """
 
+import base64
 import json
 import re
 import threading
@@ -33,6 +36,7 @@ APP_SLUG = "company-brain-test"
 CLIENT_ID = "Iv23-test-client"
 CLIENT_SECRET = "github-client-secret-value"
 WEBHOOK_SECRET = "github-webhook-secret-value"
+PUBLIC_TOKEN = "github-public-token-value"
 
 
 def user(user_id: int, login: str) -> dict:
@@ -54,7 +58,9 @@ def make_repo(repo_id: int, full_name: str, private: bool, pulls: int = 3, issue
         number = issues + 1 + index
         data["pulls"].append({"number": number, "title": f"Change {number} in {full_name}", "body": "Closes #1" if index == 0 and issues else "",
                               "state": "open", "user": authors[index % len(authors)], "html_url": f"https://github.com/{full_name}/pull/{number}",
-                              "updated_at": f"2026-10-{1 + index % 28:02d}T00:00:00Z", "head": {"ref": f"change-{number}"}})
+                              "updated_at": f"2026-10-{1 + index % 28:02d}T00:00:00Z", "head": {"ref": f"change-{number}"},
+                              "created_at": "2026-09-01T00:00:00Z", "merged_at": "2026-09-02T10:00:00Z" if index % 2 == 0 else None,
+                              "closed_at": "2026-09-02T10:00:00Z" if index % 2 == 0 else None})
         data["files"][number] = [{"filename": "src/domain/memory/search.py"}, {"filename": "README.md"}]
         data["reviews"][number] = [{"user": authors[(index + 1) % len(authors)], "state": "APPROVED"}]
     return data
@@ -77,6 +83,7 @@ class FakeGitHub:
         self.user_tokens: dict[str, str] = {}  # token -> login
         self.users: dict[str, dict] = {}
         self.rate_limit_next = 0
+        self.auth_seen: list[str] = []  # how each repo call authenticated
         self.counter = 0
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(self))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -103,6 +110,11 @@ class FakeGitHub:
             "id": installation_id, "account": account, "repos": [data["repo"]["full_name"] for data in repos],
             "users": list(installers), "suspended_at": None,
         }
+
+    def add_public_repo(self, data: dict, owner_id: int = 4242) -> None:
+        """A public repo nobody installed the app on (read by URL)."""
+        data["repo"]["owner"] = {"id": owner_id, "login": data["repo"]["full_name"].split("/")[0]}
+        self.repos[data["repo"]["full_name"]] = data
 
     def user_code(self, login: str, user_id: int) -> str:
         self.users[login] = user(user_id, login)
@@ -236,31 +248,56 @@ def _handler(fake: FakeGitHub):
                 mine = [fake.installation_payload(i) for i, found in sorted(fake.installations.items()) if login in found["users"]]
                 return self._send(200, {"total_count": len(mine), "installations": mine})
 
+            # Who is asking: an installation token, the app's client credentials (basic auth), the
+            # operator's public token, or nobody. Public repos answer every one of them.
             installation_id = fake.installation_of(auth)
-            if installation_id is None or installation_id not in fake.installations:
-                return self._send(401, {"message": "Bad credentials"})
+            if auth.startswith("Basic "):
+                if auth[6:] != base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode():
+                    return self._send(401, {"message": "Bad credentials"})
+                mode = "client"
+            elif auth == f"Bearer {PUBLIC_TOKEN}":
+                mode = "token"
+            elif auth:
+                if installation_id is None or installation_id not in fake.installations:
+                    return self._send(401, {"message": "Bad credentials"})
+                mode = "installation"
+            else:
+                mode = "anonymous"
             with fake.lock:
+                fake.auth_seen.append(mode)
                 if fake.rate_limit_next > 0:
                     fake.rate_limit_next -= 1
                     return self._send(403, {"message": "API rate limit exceeded"}, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(int(time.time()) + 1)})
-            installation = fake.installations[installation_id]
+            installation = fake.installations.get(installation_id) if mode == "installation" else None
             if path == "/installation/repositories":
+                if installation is None:
+                    return self._send(401, {"message": "Bad credentials"})
                 items = [fake.repos[name]["repo"] for name in installation["repos"]]
                 chunk, link = _page(items, query, fake.base_url, path)
                 return self._send(200, {"total_count": len(items), "repositories": chunk}, {"Link": link} if link else None)
-            match = re.fullmatch(r"/repos/([^/]+/[^/]+)/(collaborators|issues|pulls)(?:/(\d+)/(files|reviews))?", path)
-            if not match or match.group(1) not in installation["repos"]:
+            match = re.fullmatch(r"/repos/([^/]+/[^/]+)(?:/(collaborators|issues|pulls)(?:/(\d+)/(files|reviews))?)?", path)
+            if not match or match.group(1) not in fake.repos:
                 return self._send(404, {"message": "Not Found"})
             data = fake.repos[match.group(1)]
+            visible = data["repo"]["private"] is False or (installation is not None and match.group(1) in installation["repos"])
+            if not visible:
+                return self._send(404, {"message": "Not Found"})
+            if match.group(2) is None:
+                return self._send(200, data["repo"])
             if match.group(3):
                 items = data[match.group(4)].get(int(match.group(3)), [])
             elif match.group(2) == "collaborators":
+                if installation is None:
+                    return self._send(403, {"message": "Must have push access to view repository collaborators."})
                 items = data["collaborators"]
             elif match.group(2) == "issues":
                 # The issues endpoint lists pull requests too, marked as such.
                 items = data["issues"] + [{**pr, "pull_request": {}} for pr in data["pulls"]]
+                if query.get("since"):
+                    items = [item for item in items if (item.get("updated_at") or "") >= query["since"][0]]
             else:
-                items = sorted(data["pulls"], key=lambda pr: pr["number"], reverse=True)
+                key = (lambda pr: pr.get("updated_at") or "") if query.get("sort", [""])[0] == "updated" else (lambda pr: pr["number"])
+                items = sorted(data["pulls"], key=key, reverse=True)
             chunk, link = _page(items, query, fake.base_url, path)
             return self._send(200, chunk, {"Link": link} if link else None)
 
