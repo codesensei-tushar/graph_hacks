@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, coordination, fallback, kinds, memories, resolve
+from src.domain.knowledge import algorithms, bridges, coordination, fallback, find, kinds, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -114,6 +114,25 @@ _CHANGED = re.compile(
     r"|\b(?:failing|broken|erroring|flaky)\b.*\bchanged?\b",
     re.IGNORECASE,
 )
+# Everything around one thing: "explore billing", "what do we know about the sales team", "everything
+# on TKT-102". After the routes that name a question shape (risk, leaving, briefs, paths, reading
+# lists, search), before decisions: "explore the billing retries decision" wants the decision's
+# neighbourhood, not its trace. Public: explore strips it from the question before resolving the name.
+EXPLORE = re.compile(
+    r"\bexplore\b|\bwhat do (?:we|you) know about\b|\beverything (?:we know )?(?:about|on)\b|\bneighbou?rhood of\b|\bwhat(?:'s| is) around\b",
+    re.IGNORECASE,
+)
+# A list by filter: "which tickets are open", "list the services in payments", "what decisions have we
+# made". Before decisions, which shares "decisions"; "what decisions have we made about billing" names
+# one thing and stays on decision_trace, as does any "list ... about X".
+_FIND = re.compile(
+    r"^\s*(?:what|which) decisions (?:have|did) we (?:made|make)\s*\??\s*$"
+    r"|\b(?:list|show)(?: me)? (?:all |the |our )?(?:open |closed |merged |standing )?"
+    r"(?:decisions|tickets|issues|pull requests|prs|services|systems|processes|playbooks|documents|docs|people|teams)\b(?!.*\babout\b)"
+    r"|^\s*(?:what|which) (?:are|is) (?:the |our )?open (?:tickets|issues|pull requests|prs)\b"
+    r"|^\s*which (?:tickets|issues|pull requests|prs) are open\b",
+    re.IGNORECASE,
+)
 # What to read before a change. "what should I know about billing" stays on who_knows. Public:
 # reading_list strips it from the question before resolving the name.
 READING_LIST = re.compile(
@@ -157,6 +176,14 @@ def route(question: str) -> tuple[str, dict]:
     if _SEARCH.search(text):
         # Before decisions and memories: "search for decisions about refunds" wants every hit, not one decision.
         return "search", {"text": text}
+    if _FIND.search(text):
+        return "find", find.parse(text) or {"label": "Decision"}
+    if EXPLORE.search(text):
+        args = {"name": text}
+        depth = algorithms.depth_in(text)
+        if depth is not None:
+            args["depth"] = min(depth, 2)
+        return "explore", args
     if _DECISION.search(text):
         # Before the memory routes: "why did we cut vector recall" asks for a decision, not a memory search.
         return "decision_trace", {"topic": text}
@@ -545,8 +572,17 @@ _ROUTED = {
     "load_bearing": lambda args, scopes: algorithms.load_bearing(args.get("limit")),
     "related_memories": lambda args, scopes: memories.related_memories(args["name"], scopes, args.get("k")),
     "recall": lambda args, scopes: memories.recall(args["query"], scopes, args.get("k")),
+    "explore": lambda args, scopes: _explore().explore(args["name"], scopes, args.get("depth")),
+    "find": lambda args, scopes: find.find(args.get("label"), {key: value for key, value in args.items() if key != "label"}, scopes),
     "search": lambda args, scopes: _search(args["text"], scopes),
 }
+
+
+def _explore():
+    """``explore.py`` imports this module for ``EXPLORE``; imported here when a question is routed to it."""
+    from src.domain.knowledge import explore
+
+    return explore
 
 
 def _search(text: str, scopes: list[str]) -> ToolResult:
