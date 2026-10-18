@@ -240,6 +240,38 @@ class ConnectorFrameworkTest(unittest.TestCase):
         self.assertEqual(_count("MATCH (:ExternalUser {id: 'fake:default:user:u-zed'})-[:IS]->() RETURN count(*)"), 0)
         self.assertEqual(_count("MATCH (n:Person) RETURN count(n)"), len(quillfern.PEOPLE) + 1)  # no Person was created
 
+    def test_a_connector_edge_prop_never_overrides_the_frameworks(self):
+        _drain()
+        edge = Edge("WORKED_ON", "fake:default:user:u-zed", "fake:default:company:1005", props={"via": "x", "item": "y", "source": "z", "install": "w", "stage": "won"})
+        graph.write_page(INSTALL, Page(edges=[edge]))
+        props = _rows("MATCH (:ExternalUser {id: 'fake:default:user:u-zed'})-[r:WORKED_ON]->(:Service {id: 'fake:default:company:1005'}) RETURN properties(r)")[0][0]
+        self.assertEqual(
+            {name: props[name] for name in ("via", "item", "source", "install", "stage")},
+            {"via": "fake:default:user:u-zed", "item": "fake:default:company:1005", "source": "fake", "install": "fake:default", "stage": "won"},
+        )
+
+    def test_an_unlinked_owner_is_named_with_its_tool(self):
+        _drain()
+        slack_tags = resolve_brain_read_container_tags(SlackMemoryScope(kind="shared", channel_id="CPUB"))
+        result = catalogue.get_tool("who_owns").run({"name": "who owns Globex"}, slack_tags)
+        self.assertEqual(result.answer, "The Globex account is owned by Zed Contractor (Fake).")
+        self.assertIn("Zed Contractor (Fake) -[OWNS]-> Globex", [step.cite() for step in result.path])
+        linked = catalogue.get_tool("who_owns").run({"name": "who owns Acme Corp"}, slack_tags)
+        self.assertEqual(linked.answer, "The Acme Corp account is owned by Arjun Mehta.")
+
+    def test_a_team_brief_names_the_accounts_its_members_own(self):
+        _drain()
+        slack_tags = resolve_brain_read_container_tags(SlackMemoryScope(kind="shared", channel_id="CPUB"))
+        page = team_page.team_page("payments", slack_tags)
+        self.assertEqual(([account.name for account in page.accounts], page.accounts_total), (["Acme Corp"], 1))
+        self.assertIn("Arjun Mehta -[OWNS]-> Acme Corp", [step.cite() for step in page.path])
+        self.assertEqual(page.to_dict()["accounts_total"], 1)
+        brief = catalogue.get_tool("onboarding_brief").run({"name": "brief me on the payments team"}, slack_tags)
+        self.assertIn("Its members also own 1 account: Acme Corp (owned by Arjun Mehta).", brief.answer)
+        # The public page never shows them, and no RUNS edge was made.
+        self.assertEqual(team_page.team_page("payments").accounts, [])
+        self.assertEqual(_count("MATCH (:Team)-[:RUNS]->(:Service {id: 'fake:default:company:1004'}) RETURN count(*)"), 0)
+
     def test_ownership_moves_to_the_person_once_linked(self):
         _drain()
         _rows("CREATE (:Person {id: 'zed', name: 'Zed Contractor', email: 'zed@contractor.example'})")
@@ -388,7 +420,7 @@ class ConnectorFrameworkTest(unittest.TestCase):
         inside = who.run({"name": "OPS-1"}, slack_tags)
         self.assertTrue(inside.found)
         self.assertIn("Arjun Mehta -[ASSIGNED]-> OPS-1", [step.cite() for step in inside.path])
-        self.assertIn("Zed Contractor -[OPENED]-> OPS-1", [step.cite() for step in inside.path])
+        self.assertIn("Zed Contractor (Fake) -[OPENED]-> OPS-1", [step.cite() for step in inside.path])
         self.assertTrue(who.run({"name": "who owns the Acme Corp account"}, slack_tags).found)
 
         self.assertFalse(ask_api.answer_question("who knows OPS-1").found)

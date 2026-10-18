@@ -38,6 +38,7 @@ KIND_TITLES = {
 MAX_TEAM_ID = 80
 DECISION_LIMIT = 8
 TICKET_LIMIT = 10
+ACCOUNT_LIMIT = 10
 MEMORY_LIMIT = 5
 
 
@@ -149,13 +150,16 @@ class TeamPage:
     decisions: list[StandingDecision] = field(default_factory=list)
     tickets: list[OpenTicket] = field(default_factory=list)
     memories: list[TeamMemory] = field(default_factory=list)
+    # Accounts members own that the team does not run (a synced CRM's), the first few, and how many.
+    accounts: list[OwnedThing] = field(default_factory=list)
+    accounts_total: int = 0
     path: list[PathStep] = field(default_factory=list)
     # Questions the page offers; each is a read the ask box answers with a path.
     questions: list[str] = field(default_factory=list)
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
 
     def to_dict(self) -> dict:
-        nodes, edges = graph_of(self.path, {thing.id: thing.kind for group in self.owns for thing in group.items})
+        nodes, edges = graph_of(self.path, {thing.id: thing.kind for thing in [thing for group in self.owns for thing in group.items] + self.accounts})
         return {
             "id": self.id,
             "name": self.name,
@@ -165,6 +169,8 @@ class TeamPage:
             "owns": [group.to_dict() for group in self.owns],
             "decisions": [decision.to_dict() for decision in self.decisions],
             "tickets": [ticket.to_dict() for ticket in self.tickets],
+            "accounts": [account.to_dict() for account in self.accounts],
+            "accounts_total": self.accounts_total,
             "memories": [memory.to_dict() for memory in self.memories],
             "path": [step.to_dict() for step in self.path],
             "nodes": [node.to_dict() for node in nodes],
@@ -261,6 +267,7 @@ def team_page(team_id: str, scopes=DEFAULT_SCOPES) -> TeamPage | None:
     ).result_set:
         page.members.append(Member(person_id, person_name, role, owned_by.get(person_id, [])))
 
+    page.accounts, page.accounts_total = _member_accounts(graph, params)
     page.decisions = _standing_decisions(graph, params)
     page.tickets = [
         OpenTicket(ticket_id, title, about)
@@ -296,11 +303,34 @@ def team_path(page: TeamPage) -> list[PathStep]:
     for group in page.owns:
         for thing in group.items:
             steps.append(PathStep(page.name, "RUNS", thing.name, from_id=page.id, to_id=thing.id, from_label="Team", to_label="Service"))
-    for group in page.owns:
-        for thing in group.items:
-            for owner in thing.owners:
-                steps.append(PathStep(owner, "OWNS", thing.name, from_id=owner_ids.get(owner), to_id=thing.id, from_label="Person", to_label="Service"))
+    for thing in [thing for group in page.owns for thing in group.items] + page.accounts:
+        for owner in thing.owners:
+            steps.append(PathStep(owner, "OWNS", thing.name, from_id=owner_ids.get(owner), to_id=thing.id, from_label="Person", to_label="Service"))
     return steps
+
+
+def _member_accounts(graph, params: dict) -> tuple[list[OwnedThing], int]:
+    """Accounts the team's members own that the team does not run: what a CRM sync brings in.
+    The first ``ACCOUNT_LIMIT`` by name, and how many there are. Nothing here adds a RUNS edge."""
+    match = f"""
+        MATCH (p:Person)-[:MEMBER_OF]->(t:Team {{id: $id}})
+        MATCH (p)-[:OWNS]->(s:Service)
+        WHERE {SCOPED.format(var="p")} AND {SCOPED.format(var="s")} AND {kinds.KIND_OF.format(var="s")} = 'account' AND NOT (t)-[:RUNS]->(s)
+    """
+    total = graph.ro_query(f"{match} RETURN count(DISTINCT s)", params).result_set
+    if not total or not total[0][0]:
+        return [], 0
+    rows = graph.ro_query(
+        f"""
+        {match}
+        WITH s, collect(DISTINCT p.name) AS owners
+        RETURN s.id, s.name, coalesce(s.summary, ''), owners
+        ORDER BY s.name
+        LIMIT {ACCOUNT_LIMIT}
+        """,
+        params,
+    ).result_set
+    return [OwnedThing(account_id, name, "account", summary, sorted(owners)) for account_id, name, summary, owners in rows], int(total[0][0])
 
 
 def team_questions(page: TeamPage) -> list[str]:

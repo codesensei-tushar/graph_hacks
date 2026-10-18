@@ -159,29 +159,55 @@ def _decisions(graph, person: Entity, params: dict, reach: dict[str, int]) -> tu
 
 
 def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple[list[AtRisk], int]:
-    """Open tickets no one else worked on. Also how many open tickets they are on."""
-    rows = graph.ro_query(
+    """Open tickets no one else worked on or is assigned. Also how many open tickets they are on.
+
+    Theirs are the ones they worked on and the ones assigned to an account linked to them (Jira,
+    GitHub). Anyone else on it is another person who worked on it, or any other account assigned
+    to it, linked or not.
+    """
+    accounts = {**params, "accounts": list(ask_service.ACCOUNT_LABELS)}
+    mine: dict[str, str] = {}
+    for ticket_id, rel in graph.ro_query(
         f"""
         MATCH (:Person {{id: $id}})-[:WORKED_ON]->(k:Ticket)
         WHERE {SCOPED.format(var="k")} AND coalesce(k.state, 'open') <> 'closed'
-        OPTIONAL MATCH (other:Person)-[:WORKED_ON]->(k)
-        WHERE other.id <> $id
-        WITH k, count(other) AS others
+        RETURN k.id AS ticket, 'WORKED_ON' AS rel
+        UNION
+        MATCH (:Person {{id: $id}})<-[:IS]-(account)-[:ASSIGNED]->(k:Ticket)
+        WHERE labels(account)[0] IN $accounts AND {SCOPED.format(var="account")} AND {SCOPED.format(var="k")}
+          AND coalesce(k.state, 'open') <> 'closed'
+        RETURN k.id AS ticket, 'ASSIGNED' AS rel
+        """,
+        accounts,
+    ).result_set:
+        mine.setdefault(ticket_id, rel)  # worked on it, if both
+    if not mine:
+        return [], 0
+    rows = graph.ro_query(
+        f"""
+        MATCH (k:Ticket)
+        WHERE k.id IN $tickets
+        OPTIONAL MATCH (other)-[:WORKED_ON|ASSIGNED]->(k)
+        WHERE (labels(other)[0] = 'Person' AND other.id <> $id)
+           OR (labels(other)[0] IN $accounts AND NOT (other)-[:IS]->(:Person {{id: $id}}))
+        WITH k, count(DISTINCT other) AS others
         OPTIONAL MATCH (k)-[:ABOUT]->(s:Service)
         WHERE {SCOPED.format(var="s")}
         RETURN k.id, k.name, coalesce(k.title, k.name), others, collect(DISTINCT [s.id, s.name, {kinds.KIND_OF.format(var="s")}])
         ORDER BY k.name
         """,
-        params,
+        {**accounts, "tickets": sorted(mine)},
     ).result_set
     items = []
     for ticket_id, name, title, others, about in rows:
         if others:
             continue
-        step = PathStep(person.name, "WORKED_ON", name, from_id=person.id, to_id=ticket_id, from_label="Person", to_label="Ticket")
+        rel = mine[ticket_id]
+        step = PathStep(person.name, rel, name, from_id=person.id, to_id=ticket_id, from_label="Person", to_label="Ticket")
         about_clause, dependents, about_steps = _about(graph, name, ticket_id, "Ticket", about, params, reach)
         titled = f" (“{title}”)" if title and title != name else ""
-        sentence = f"Open ticket {name}{titled}{about_clause}: only {person.name} worked on it"
+        holds = "worked on it" if rel == "WORKED_ON" else "is assigned it"
+        sentence = f"Open ticket {name}{titled}{about_clause}: only {person.name} {holds}"
         items.append(AtRisk(name, sentence + _reach_clause(dependents, _subject_of(about)) + ".", dependents, 2, (step, *about_steps)))
     return items, len(rows)
 

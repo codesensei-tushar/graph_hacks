@@ -45,14 +45,44 @@ class ConnectorScopeTest(unittest.TestCase):
                    (:Service {id: 'reports', name: 'Reports Service'})-[:DEPENDS_ON]->(ledger),
                    (pay:Ticket {id: 'jira:default:10012', name: 'PAY-12', title: 'Billing exports time out', external_id: '10012',
                                 source: 'jira', state: 'open', scope: 'org_internal'})-[:ABOUT]->(billing),
-                   (linked:ExternalUser {id: 'jira:default:user:a1', name: 'arjun.m', scope: 'org_internal'})-[:IS]->(arjun),
-                   (contractor:ExternalUser {id: 'jira:default:user:z9', name: 'Zed Contractor', scope: 'org_internal'}),
-                   (linked)-[:ASSIGNED]->(pay), (contractor)-[:OPENED]->(pay),
+                   (linked:ExternalUser {id: 'jira:default:user:a1', name: 'arjun.m', source: 'jira', scope: 'org_internal'})-[:IS]->(arjun),
+                   (contractor:ExternalUser {id: 'jira:default:user:z9', name: 'Zed Contractor', source: 'jira', scope: 'org_internal'}),
+                   (namesake:ExternalUser {id: 'jira:default:user:hidden', name: 'Arjun Mehta', source: 'jira', scope: 'org_internal'}),
+                   (linked)-[:ASSIGNED]->(pay), (contractor)-[:OPENED]->(pay), (namesake)-[:OPENED]->(pay),
                    (:Ticket {id: 'TKT-900', name: 'TKT-900', title: 'Ledger drift'})-[:ABOUT]->(ledger),
                    (:Ticket {id: 'github:1:issue:5000', name: 'app#5000', title: 'An issue', source: 'github'}),
                    (:Decision {id: 'decision-ledger', name: 'Close the books nightly', scope: 'org_shared'})-[:ABOUT]->(ledger)
             """
         )
+        # Nadia's only work is a Jira ticket assigned to her linked account; PAY-13 is blocked by PAY-12; a pull
+        # request by Lena references PAY-14, which blocks a public ticket.
+        graph.query(
+            """
+            MATCH (lena:Person {id: 'lena'}), (pay:Ticket {id: 'jira:default:10012'})
+            CREATE (nadia:Person {id: 'nadia', name: 'Nadia Okafor', email: 'nadia@quillfern.example.com'}),
+                   (nadia)<-[:IS]-(:ExternalUser {id: 'jira:default:user:n1', name: 'nadia.o', source: 'jira', scope: 'org_internal'})
+                       -[:ASSIGNED]->(:Ticket {id: 'jira:default:10077', name: 'OPS-77', title: 'Rotate the export bucket keys',
+                                               external_id: '10077', source: 'jira', state: 'open', scope: 'org_internal'}),
+                   (pay)-[:BLOCKS]->(:Ticket {id: 'jira:default:10013', name: 'PAY-13', title: 'Ship the export', external_id: '10013',
+                                             source: 'jira', state: 'open', scope: 'org_internal'}),
+                   (lena)<-[:IS]-(:GitHubUser {id: 'gh-lena-refs', login: 'lena-f', name: 'lena-f'})
+                       -[:AUTHORED]->(:PullRequest {id: 'github:1:pr:88', name: 'app#88', scope: 'org_shared'})
+                       -[:REFERENCES]->(pay14:Ticket {id: 'jira:default:10014', name: 'PAY-14', title: 'Export retries', external_id: '10014',
+                                                     source: 'jira', state: 'open', scope: 'org_internal'}),
+                   (pay14)-[:BLOCKS]->(:Ticket {id: 'TKT-778', name: 'TKT-778', title: 'Public follow-up'})
+            """
+        )
+        # Nine Jira tickets about the memory layer, all assigned to one unlinked account.
+        for number in range(1, 10):
+            graph.query(
+                """
+                MATCH (memory:Service {id: 'memory-layer'})
+                MERGE (busy:ExternalUser {id: 'jira:default:user:busy', name: 'Busy Bee', source: 'jira', scope: 'org_internal'})
+                CREATE (busy)-[:ASSIGNED]->(:Ticket {id: $id, name: $name, title: 'Memory chore', external_id: $ext, source: 'jira',
+                                                     state: 'open', source_updated_at: $updated, scope: 'org_internal'})-[:ABOUT]->(memory)
+                """,
+                {"id": f"jira:default:3{number:04d}", "name": f"MEM-{number}", "ext": f"3{number:04d}", "updated": f"2026-09-{number:02d}T00:00:00Z"},
+            )
         # A backlog about the invoice worker: ten open tickets and a closed one, all from Jira.
         for number in range(1, 12):
             graph.query(
@@ -145,9 +175,41 @@ class ConnectorScopeTest(unittest.TestCase):
         self.assertTrue(result.found)
         cites = _cites(result)
         self.assertIn("Arjun Mehta -[ASSIGNED]-> PAY-12", cites)
-        self.assertIn("Zed Contractor -[OPENED]-> PAY-12", cites)
-        self.assertIn("Arjun Mehta (is assigned it", result.answer.replace("is assigned PAY-12", "is assigned it"))
-        self.assertIn("Zed Contractor (opened", result.answer)
+        self.assertIn("Zed Contractor (Jira) -[OPENED]-> PAY-12", cites)
+        self.assertIn("Arjun Mehta (is assigned PAY-12, owns Billing Service)", result.answer)
+        self.assertIn("Zed Contractor (Jira) (opened PAY-12)", result.answer)
+
+    def test_an_unlinked_account_named_like_a_person_stays_someone_else(self):
+        result = ask_service.who_knows("who knows PAY-12", SLACK)
+        self.assertIn("Arjun Mehta (Jira) -[OPENED]-> PAY-12", _cites(result))
+        self.assertIn("Arjun Mehta (Jira) (opened PAY-12)", result.answer)
+        ranked = ask_service.rank_people(result.path, resolve.Entity("jira:default:10012", "PAY-12", "Ticket"))
+        self.assertEqual([reasons for name, _score, reasons in ranked if name == "Arjun Mehta"], ["is assigned PAY-12, owns Billing Service"])
+
+    def test_many_tickets_never_outrank_the_owner_and_seeded_tickets_stay_listed(self):
+        result = ask_service.who_knows("who knows the memory layer", SLACK)
+        self.assertTrue(result.answer.split("Ask first: ")[1].startswith("Kofi Mensah"), result.answer)
+        ranked = {name: score for name, score, _reasons in ask_service.rank_people(result.path, resolve.Entity("memory-layer", "Memory Layer", "Service"))}
+        self.assertEqual(ranked["Busy Bee (Jira)"], ask_service.EDGE_WEIGHTS["ASSIGNED"])
+        self.assertIn("TKT-101 -[ABOUT]-> Memory Layer", _cites(result))
+        self.assertIn("TKT-101 and 2 more.", result.answer)
+
+    def test_a_linked_jira_assignee_leaving_takes_the_ticket(self):
+        nadia = ask_service.if_person_leaves("what if nadia leaves", SLACK)
+        self.assertIn("Open ticket OPS-77 (“Rotate the export bucket keys”): only Nadia Okafor is assigned it.", nadia.answer)
+        self.assertIn("Nadia Okafor -[ASSIGNED]-> OPS-77", _cites(nadia))
+        self.assertIn("nothing is linked to them yet", ask_service.if_person_leaves("what if nadia leaves", ORG).answer)
+        arjun = ask_service.if_person_leaves("what if arjun leaves", SLACK)
+        self.assertIn("Open ticket PAY-12 (“Billing exports time out”), about Billing Service: only Arjun Mehta is assigned it", arjun.answer)
+
+    def test_paths_cite_blocks_and_references_through_readable_nodes_only(self):
+        blocked = algorithms.path_between("PAY-12", "PAY-13", SLACK)
+        self.assertIn("PAY-12 -[BLOCKS]-> PAY-13", _cites(blocked))
+        referenced = algorithms.path_between("Lena Fischer", "PAY-14", SLACK)
+        self.assertIn("app#88 -[REFERENCES]-> PAY-14", _cites(referenced))
+        self.assertIn("PAY-14 -[BLOCKS]-> TKT-778", _cites(algorithms.path_between("Lena Fischer", "TKT-778", SLACK)))
+        # From the public scope the only route runs through a Jira ticket, so there is none.
+        self.assertTrue(algorithms.path_between("Lena Fischer", "TKT-778", ORG).answer.startswith("No path"))
 
     def test_jira_assignees_of_tickets_about_a_service_know_it(self):
         result = ask_service.who_knows("who knows billing", SLACK)
