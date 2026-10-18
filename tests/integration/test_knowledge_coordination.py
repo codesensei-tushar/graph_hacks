@@ -248,16 +248,20 @@ class WhoShouldKnowTest(unittest.TestCase):
         # docs#12345 is titled "Auth service".
         self.assertTrue(_ask("who should know if the auth service changes").answer.startswith("Auth Service is owned by Maya Ortiz."))
 
-    def test_a_ticket_or_a_document_is_not_a_change(self):
+    def test_a_document_or_ticket_by_name_gets_who_knows_and_an_issue_named_like_a_pull_request_is_refused(self):
+        who_knows = catalogue.get_tool("who_knows")
         document = _ask("who should I tell about the billing runbook")
-        self.assertFalse(document.found)
-        self.assertEqual(document.candidates, ["Billing runbook"])
-        self.assertEqual(
-            document.answer,
-            "Billing runbook is a document, not a change. Name the pull request or service that changes, or ask who knows Billing runbook.",
-        )
+        self.assertTrue(document.found)
+        self.assertEqual(document.tool, "who_knows")
+        self.assertTrue(document.answer.startswith("Billing runbook is about Billing Service. Ask first: Arjun Mehta"), document.answer)
+        self.assertEqual(document.answer, who_knows.run({"name": "the billing runbook"}, ORG).answer)
         ticket = _ask("who should know about TKT-101")
-        self.assertEqual(ticket.answer, "TKT-101 is a ticket, not a change. Name the pull request or service that changes, or ask who knows TKT-101.")
+        self.assertEqual((ticket.tool, ticket.answer), ("who_knows", who_knows.run({"name": "TKT-101"}, ORG).answer))
+        # notebook#12 is an issue: named like a pull request, it is refused rather than answered about.
+        self.assertEqual(
+            _ask("who should know about notebook#12").answer,
+            "notebook#12 is a ticket, not a change. Name the pull request or service that changes, or ask who knows notebook#12.",
+        )
 
     def test_a_service_named_only_by_the_end_of_an_unknown_name_is_refused(self):
         # The graph knows API Gateway as "api" and nothing as "claude".
@@ -268,10 +272,7 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertTrue(_ask("who should know if the api changes").answer.startswith("API Gateway is owned by Maya Ortiz."))
 
     def test_a_word_that_only_says_which_version_still_resolves(self):
-        self.assertEqual(
-            _ask("who should know about the old billing runbook").answer,
-            "Billing runbook is a document, not a change. Name the pull request or service that changes, or ask who knows Billing runbook.",
-        )
+        self.assertTrue(_ask("who should know about the old billing runbook").answer.startswith("Billing runbook is about Billing Service."))
         self.assertTrue(_ask("who should know if the current auth service changes").answer.startswith("Auth Service is owned by Maya Ortiz."))
         self.assertEqual(_ask("who should know if the old claude api changes").candidates, ["API Gateway"])
 
@@ -453,6 +454,25 @@ class WhoShouldKnowTest(unittest.TestCase):
         routed = ask_service.ask("who should know about notebook#45", ORG)
         self.assertEqual(routed.tool, "who_should_know")
         self.assertEqual(routed.answer, _ask("notebook#45").answer)
+
+    def test_the_keyword_path_sends_people_questions_to_who_knows(self):
+        # What the public page does with no model: these name people to ask, not a change.
+        for question, about in (
+            ("who should review the billing runbook", "Billing runbook is about Billing Service."),
+            ("who should know about the billing runbook", "Billing runbook is about Billing Service."),
+            ("who should I ping about billing", "Billing Service is owned by Arjun Mehta."),
+            ("who should we ping about the auth outage", "Auth Service is owned by Maya Ortiz."),
+        ):
+            with self.subTest(question=question):
+                routed = ask_service.ask(question, ORG)
+                self.assertEqual((routed.tool, routed.found), ("who_knows", True))
+                self.assertTrue(routed.answer.startswith(about), routed.answer)
+        # "PR-45" is a pull request number, not a ticket id: two repos have a #45.
+        self.assertEqual(
+            ask_service.ask("who should know about PR-45", ORG).answer,
+            "More than one pull request is #45: docs#45 and notebook#45. Name the repo, as in docs#45.",
+        )
+        self.assertEqual(ask_service.ask("who should know about PR-52", ORG).answer, _ask("notebook#52").answer)
 
 
 class WhoShouldKnowOnTheSeedAloneTest(unittest.TestCase):

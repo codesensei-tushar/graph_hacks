@@ -2,7 +2,7 @@
 
 import unittest
 
-from src.domain.knowledge import algorithms, ask_service
+from src.domain.knowledge import algorithms, ask_service, coordination
 
 
 class RouteTest(unittest.TestCase):
@@ -96,6 +96,18 @@ class RouteTest(unittest.TestCase):
         # A ticket is asked about, not changed; "why" is a decision question.
         self.assertEqual(ask_service.route("who should I ping about TKT-101")[0], "who_knows")
         self.assertEqual(ask_service.route("who needs to know why we moved off postgres")[0], "decision_trace")
+
+    def test_someone_to_ask_is_who_knows_and_pr_dash_number_is_a_pull_request(self):
+        # Someone to go to, not someone a change should reach; "outage" does not make it blast radius.
+        for question in ("who should I ping about billing", "who should we ping about the auth outage", "who should I ask about invoices"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("who_knows", {"name": question}))
+        # "PR-45" looks like a ticket id but is a pull request.
+        self.assertEqual(ask_service.route("who should know about PR-45"), ("who_should_know", {"name": "who should know about PR-45"}))
+        self.assertEqual(coordination.pr_reference("who should know about PR-45"), (None, 45))
+        self.assertEqual(ask_service.route("who should know about TKT-45")[0], "who_knows")
+        # A document stays on who_should_know here; the tool answers it as who_knows (integration test).
+        self.assertEqual(ask_service.route("who should review the billing runbook")[0], "who_should_know")
 
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)

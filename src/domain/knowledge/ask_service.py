@@ -63,12 +63,17 @@ _BRIEF = re.compile(
 # A change and the people it should reach: "who should know about notebook#45", "who else should
 # review it", "who should we loop in". After the decision and memory routes, so "who needs to know
 # why we moved off postgres" stays a decision question; before blast radius and owners, which share
-# its words. A ticket is asked about, not changed: "who should I ping about TKT-101" stays on who_knows.
+# its words. A ticket is asked about, not changed: "who should know about TKT-101" stays on who_knows,
+# but "PR-45" is a pull request. A document or ticket the tool resolves is answered as who_knows there.
 _SHOULD_KNOW = re.compile(
-    r"\bwho (?:else )?(?:should|needs to) (?:know|review|be told|hear)\b|\bwho should (?:i|we) (?:loop in|tell|ping)\b",
+    r"\bwho (?:else )?(?:should|needs to) (?:know|review|be told|hear)\b|\bwho should (?:i|we) (?:loop in|tell)\b",
     re.IGNORECASE,
 )
-_TICKET_ID = re.compile(r"\b[a-z]{2,}-\d+\b", re.IGNORECASE)
+_TICKET_ID = re.compile(r"\b(?!pr-\d)[a-z]{2,}-\d+\b", re.IGNORECASE)
+# Someone to go to: "who should we ping about the auth outage" wants the people who know Auth,
+# not what breaks, so it is routed before blast radius, which shares "outage". Pinging about a
+# pull request ("who should I ping about notebook#45") is about a change.
+_ASK_WHO = re.compile(r"\bwho should (?:i|we) (?:ping|ask|talk to)\b", re.IGNORECASE)
 # People between teams. "how is maya connected to the invoice worker" is a path question.
 _CONNECTORS = re.compile(r"\bwho (?:connects|bridges|links)\b|\b(?:bridges?|connectors?|go-betweens?) between\b", re.IGNORECASE)
 
@@ -100,8 +105,11 @@ def route(question: str) -> tuple[str, dict]:
         return "related_memories", {"name": text}
     if _RECALL.search(text):
         return "recall", {"query": text}
-    if _SHOULD_KNOW.search(text) and not _TICKET_ID.search(text):
+    about_a_change = _SHOULD_KNOW.search(text) or (_ASK_WHO.search(text) and coordination.pr_reference(text))
+    if about_a_change and not _TICKET_ID.search(text):
         return "who_should_know", {"name": text}
+    if _ASK_WHO.search(text):
+        return "who_knows", {"name": text}
     if _BLAST.search(text):
         args = {"name": text}
         depth = algorithms.depth_in(text)
