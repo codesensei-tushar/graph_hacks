@@ -46,6 +46,8 @@ def _directory(client, team_id: str) -> tuple[frozenset[str], bool] | None:
             return None
         for member in page.items:
             foreign = bool(getattr(member, "team_id", None)) and member.team_id != team_id
+            if getattr(member, "deleted", False):
+                continue
             if member.is_restricted or member.is_ultra_restricted or member.is_stranger or foreign:
                 outsiders = True
             else:

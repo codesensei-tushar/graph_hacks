@@ -258,6 +258,29 @@ class TenancyTest(unittest.TestCase):
             self.assertIsNone(workspace_module.get_workspace_row(team))
         self.assertIsNone(orgs.routed_org_id(team))
 
+    def test_install_is_refused_when_the_installer_does_not_belong_to_the_org(self):
+        team = f"TREF{uuid.uuid4().hex[:6].upper()}"
+        seen = []
+
+        def refusal(team_id, user):
+            seen.append((team_id, user, tenancy.current_org()))
+            return "guest"
+
+        with mock.patch.object(slack_install, "_membership_refusal", side_effect=refusal):
+            self.assertEqual(self._install(self.x.id, team).status_code, 403)
+        self.assertEqual(seen, [(team, "UADMIN", self.x.id)])
+        self.assertIsNone(orgs.routed_org_id(team))
+        with tenancy.org_context(self.x.id):
+            self.assertIsNone(workspace_module.get_workspace_row(team))
+
+    def test_deactivated_users_are_not_members(self):
+        from src.integrations.slack.client import _slack_user_info_from_member
+
+        user = _slack_user_info_from_member({"id": "UGONE", "name": "gone", "deleted": True, "team_id": "T1"})
+        self.assertTrue(user.deleted)
+        self.assertFalse(workspace_module.is_workspace_member(user))
+        self.assertTrue(workspace_module.is_workspace_member(_slack_user_info_from_member({"id": "UHERE", "name": "here", "real_name": "Here"})))
+
     # --- the migration -------------------------------------------------------------------------
 
     def test_migration_routes_every_existing_workspace_to_the_legacy_org(self):
