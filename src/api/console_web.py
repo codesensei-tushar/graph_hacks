@@ -81,6 +81,12 @@ NAV = {
 }
 HERE_UNDER = {"team": "teams"}
 NAV_MARK = "<!-- shell:nav -->"
+# On a phone the nav folds behind this button (style.css hides it on wider screens; shell.js opens it).
+MENU_BUTTON = (
+    '<button class="icon-btn nav-toggle" id="nav-toggle" type="button" aria-label="Menu" aria-expanded="false">'
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">'
+    '<path d="M4 7h16M4 12h16M4 17h16"/></svg></button>'
+)
 ACTIONS_MARK = "<!-- shell:actions -->"
 _HEADER = re.compile(r'<header class="top" data-shell="(site|console)" data-here="([a-z]+)">')
 
@@ -103,7 +109,7 @@ def render(html: str, console_on: bool) -> str:
         actions = '<a class="top-signin" href="/signin">Sign in</a>'
     else:
         actions = ""
-    html = html.replace(NAV_MARK, f'<nav aria-label="{label}">{links}</nav>', 1).replace(ACTIONS_MARK, actions, 1)
+    html = html.replace(NAV_MARK, f'<nav aria-label="{label}">{links}</nav>', 1).replace(ACTIONS_MARK, actions + MENU_BUTTON, 1)
     return html.replace(CONSOLE_OFF, CONSOLE_ON, 1) if console_on else html
 
 

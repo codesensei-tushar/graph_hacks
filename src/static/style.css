@@ -216,7 +216,9 @@ code { font-variant-ligatures: none; }
 /* Over the hero's dark top the header is transparent with light ink (app.js sets data-over-hero);
    once the hero leaves it is solid again, so a deep link lands under a solid header. */
 .top { transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease); }
-:root[data-over-hero] .top { background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* Still clear over the hero's dark top, but blurred and faintly shaded, so the headline scrolling
+   under it never collides with the section links. */
+:root[data-over-hero] .top { background: linear-gradient(180deg, rgba(4, 6, 20, 0.55), rgba(4, 6, 20, 0)); border-color: transparent; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 :root[data-over-hero] .top, :root[data-over-hero] .top nav a { color: var(--hero-ink-2); }
 :root[data-over-hero] .brand { color: var(--hero-ink); }
 :root[data-over-hero] .top nav a:hover { color: var(--hero-ink); background: rgba(255, 255, 255, 0.08); }
@@ -230,6 +232,8 @@ code { font-variant-ligatures: none; }
 .top nav a { color: var(--ink-2); text-decoration: none; font: 500 var(--fs-xs)/1 var(--font); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 4px; border-radius: 8px; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
 .top nav a:hover, .top nav a[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
 .top-actions { display: flex; align-items: center; gap: 8px; }
+/* The Menu button only shows on phones, where the section links fold behind it. */
+.top .nav-toggle { display: none; }
 /* "Sign in" to the console: shown only when the server runs it (console_web unhides it). */
 .top-signin {
   display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line);
@@ -884,6 +888,13 @@ section.block.band-dark {
   /* The path head wraps here; the buttons start their row like the replay button. */
   .depths, .path-head h3 + .copy-link { margin-left: 0; }
   .top nav { display: none; }
+  .top .nav-toggle { display: inline-flex; }
+  .top[data-nav-open] nav {
+    display: flex; position: absolute; top: var(--header); left: 0; right: 0; flex-direction: column; align-items: stretch; gap: 0;
+    padding: 6px var(--gutter) 12px; background: var(--bg); border-bottom: 1px solid var(--line); box-shadow: 0 18px 32px -18px rgba(0, 0, 0, 0.45);
+  }
+  .top[data-nav-open] nav a, :root[data-over-hero] .top[data-nav-open] nav a { color: var(--ink-2); padding: 14px 4px; font-size: var(--fs-sm); }
+  .top[data-nav-open] nav a + a { border-top: 1px solid var(--line); }
   .hero {
     min-height: max(600px, 100svh); padding: calc(var(--header) + 48px) var(--gutter) 40px; place-items: start center;
     background:
@@ -938,4 +949,10 @@ section.block.band-dark {
   #chips { min-height: 148px; }
   .replay, .copy-link { min-height: 44px; }
   .depths button { min-height: 38px; }
+}
+
+/* A short window (a 1366 x 768 laptop leaves about 650 px): the hero's foot line would float over
+   the example questions, so it sits under them instead, as it does on a phone. */
+@media (min-width: 761px) and (max-height: 760px) {
+  .hero-foot { position: static; width: min(var(--max), 100% - 2 * var(--gutter)); margin: 28px auto 0; }
 }

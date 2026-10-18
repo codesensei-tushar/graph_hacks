@@ -99,7 +99,7 @@ class SectionsTest(unittest.TestCase):
             page.headings,
             [
                 ("h1", "Ask how your company works. Every answer shows the path it walked."),
-                ("h2", "Ask the graph behind this project."),
+                ("h2", "Ask the demo company's graph."),
                 ("h2", "The graph behind every answer."),
                 ("h2", "Take FalkorDB out, and the answers go with it."),
                 ("h2", "Not only engineering."),
