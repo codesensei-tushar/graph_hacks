@@ -77,6 +77,14 @@ class TokenEndpointTest(unittest.TestCase):
         self.assertEqual((tokens.access_token, tokens.refresh_token), ("a2", "r1"))
         self.assertNotIn("a2", repr(tokens))
 
+    def test_secret_fields_cover_every_credential(self):
+        from src.connectors.hubspot.connector import HubSpotConnector
+        from src.connectors.jira import JiraConnector
+
+        self.assertEqual(JiraConnector.secret_fields, ("api_token", "access_token", "refresh_token", "expires_at"))
+        self.assertEqual(HubSpotConnector.secret_fields, ("token", "access_token", "refresh_token", "expires_at"))
+        self.assertEqual(set(oauth.Tokens("a", "r", 1.0).as_secret()), set(oauth.OAUTH_SECRET_FIELDS))
+
     def test_site_urls(self):
         for good in ("https://acme.atlassian.net", "https://a-1.atlassian.net"):
             self.assertTrue(jira_oauth.SITE_URL.fullmatch(good))

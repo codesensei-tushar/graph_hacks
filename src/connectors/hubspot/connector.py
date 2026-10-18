@@ -30,7 +30,7 @@ from src.connectors.hubspot import mapping
 from src.connectors.hubspot import oauth as hubspot_oauth
 from src.connectors.hubspot.client import API_VERSION, BATCH, HubSpotClient
 from src.connectors.http import HttpError
-from src.connectors.oauth import bearer_for
+from src.connectors.oauth import OAUTH_SECRET_FIELDS, bearer_for
 
 # Accounts kept per portal, newest first.
 MAX_COMPANIES = 500
@@ -48,6 +48,8 @@ class HubSpotConnector(Connector):
     poll_seconds = 300
     accepts_webhooks = False
     oauth: OAuthSpec = hubspot_oauth.SPEC
+    # The private app's token (token installs) and the OAuth tokens: kept encrypted, never in config_json.
+    secret_fields = ("token", *OAUTH_SECRET_FIELDS)
 
     def __init__(self, client_for=None, clock=time.time):
         self._client_for = client_for or _client_for

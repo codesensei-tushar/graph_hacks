@@ -34,7 +34,7 @@ from src.connectors import registry
 from src.connectors.base import AvailableContainer, Connector, ConnectorError, Container, Edge, Install, InstallInfo, OAuthSpec, Page
 from src.connectors.jira import mapper
 from src.connectors.jira import oauth as jira_oauth
-from src.connectors.oauth import bearer_for
+from src.connectors.oauth import OAUTH_SECRET_FIELDS, bearer_for
 from src.connectors.jira.client import PAGE_SIZE, PROJECT_KEY, JiraClient, site_host, site_problems
 
 log = logging.getLogger(__name__)
@@ -81,6 +81,8 @@ class JiraConnector(Connector):
     oauth: OAuthSpec = jira_oauth.SPEC
     # The console stores the selected project keys here (comma-separated), the same field as CONNECTOR_JIRA_PROJECTS.
     container_field = "projects"
+    # The API token (token installs) and the OAuth tokens: kept encrypted, never in config_json.
+    secret_fields = ("api_token", *OAUTH_SECRET_FIELDS)
 
     def __init__(self) -> None:
         # Seams for tests: the client, and what time it is.

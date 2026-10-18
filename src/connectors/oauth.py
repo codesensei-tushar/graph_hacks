@@ -49,6 +49,9 @@ from src.db.falkordb_client import kv
 
 log = logging.getLogger(__name__)
 
+# The fields an OAuth install keeps in ``secret_enc`` (``Connector.secret_fields``). ``expires_at`` is
+# not secret, but it is written with the tokens it describes.
+OAUTH_SECRET_FIELDS = ("access_token", "refresh_token", "expires_at")
 # Refresh when less than this is left, so a token never expires in the middle of a step.
 REFRESH_SKEW_SECONDS = 5 * 60
 # The refresh lock. A holder that dies frees it after this; a refresh takes one HTTP call.
