@@ -64,7 +64,8 @@ loopback. They exist only on the Compose network.
 | `deploy/slack-app-manifest.yaml` | Manifest for the production Slack app |
 | `.github/workflows/ci.yml` | ruff, pytest (with a FalkorDB service), docker build |
 | `.github/workflows/deploy.yml` | CI, then build, push, deploy, verify |
-| `src/api/ops.py` | `/healthz`, `POST /ops/seed`, `POST /ops/import`, the Slack event clock |
+| `src/api/ops.py` | `/healthz`, `GET /ops/metrics`, `POST /ops/seed`, `POST /ops/import`, the Slack event clock |
+| `src/core/query_metrics.py` | Graph query metrics and the slow-query log (a hook on every `connect()` query) |
 | `src/api/mcp.py` | `/mcp`: the read-only tools over MCP, public and rate-limited |
 | `src/api/v1/connectors.py` | `/connectors/<source>/webhook`, `/ops/connectors` and its sync-now route (admin token) |
 
@@ -262,6 +263,48 @@ sudo docker compose exec falkordb redis-cli GRAPH.CONFIG GET MAX_QUEUED_QUERIES 
 (`REDISCLI_AUTH` is set in the container, so no password is typed.) Locally, recreate the dev
 container with `docker compose up -d falkordb` to pick up the same values.
 
+### The client side
+
+The app's connection (`src/db/falkordb_client.py`) is bounded too, so a stuck or restarted
+FalkorDB costs a request seconds, never a worker:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `socket_connect_timeout` | 2 s | An unreachable host failed after 135 s with the redis-py default (measured); now 2 s. |
+| `socket_timeout` | 15 s (`FALKORDB_SOCKET_TIMEOUT`) | A few seconds past the server's 10 s read `TIMEOUT`, so "Query timed out" arrives first; this catches a server that stopped answering. A write still running at 15 s raises here while the server finishes it. |
+| `health_check_interval` | 30 s | A connection idle that long is PINGed before reuse, and replaced if it went stale. |
+| Pool | `BlockingConnectionPool(max_connections=64, timeout=5)` | At most 64 connections; a caller past that waits up to 5 s, then gets an error. |
+| Retries | none on commands | A write whose reply was lost may have been applied; sending it again could apply it twice. Only the health-check PING and the socket connect get a second try. |
+
+## Query metrics
+
+Every graph query that goes through `connect()` is timed by `src/core/query_metrics.py`. Each
+query is counted under its **tool** and its **org**:
+
+- The tool is the catalogue tool on the call stack (`who_owns`, `blast_radius`, ...). If there
+  is none, it is `module:function` of the nearest caller, such as `connectors.sync:...`. Code
+  can name the tool itself with `query_metrics.tool_scope(name)`.
+- The org is the org id in context, or `-` when there is none.
+
+The query's outcome is one of: ok, **timeout** (past its `TIMEOUT` or the per-query timeout),
+**rejected** (the queue of `MAX_QUEUED_QUERIES` was full: "Max pending queries exceeded"), or
+error.
+
+- **Slow-query log.** A query at or above `QUERY_SLOW_MS` (default 200) logs one WARNING line,
+  and so does any timeout or rejection: `[falkordb] slow query 412 ms tool=who_knows
+  org=... graph=... method=ro_query rows=37 timeout=2000: MATCH ...`. The query text is cut to
+  200 characters, with every string literal replaced by `?`. Parameter values are never
+  logged.
+- **`GET /ops/metrics`** (admin token). Since the process started: totals, then per tool and
+  per org the `count`, `errors`, `timeouts`, `rejected`, `slow` and `rows`, plus `p50_ms`,
+  `p95_ms` and `max_ms` over the last 512 queries. At most 200 tools and 200 orgs are kept;
+  any more are counted under `_other`. The numbers reset when the backend restarts.
+
+```bash
+curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" https://brain.noobsurd.space/ops/metrics | jq '.total, .tools'
+sudo docker compose logs backend | grep '\[falkordb\]'     # on the VM: slow, timed-out and refused queries
+```
+
 ## Backups and restore
 
 The boot-disk snapshot copies the FalkorDB volume as the disk happens to be at that moment.
@@ -289,7 +332,47 @@ Each run:
    `ifGenerationMatch=0` (never overwrites), and checks the MD5 GCS reports.
 
 Nothing is kept on the VM; the RDB is staged in `/var/tmp` and deleted. `deploy.sh`
-installs the script and enables the timer on every deploy.
+installs the script and enables the timer on every deploy. Until the bucket exists, each run
+logs one line (`skipped: gs://... does not exist yet`) and exits 0. Any other failure, such as
+a 403 from missing IAM or scopes, is one `failed:` line, and the unit exits non-zero.
+
+### What a backup holds, and who may read it
+
+An RDB is the whole of FalkorDB, not only the graphs. It also holds the key-value store
+(console sessions, OAuth state, event dedupe, approvals, the scheduler's keys) and every
+connector install's credentials, which are encrypted with `TOKEN_ENCRYPTION_KEYS`. Treat the
+bucket like production itself:
+
+- Only the people who may read production secrets may read the bucket. Nobody is granted
+  anything on it beyond the VM's `objectCreator`, but project-level roles (Owner, Editor,
+  Storage Admin or Viewer) reach it too. Check both before adding anyone:
+  `gcloud storage buckets get-iam-policy gs://graphhacks-brain-8490-falkordb-backups --configuration=graphhacks`
+  and `gcloud projects get-iam-policy graphhacks-brain-8490 --configuration=graphhacks`.
+- Never make it public, and never copy a backup anywhere outside the project, except to a
+  local disk for `verify`. Delete `/tmp/brain-restore` afterwards.
+
+**The encryption keys are not in the backup.** `TOKEN_ENCRYPTION_KEYS` (and the older single
+`TOKEN_ENCRYPTION_KEY`, which encrypts Slack bot tokens) live in Secret Manager, project
+`graphhacks-brain-8490`. `deploy.sh` writes the latest version into `/opt/brain/.env`. A
+restored graph whose connector secrets were encrypted with a key that is no longer in that
+list has credentials nobody can decrypt, so every connector needs reconnecting. Hence:
+
+- Never disable or destroy a version of either secret until 37 days after a newer version
+  replaced it (30 days of backups plus 7 noncurrent). Key rotation (docs/CONSOLE.md) only adds
+  versions, so nothing more is needed in the ordinary course.
+- If the keys were rotated after the backup was taken, find the version that was latest at
+  the backup's `created_at` before restoring. Add a new version that lists the current keys
+  first and then that version's keys, and redeploy. MultiFernet decrypts with any key in the
+  list.
+
+  ```bash
+  gcloud secrets versions list TOKEN_ENCRYPTION_KEYS --configuration=graphhacks   # createTime per version
+  gcloud secrets versions access <n> --secret=TOKEN_ENCRYPTION_KEYS --configuration=graphhacks
+  ```
+
+A restore also brings back the key-value state from that moment. Sessions and OAuth flows
+started since are gone, and anything disconnected since (a connector install, a revoked
+session) is back. Disconnect it again after the restore.
 
 ```bash
 # On the VM
@@ -309,6 +392,12 @@ the image named in the manifest), compares every graph's counts per label and pe
 the manifest, prints each mismatch, and removes the container. Exit 0 means every count
 matched. For a manifest with `"consistent": false`, a count passes if it lies between the
 before and after values.
+
+This is a shape check, not a content check. Matching counts mean the RDB loads and has the
+same nodes per label and edges per type as production had. They say nothing about property
+values, scopes or the key-value store. The sha256 proves only that the RDB is the file that
+was uploaded. For more, `--keep` the container and query it: open a few known nodes, or a
+connector install's `secret_enc` decrypted with the current keys.
 
 ```bash
 B=gs://graphhacks-brain-8490-falkordb-backups/falkordb/2026/10/19/brain-falkordb-20261019T213512Z

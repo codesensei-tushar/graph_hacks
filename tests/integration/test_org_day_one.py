@@ -14,6 +14,11 @@ from types import SimpleNamespace
 
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
+from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from src.api.v1 import console_teams  # noqa: E402
+from src.core.config import settings  # noqa: E402
 from src.core import tenancy  # noqa: E402
 from src.db import falkordb_client  # noqa: E402
 from src.db.falkordb_client import connect  # noqa: E402
@@ -24,6 +29,31 @@ from src.domain.slack import compute  # noqa: E402
 from src.domain.slack.compute import TurnRequest  # noqa: E402
 from src.integrations.slack.events import SlackEventInner  # noqa: E402
 
+ORIGIN = "https://console.test"
+CSRF = "csrf-token-of-the-session"
+PAYMENTS_FILE = """
+[team]
+name = "Payments"
+summary = "Money in and out."
+
+[[members]]
+name = "Paula Ortiz"
+email = "paula@dayone.example"
+
+[[members]]
+name = "Sam Okafor"
+
+[[runs]]
+name = "Billing Service"
+kind = "service"
+owner = "Paula Ortiz"
+
+[[runs]]
+name = "Ledger"
+kind = "system"
+owner = "Sam Okafor"
+depends_on = ["Billing Service"]
+"""
 PAYMENTS = "<@UBOT> onboard team: Payments | members: <@UPAULA> <@USAM> | owns: Billing Service (service), Ledger (system, <@USAM>)"
 PROFILES = {
     "UPAULA": SimpleNamespace(id="UPAULA", real_name="Paula Ortiz", display_name="", name="paula", email="paula@dayone.example"),
@@ -117,6 +147,105 @@ class OrgDayOneTest(unittest.TestCase):
         self.assertIsNone(orgs.ensure_company(tenancy.legacy_org()), "the legacy org's company is the seed's")
         with tenancy.org_context(org.ref()):
             self.assertEqual(compute.compute_turn(_request(PAYMENTS)).status, "suspended")
+
+
+
+class ConsoleTeamsTest(unittest.TestCase):
+    """``/console/api/teams``: an admin imports a team file into their org; members list the teams."""
+
+    @classmethod
+    def setUpClass(cls):
+        orgs.ensure_control_indexes()
+        cls.x = orgs.create_org("Teams X", created_by="TX:UX")
+        cls.y = orgs.create_org("Teams Y", created_by="TY:UY")
+        cls.saved = {name: getattr(settings, name) for name in ("console_enabled", "public_url")}
+        for name, value in (("console_enabled", True), ("public_url", ORIGIN)):
+            object.__setattr__(settings, name, value)
+        cls.app = FastAPI()
+        cls.app.include_router(console_teams.router)
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, value in cls.saved.items():
+            object.__setattr__(settings, name, value)
+        for org in (cls.x, cls.y):
+            try:
+                falkordb_client.client().select_graph(org.graph).delete()
+            except Exception:
+                pass
+        tenancy.control_graph().query("MATCH (o:Org) WHERE o.id IN $ids DETACH DELETE o", {"ids": [cls.x.id, cls.y.id]})
+
+    def setUp(self):
+        self.session = {"org": self.x.id, "person": {"id": "p-ada", "name": "Ada"}, "role": "admin", "csrf": CSRF, "slack_user": "UADA", "team": "TX"}
+        self.app.dependency_overrides[console_teams.console_user] = lambda: self.session
+        self.app.dependency_overrides[console_teams.console_admin] = self._admin
+        self.client = TestClient(self.app)
+        self.headers = {"x-csrf-token": CSRF, "origin": ORIGIN}
+
+    def _admin(self):
+        if self.session["role"] not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="admins only")
+        return self.session
+
+    def _post(self, body, **kwargs):
+        return self.client.post("/console/api/teams/import", json=body, headers=self.headers, **kwargs)
+
+    def test_check_then_import_then_list_in_the_orgs_own_graph(self):
+        checked = self._post({"file": PAYMENTS_FILE, "check": True})
+        self.assertEqual(checked.status_code, 200, checked.text)
+        self.assertEqual(
+            checked.json(),
+            {"mode": "check", "company": self.x.slug, "team": "payments", "contents": "Payments: 2 people, 1 service, 1 system", "counts": {"people": 2, "runs": {"service": 1, "system": 1}, "decisions": 0}},
+        )
+        self.assertEqual(_rows(self.x.ref(), "MATCH (t:Team) RETURN count(t)"), [[0]], "a check writes nothing")
+
+        merged = self._post({"file": PAYMENTS_FILE})
+        self.assertEqual(merged.status_code, 200, merged.text)
+        body = merged.json()
+        self.assertEqual((body["mode"], body["company"], body["team"]), ("merge", self.x.slug, "payments"))
+        self.assertGreater(body["nodes_created"], 0)
+        self.assertEqual(_rows(self.x.ref(), "MATCH (:Team {id: 'payments'})-[:PART_OF]->(c:Company) RETURN c.id"), [[self.x.slug]])
+        self.assertEqual(self._post({"file": PAYMENTS_FILE}).json()["nodes_created"], 0, "a second import creates nothing")
+        audit = tenancy.control_graph().query("MATCH (a) WHERE a.action = 'teams.import' AND a.org = $org RETURN count(a)", {"org": self.x.id}).result_set
+        self.assertGreaterEqual(audit[0][0], 1)
+
+        listed = self.client.get("/console/api/teams").json()
+        self.assertEqual(
+            listed,
+            {
+                "teams": [
+                    {
+                        "id": "payments", "name": "Payments", "summary": "Money in and out.",
+                        "members": [{"id": "paula-ortiz", "name": "Paula Ortiz", "role": None}, {"id": "sam-okafor", "name": "Sam Okafor", "role": None}],
+                        "runs": [
+                            {"id": "billing-service", "name": "Billing Service", "kind": "service", "owners": [{"id": "paula-ortiz", "name": "Paula Ortiz"}]},
+                            {"id": "ledger", "name": "Ledger", "kind": "system", "owners": [{"id": "sam-okafor", "name": "Sam Okafor"}]},
+                        ],
+                    }
+                ]
+            },
+        )
+        self.session = {**self.session, "org": self.y.id}
+        self.assertEqual(self.client.get("/console/api/teams").json(), {"teams": []}, "another org sees none of it")
+        self.assertEqual(_rows(self.y.ref(), "MATCH (t:Team) RETURN count(t)"), [[0]])
+
+    def test_a_refused_file_writes_nothing_and_says_why(self):
+        bad = PAYMENTS_FILE.replace('owner = "Sam Okafor"', 'owner = "Nobody Here"')
+        response = self._post({"file": bad})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "refused")
+        self.assertTrue(any("Nobody Here" in problem for problem in response.json()["problems"]), response.json())
+        self.assertEqual(_rows(self.y.ref(), "MATCH (t:Team) RETURN count(t)"), [[0]])
+
+    def test_only_admins_import_and_the_body_is_checked(self):
+        self.assertEqual(self._post({"file": ""}).status_code, 400)
+        self.assertEqual(self._post({"file": PAYMENTS_FILE, "check": "yes"}).status_code, 400)
+        self.assertEqual(self.client.post("/console/api/teams/import", content=PAYMENTS_FILE, headers={**self.headers, "content-type": "text/plain"}).status_code, 415)
+        huge = self._post({"file": "#" * (team_import.MAX_FILE_BYTES + 10)})
+        self.assertEqual((huge.status_code, huge.json()["error"]), (413, "too_large"))
+        self.session = {**self.session, "role": "member"}
+        self.assertEqual(self._post({"file": PAYMENTS_FILE}).status_code, 403)
+        self.assertEqual(self.client.get("/console/api/teams").status_code, 200, "members may list")
 
 
 if __name__ == "__main__":

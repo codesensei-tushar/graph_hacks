@@ -27,9 +27,29 @@ something (nodes, edges, properties, labels) and every ``delete`` bumps. Caches 
 holds (the answer cache) put ``generation(name)`` in their key, so a write anywhere, in any
 process, makes them read again: a disconnected tool's data is not served from a cache after its
 nodes are deleted. Within ``generation_snapshot()`` (one question) Redis is asked once per graph.
+
+The connection (``client()``) is bounded on every side, so a stuck or restarted FalkorDB costs
+a request seconds, never a worker:
+
+- connecting gives up after ``SOCKET_CONNECT_TIMEOUT`` (2 s);
+- a reply gives up after ``SOCKET_TIMEOUT`` (15 s): a few seconds past the server's own read
+  ``TIMEOUT`` (10 s, docker-compose.yml), so FalkorDB's "Query timed out" arrives first and the
+  socket limit only catches a server that stopped answering. Writes are not cut off by the
+  server, so a write still running after 15 s raises ``TimeoutError`` here while the server
+  finishes it; set ``FALKORDB_SOCKET_TIMEOUT`` higher for a bulk job that needs longer;
+- an idle connection is PINGed before reuse after ``HEALTH_CHECK_INTERVAL`` (30 s), so a
+  connection the server or a NAT dropped is replaced instead of failing the next query;
+- at most ``MAX_CONNECTIONS`` (64) connections; a caller beyond that waits up to
+  ``POOL_TIMEOUT`` (5 s) for one, then gets ``ConnectionError``;
+- nothing is retried at the connection level (redis-py's default retries every command three
+  times on a connection error or socket timeout): a write whose reply was lost may have been
+  applied, and sending it again could apply it twice; a read that timed out would only double
+  the load of the query that just ran too long. A connection dropped while idle is caught by
+  the health check, whose PING (and the reconnect after it) gets one more try (``CommandsOnce``).
 """
 
 import logging
+import os
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -41,6 +61,9 @@ from typing import Any
 
 from falkordb import FalkorDB
 from redis.exceptions import ResponseError
+from redis import BlockingConnectionPool
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 from src.core.config import settings
 
@@ -192,9 +215,48 @@ class _GraphProxy:
             _run_hooks(AFTER_QUERY, call)
 
 
+SOCKET_CONNECT_TIMEOUT = 2.0
+SOCKET_TIMEOUT = float(os.getenv("FALKORDB_SOCKET_TIMEOUT", "15"))
+HEALTH_CHECK_INTERVAL = 30
+MAX_CONNECTIONS = 64
+POOL_TIMEOUT = 5
+
+
+class CommandsOnce(Retry):
+    """No command is sent twice; the health-check PING and the socket connect, which change
+    nothing on the server, get one more try, so a connection that went stale while idle is
+    replaced before the command goes out instead of failing it."""
+
+    SAFE = frozenset({"_send_ping", "_connect"})
+
+    def __init__(self) -> None:
+        super().__init__(NoBackoff(), 0)
+
+    def call_with_retry(self, do, fail, is_retryable=None, with_failure_count=False):
+        if getattr(do, "__name__", "") in self.SAFE:
+            return Retry(NoBackoff(), 1).call_with_retry(do, fail, is_retryable, with_failure_count)
+        return super().call_with_retry(do, fail, is_retryable, with_failure_count)
+
+
+def pool() -> BlockingConnectionPool:
+    """The bounded pool every FalkorDB and Redis call shares (see the module docstring)."""
+    return BlockingConnectionPool(
+        max_connections=MAX_CONNECTIONS,
+        timeout=POOL_TIMEOUT,
+        host=settings.falkordb_host,
+        port=settings.falkordb_port,
+        password=settings.falkordb_password or None,
+        decode_responses=True,
+        socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
+        socket_timeout=SOCKET_TIMEOUT,
+        health_check_interval=HEALTH_CHECK_INTERVAL,
+        retry=CommandsOnce(),
+    )
+
+
 @lru_cache(maxsize=1)
 def client() -> FalkorDB:
-    return FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port, password=settings.falkordb_password or None)
+    return FalkorDB(connection_pool=pool())
 
 
 def graph_name() -> str:
