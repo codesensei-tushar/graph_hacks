@@ -47,6 +47,13 @@ jobs:
         run: .venv/bin/ruff check --output-format github .
       - name: Pytest
         run: .venv/bin/pytest -q
+      - name: Pytest, as production runs tenancy
+        # TENANCY_WRITE_STRICT=1, as in deploy/docker-compose.yml: a graph write with no org raises
+        # (tests/strict_tenancy.py says how tests and requests get their org).
+        env:
+          TENANCY_WRITE_STRICT: "1"
+          TEST_GRAPH_SUFFIX: _strict
+        run: .venv/bin/pytest -q
 
   image:
     name: docker build

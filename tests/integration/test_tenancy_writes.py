@@ -21,7 +21,7 @@ from src.db import falkordb_client  # noqa: E402
 
 # Routes that set their own org: Slack per team, the console per session, the operator's org routes
 # per ?org=, connector webhooks and admin routes per install. Anything else must be a legacy path.
-OWN_ORG_PREFIXES = ("/slack/", "/console/", "/auth/", "/ops/orgs", "/ops/tokens", "/ops/invites", "/ops/connectors", "/connectors/", "/healthz")
+OWN_ORG_PREFIXES = ("/slack/", "/console/", "/auth/", "/ops/orgs", "/ops/tokens", "/ops/invites", "/ops/connectors", "/ops/metrics", "/connectors/", "/healthz")
 
 
 def _write_strict(on: bool) -> None:
@@ -29,9 +29,11 @@ def _write_strict(on: bool) -> None:
 
 
 class WriteStrictTest(unittest.TestCase):
+    NO_ORG_CONTEXT = True  # what happens with no org is what these test (tests/strict_tenancy.py)
+
     def setUp(self):
+        self.addCleanup(_write_strict, settings.tenancy_write_strict)
         _write_strict(True)
-        self.addCleanup(_write_strict, False)
         self.marker = f"strict-{uuid.uuid4().hex[:8]}"
 
     def tearDown(self):
@@ -135,6 +137,29 @@ class WriteStrictTest(unittest.TestCase):
             ):
                 asyncio.run(boot())
         self.assertEqual(seen, [tenancy.LEGACY_ORG_ID])
+
+
+@unittest.skipUnless(settings.tenancy_write_strict, "the suite's strict mode only (TENANCY_WRITE_STRICT=1)")
+class StrictSuiteTest(unittest.TestCase):
+    """The strict suite itself: test code runs as the legacy org, a request does not inherit it."""
+
+    def test_test_code_is_legacy_and_a_request_starts_with_no_org(self):
+        self.assertEqual(tenancy.current_org(), tenancy.LEGACY_ORG_ID)
+        app = FastAPI()
+
+        @app.post("/console/api/forgot")
+        def forgot():
+            _, graph = falkordb_client.connect()
+            graph.query("CREATE (:StrictProbe {id: 'never'})")
+            return {"ok": True}
+
+        @app.get("/api/where")
+        def where():
+            return {"org": tenancy.current_org()}
+
+        client = TestClient(app, raise_server_exceptions=False)
+        self.assertEqual(client.post("/console/api/forgot").status_code, 500)
+        self.assertEqual(client.get("/api/where").json(), {"org": tenancy.LEGACY_ORG_ID})
 
 
 if __name__ == "__main__":
