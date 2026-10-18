@@ -12,7 +12,8 @@
   background: linear-gradient(to right, transparent, var(--surface)); opacity: 0; transition: opacity var(--fast) var(--ease);
 }
 .riskmap-pane.more-right::after { opacity: 1; }
-.riskmap-scroll { overflow-x: auto; overscroll-behavior-x: contain; border-radius: var(--radius); }
+/* Positioned, so the cells' visually hidden labels (position: absolute) stay inside the scroller instead of widening the page. */
+.riskmap-scroll { position: relative; overflow-x: auto; overscroll-behavior-x: contain; border-radius: var(--radius); }
 .riskmap-scroll:focus-visible { outline-offset: -2px; }
 .riskmap-cue {
   position: absolute; z-index: 2; right: 12px; bottom: -11px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px;

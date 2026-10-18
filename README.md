@@ -2,24 +2,29 @@
 
 [![Deploy](https://github.com/codesensei-tushar/graph_hacks/actions/workflows/deploy.yml/badge.svg)](https://github.com/codesensei-tushar/graph_hacks/actions/workflows/deploy.yml)
 
-Hackathon project for Graph Hacks track 03. FalkorDB holds how a company is connected. An agent answers from that graph and shows the path behind each answer.
+**Ask how your company works. Every answer shows the path it walked.**
 
-Ask it in Slack and it answers from the graph, then prints the edges it walked:
+Company Brain keeps a company's people, teams, what they run, documents, tickets, decisions and chat in one FalkorDB graph. A Slack agent, the live page and any MCP client answer by walking it, and print every edge they used as `A -[REL]-> B`. The agent never writes Cypher: it picks one of a fixed catalogue of hand-written, parameterised queries, resolves names against the graph first, and when the graph does not know something it says so instead of guessing.
 
-| You ask | It walks |
-| --- | --- |
-| Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, tickets and docs, and pull requests and reviews once GitHub is connected |
-| Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[BASED_ON]-> Document`, the decision it `SUPERSEDES`, and the chat it came from |
-| What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
-| Who should know about notebook#45? | `PullRequest -[TOUCHES]-> Service`, then back two `DEPENDS_ON` hops: the owners of what it changes and of what depends on it who were not on the pull request, each tagged by whether they have worked with its author |
-| A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
-| What if Priya Shah leaves? | What only they own or know, ranked by what depends on it, and who is next in line by the same edges `who_knows` ranks |
+[![“who knows billing” on the ask page: the ranked answer, the path drawn as a graph, and the same edges as A -[REL]-> B lines, including the pull request a teammate reviewed.](docs/images/01-who-should-look.png)](https://brain.noobsurd.space/?q=who%20knows%20billing)
 
-Rows 4 and 6 need the demo replay's pull requests and Sales team; the live site answers the questions in [Try it in two minutes](#try-it-in-two-minutes).
+<sub>Taken on the local replay of the synthetic company, which adds a GitHub history. The live site answers the same question from the seeded graph, without the pull request.</sub>
 
-If the thing you named is not in the graph, it says so and offers the nearest matches. It never guesses.
+Graph Hacks 2026: track 03, Company Brain, also entered in tracks 01 and 02.
 
-Engineering was first; any team joins the same graph from one TOML file. A `Service` node has a `kind`, so a Sales team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as the billing service, worded for what they are: a process stalls, a playbook no longer applies. The import only merges, and people Slack already knows are matched by email, never duplicated. Every read-only tool is also served over MCP and returns the path it walked. See [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md).
+## For judges: verify it in two minutes
+
+| | Do this | You should see |
+| --- | --- | --- |
+| 1 | Open [brain.noobsurd.space](https://brain.noobsurd.space) and click an example question | The answer, the path drawn edge by edge, and the same edges as `A -[REL]-> B` lines |
+| 2 | Open [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves) | What rests on one person alone, and who is next in line |
+| 3 | Ask [`who knows the payments gateway`](https://brain.noobsurd.space/?q=who%20knows%20the%20payments%20gateway) | A refusal that names the nearest things the graph does hold. It never guesses |
+| 4 | Scroll to [Take FalkorDB out](https://brain.noobsurd.space/#proof) on the page | The same questions run twice: five of six capabilities collapse without the graph, and the refusal stays a refusal |
+| 5 | Open a team: [/team/payments](https://brain.noobsurd.space/team/payments) | Its people, what it runs, what it depends on in other teams and who depends on it, where its risk sits, and the edges behind every line |
+| 6 | `claude mcp add --transport http company-brain https://brain.noobsurd.space/mcp` | The same read-only tools over MCP, with no token, each result with the path it walked |
+| 7 | `python scripts/replay_workspace.py --graph company_demo`, with FalkorDB running | The whole demo through the real routes, with no Slack app and no model key |
+
+`python scripts/check_live.py` runs the live checks in one go: every example question, the questions in the next section, the team page, the deep link and MCP.
 
 ## Try it in two minutes
 
@@ -32,7 +37,7 @@ Engineering was first; any team joins the same graph from one TOML file. A `Serv
 | `why did we move the memory layer off postgres` | The decision, who proposed and approved it, the RFC and ticket it rests on, and the chat it came from |
 | `who knows the payments gateway` | Something the graph does not know: "Nothing in the graph matches “payments gateway” as one thing. Nearest: Billing Service (known as “payments”), API Gateway (known as “gateway”)." It never guesses. |
 
-Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, its open tickets, and the edges behind every line. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
+Then open a team's page, [/team/payments](https://brain.noobsurd.space/team/payments): its people, what it runs, the teams it depends on and the ones that depend on it, where its risk sits, and the edges behind every line. The team names at the top switch between teams. A question can be linked directly: [`/?q=what if arjun mehta leaves`](https://brain.noobsurd.space/?q=what%20if%20arjun%20mehta%20leaves).
 
 **Over MCP.** The same read-only tools, with the same cited results, from any MCP client. No token needed: read-only, the company-wide scope, 30 calls a minute per address, shared with the ask page. A token, where one was issued, lifts the limit.
 
@@ -50,43 +55,34 @@ python scripts/replay_workspace.py --graph company_demo
 
 In a few seconds it seeds Quillfern into its own graph, imports its Sales team from the example file, and plays the chat history and every demo step through the real routes, against a fake Slack API. It prints each question with the bot's reply and the edges it walked, 15 replies, from "who owns billing" through the Sales questions to the heads-up a new pull request posts, and ends with `fake Slack calls=144 bot messages=17`: the 15 replies and the two Approve cards.
 
-- What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
-- Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
-- Blog post outline: [docs/BLOG.md](docs/BLOG.md)
-- Pitch deck, slide by slide: [docs/PITCH.md](docs/PITCH.md)
-- Site design brief: [docs/DESIGN.md](docs/DESIGN.md)
-- How to run the graph: [docs/SETUP.md](docs/SETUP.md)
-- Onboard any team from one file: [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md)
-- Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
-- GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
-- What is built and what is next: [docs/SLACK.md#what-is-next](docs/SLACK.md#what-is-next)
-- Production deploy, CI/CD and operations: [docs/DEPLOY.md](docs/DEPLOY.md)
-- Replay the synthetic company for a demo or a test: [docs/SETUP.md](docs/SETUP.md#replay-the-synthetic-company)
+## What it answers
 
-AI assistance: parts of this project were written with Claude Code (Anthropic), including the production infrastructure, deploy pipeline and their docs.
+Ask it in Slack and it answers from the graph, then prints the edges it walked:
 
-```bash
-docker compose up -d
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python scripts/seed_graph.py
-uvicorn src.main:app --reload
-```
+| You ask | It walks |
+| --- | --- |
+| Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, tickets and docs, and pull requests and reviews once GitHub is connected |
+| Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[BASED_ON]-> Document`, the decision it `SUPERSEDES`, and the chat it came from |
+| What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
+| Who should know about notebook#45? | `PullRequest -[TOUCHES]-> Service`, then back two `DEPENDS_ON` hops: the owners of what it changes and of what depends on it who were not on the pull request, each tagged by whether they have worked with its author |
+| A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
+| What if Priya Shah leaves? | What only they own or know, ranked by what depends on it, and who is next in line by the same edges `who_knows` ranks |
 
-To see the seven demo answers with no Slack app and no model key, run the synthetic company through the real routes against a local fake of the Slack API. It seeds the fictional Quillfern into a graph of its own and prints every reply with the edges it walked:
+Rows 4 and 6 need the demo replay's pull requests and Sales team; the live site answers the questions in [Try it in two minutes](#try-it-in-two-minutes).
 
-```bash
-python scripts/replay_workspace.py --graph company_demo
-```
+![Blast radius on the ask page at one hop, then two hops out: the depth in the path header changes, and the invoice worker appears through Billing and Notifications.](docs/images/05-blast-radius.png)
 
-That is the complete local setup the rules accept in place of a live deployment: Docker, Python 3.11 or newer, and the two commands above. Verified from a clean clone on Python 3.13 with only `requirements.txt` installed.
+If the thing you named is not in the graph, it says so and offers the nearest matches. It never guesses.
 
-The interface is Slack. Create the app from [`slack_app/manifest.yaml`](slack_app/manifest.yaml) and follow [docs/SLACK.md](docs/SLACK.md). The same read-only catalogue is also a page at [http://localhost:8000/](http://localhost:8000/), which draws the path behind each answer and runs the same questions with the graph switched off. Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health). Graph browser: [http://localhost:3000](http://localhost:3000).
+![The refusal on the ask page: nothing in the graph matches “payments gateway” as one thing, the nearest names, and no path.](docs/images/03-refusal.png)
+
+Engineering was first; any team joins the same graph from one TOML file. A `Service` node has a `kind`, so a Sales team's renewals process, the CRM it depends on and its pricing playbook answer the same questions as the billing service, worded for what they are: a process stalls, a playbook no longer applies. The import only merges, and people Slack already knows are matched by email, never duplicated. Every read-only tool is also served over MCP and returns the path it walked. See [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md).
 
 ## Graph data model
 
 A `Service` node is anything a team owns: a service, a system, a process, a product, an account, a policy or a playbook. Its `kind` changes only how replies read ("the Renewals process stalls", "the Refund policy is owned by ...").
+
+![The FalkorDB Browser on the replay graph: Billing Service in the centre with its DEPENDS_ON, OWNS and TOUCHES edges, and two Memory nodes that MENTION it.](docs/images/02-browser-graph.png)
 
 ```mermaid
 flowchart LR
@@ -181,7 +177,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a small schema: `tool`, an enum of the catalogue's names, and `args`, the chosen tool's arguments as JSON text (each tool's argument names, types and bounds are in the prompt, because the structured-output API rejects integer bounds and refuses the union of every tool's arguments as too complex). The choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
 
-**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (92 of them on 18 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (94 of them on 18 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; the risk map's optional id filter, the fixed text `AND s.id IN $ids` with the ids passed as a parameter; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |
@@ -564,6 +560,10 @@ MATCH (u:GitHubUser {id: $user}), (r:Repo {id: $repo}) MERGE (u)-[c:CAN_READ]->(
 curl -s -H "Authorization: Bearer $BRAIN_ADMIN_TOKEN" "https://brain.noobsurd.space/api/proof?format=text"
 ```
 
+The ask page runs the same report without a token for the company-wide scope, through `GET /api/ask/proof`, and shows it in its "Take FalkorDB out" section.
+
+![The proof table from GET /api/proof: five capabilities collapse without the graph, and the refusal stays a refusal.](docs/images/06-proof-table.png)
+
 ### Onboarding a team
 
 Any team joins the same graph from one TOML file: the team, its members, what it runs (each a `Service` with a `kind`), and its decisions. The [template](docs/templates/team.example.toml) is written for people who do not write code, and [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md) walks through it. `POST /ops/import` takes the file behind the admin token and returns what it created. The import is merge-only: importing the same file again creates nothing and deletes nothing.
@@ -617,6 +617,46 @@ async with create_mcp_http_client() as http:
 The mapping is `src/domain/knowledge/mcp_tools.py`; the mount, caller gate and session lifespan are `src/api/mcp.py`. `tests/integration/test_mcp_server.py` runs this exact exchange against a local server.
 
 **Before a coding agent edits a service**, it can ask for the reading list: `session.call_tool("reading_list", {"name": "invoice worker"})` returns the documents on the service and on everything it depends on, nearest first, the decisions that stand about them and what each rests on, and who owns what nothing documents. On Quillfern that is the invoice format spec, the billing runbook and the auth session design, the billing retries decision with TKT-102, and Lena Fischer and Sara Lindqvist for the notification service and Postgres. Every line comes with the edges it was read from, so the agent can cite why it read what it read.
+
+## Run it locally
+
+```bash
+docker compose up -d
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python scripts/seed_graph.py
+uvicorn src.main:app --reload
+```
+
+To see the seven demo answers with no Slack app and no model key, run the synthetic company through the real routes against a local fake of the Slack API. It seeds the fictional Quillfern into a graph of its own and prints every reply with the edges it walked:
+
+```bash
+python scripts/replay_workspace.py --graph company_demo
+```
+
+That is the complete local setup the rules accept in place of a live deployment: Docker, Python 3.11 or newer, and the two commands above. Verified from a clean clone on Python 3.13 with only `requirements.txt` installed.
+
+The interface is Slack. Create the app from [`slack_app/manifest.yaml`](slack_app/manifest.yaml) and follow [docs/SLACK.md](docs/SLACK.md). The same read-only catalogue is also a page at [http://localhost:8000/](http://localhost:8000/), which draws the path behind each answer and runs the same questions with the graph switched off. Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health). Graph browser: [http://localhost:3000](http://localhost:3000).
+
+## Docs
+
+- What to build: [docs/PROBLEM.md](docs/PROBLEM.md)
+- Hackathon strategy (rules, judges, competitors, build order): [docs/STRATEGY.md](docs/STRATEGY.md)
+- Blog post outline: [docs/BLOG.md](docs/BLOG.md)
+- Pitch deck, slide by slide: [docs/PITCH.md](docs/PITCH.md)
+- Site design brief: [docs/DESIGN.md](docs/DESIGN.md)
+- How to run the graph: [docs/SETUP.md](docs/SETUP.md)
+- Onboard any team from one file: [docs/ONBOARDING-TEAMS.md](docs/ONBOARDING-TEAMS.md)
+- Slack app and permissions: [docs/SLACK.md](docs/SLACK.md)
+- GitHub App ingestion: [docs/GITHUB.md](docs/GITHUB.md)
+- What is built and what is next: [docs/SLACK.md#what-is-next](docs/SLACK.md#what-is-next)
+- Production deploy, CI/CD and operations: [docs/DEPLOY.md](docs/DEPLOY.md)
+- Replay the synthetic company for a demo or a test: [docs/SETUP.md](docs/SETUP.md#replay-the-synthetic-company)
+
+## AI assistance
+
+AI assistance: parts of this project were written with Claude Code (Anthropic), including the production infrastructure, deploy pipeline and their docs.
 
 ## License
 
