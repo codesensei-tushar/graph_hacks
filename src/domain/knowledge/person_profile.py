@@ -23,6 +23,7 @@ It is also the fallback where ``who_knows``, ``who_owns``, ``onboarding_brief`` 
 service or a team, so ``profile_if_person`` answers it instead of the refusal.
 """
 
+import re
 from dataclasses import dataclass, field
 
 from src.db.falkordb_client import connect
@@ -90,6 +91,9 @@ def person_profile(question: str, scopes: list[str]) -> ToolResult:
         return ToolResult(tool=TOOL, answer=resolve.describe_miss(resolution, "person"), found=False, candidates=resolution.candidate_names())
     result = profile_of(graph, resolution.entity, scopes)
     result.candidates = resolution.candidate_names()
+    if (question or "").startswith(people.PERSON_REF) and resolution.entity.label == "Person":
+        # The asker, named by the Slack turn: told to them as "you".
+        in_second_person(result, resolution.entity)
     return result
 
 
@@ -152,6 +156,43 @@ def profile_of(graph, person: Entity, scopes: list[str]) -> ToolResult:
     result.memories = _said(graph, person, params)
     result.answer = " ".join(parts)
     return result
+
+
+# Each sentence's opening, as the asker reads it about themselves.
+_SECOND_PERSON = (
+    ("Owns ", "You own "), ("Works on ", "You work on "), ("Knows ", "You know "), ("Wrote ", "You wrote "),
+    ("Pull requests: ", "Your pull requests: "), ("Open tickets: ", "Your open tickets: "), ("Works most with ", "You work most with "),
+    ("Proposed ", "You proposed "), ("Approved ", "You approved "),
+)
+_INNER_VERBS = ((", and knows ", ", and know "), (" and knows ", " and know "), (", and works on ", ", and work on "), (" and works on ", " and work on "))
+
+
+def in_second_person(result: ToolResult, person: Entity) -> ToolResult:
+    """The profile told to the person it is about ("what team am I on"): "You're on Payments. You own ..."."""
+    first = person.name.split()[0]
+    sentences = []
+    for sentence in _sentences(result.answer):
+        if sentence.startswith(f"{person.name} is the "):
+            sentence = "You're the " + sentence[len(f"{person.name} is the ") :]
+        elif sentence.startswith(f"{person.name} is "):
+            sentence = "You're " + sentence[len(f"{person.name} is ") :]
+        for opening, mine in _SECOND_PERSON:
+            if sentence.startswith(opening):
+                sentence = mine + sentence[len(opening) :]
+                for theirs, yours in _INNER_VERBS:
+                    sentence = sentence.replace(theirs, yours)
+                break
+        sentence = sentence.replace(f" on {first} alone; ask “what if {first} leaves”.", " on you alone; ask “what if I leave”.")
+        sentence = sentence.replace(f"Nothing rests on {first} alone.", "Nothing rests on you alone.")
+        sentence = sentence.replace("Nothing else is linked to them yet.", "Nothing else is linked to you yet.")
+        sentences.append(sentence)
+    result.answer = " ".join(sentences)
+    return result
+
+
+def _sentences(text: str) -> list[str]:
+    """The answer's sentences: each ends at ". " before a capital or a quote."""
+    return [part for part in re.split(r"(?<=[.”])\s+(?=[A-Z“*])", text) if part]
 
 
 # --- an account a connected tool knows -------------------------------------------------------

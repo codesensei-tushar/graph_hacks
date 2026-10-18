@@ -393,6 +393,14 @@ class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("who owns the enterprise accounts")[0], "who_owns")
         self.assertEqual(ask_service.route("list the services in payments"), ("find", {"label": "Service", "team": "payments"}))
 
+    def test_a_bare_key_and_whats_open_in_a_project(self):
+        self.assertEqual(ask_service.route("PAY-999"), ("ticket_status", {"name": "PAY-999"}))
+        self.assertEqual(ask_service.route("PLAT-7?"), ("ticket_status", {"name": "PLAT-7?"}))
+        self.assertNotEqual(ask_service.route("utf-8")[0], "ticket_status")
+        self.assertNotEqual(ask_service.route("PR-45")[0], "ticket_status")
+        self.assertEqual(ask_service.route("what's open in PLAT"), ("find", {"label": "Ticket", "state": "open", "project": "PLAT"}))
+        self.assertEqual(ask_service.route("what is open in the PAY project"), ("find", {"label": "Ticket", "state": "open", "project": "PAY"}))
+
     def test_other_ticket_questions_keep_their_tools(self):
         cases = {
             "who knows about TKT-102": "who_knows",
