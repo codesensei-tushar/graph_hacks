@@ -73,3 +73,18 @@ class FakeGitHubClient:
     def list_issues(self, full_name: str, limit: int) -> list[dict]:
         repo = self._repos[full_name]
         return [issue_payload(repo, issue) for issue in repo.issues][:limit]
+
+    # The paged calls the stepped backfill makes (src/domain/github/backfill.py).
+
+    def get_repo(self, full_name: str) -> dict:
+        return repo_payload(self._repos[full_name])
+
+    def pull_requests_page(self, full_name: str, page: int, per_page: int, sort: str = "created") -> tuple[list[dict], bool]:
+        return _page(self.list_pull_requests(full_name, 10_000), page, per_page)
+
+    def issues_page(self, full_name: str, page: int, per_page: int, since: str | None = None) -> tuple[list[dict], bool]:
+        return _page(self.list_issues(full_name, 10_000), page, per_page)
+
+
+def _page(items: list[dict], page: int, per_page: int) -> tuple[list[dict], bool]:
+    return items[(page - 1) * per_page : page * per_page], page * per_page < len(items)

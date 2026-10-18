@@ -170,6 +170,18 @@ An owner or admin clicks **Connect** in the console.
 | `account_claimed` | Another org already reads this Jira site or HubSpot portal |
 | `oauth_failed` | Anything else: the code exchange or the account lookup failed, the consent covers no Jira site on atlassian.net, or the app's client id or secret is missing. The backend logs the failure type, never its text. |
 
+## GitHub
+
+GitHub is a GitHub App, not OAuth. The operator registers the app once from `/ops/github/app` (the manifest flow; credentials are stored encrypted in the control graph). Each company then connects its own GitHub account from the console.
+
+- `GET /console/api/github`: `{app: {available, connect}, installations: [{id, account, account_type, status, backfill_limit, repos: [{full_name, private, status, pull_requests, issues, last_error}], manage_url}]}`.
+- `POST /console/api/github/connect` (owners and admins, browser sessions only): `{install_url}`.
+- GitHub returns to `/console/oauth/github/setup`, then through a GitHub sign-in to `/console/oauth/github/verify`. The state is bound to the session and the org and used once. The sign-in proves the person can reach the installation (`GET /user/installations`), so a typed `installation_id` cannot bind someone else's install.
+- `POST /console/api/github/installations/{id}/sync` with `{backfill?: "all" | N}`; `DELETE /console/api/github/installations/{id}` answers `{uninstall_url}`.
+- Public repos, with no installation: `/console/api/github/public-repos` (GET, POST `{repo, backfill}`, POST `/{id}/sync`, DELETE `/{id}`).
+
+Callback errors redirect to `/console/github?error=github_state|github_denied|github_not_yours|account_claimed|github_failed`. Details, webhook routing and the operator's routes are in [GITHUB.md](GITHUB.md).
+
 ## Teams
 
 A new org's graph starts with its Company node (`{id: <org slug>, name: <org name>}`); every team

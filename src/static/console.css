@@ -115,6 +115,7 @@ a.conn-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
 .tile.jira { --c: var(--person); }
 .tile.hubspot { --c: var(--service); }
 .tile.slack { --c: var(--knowledge); }
+.tile.github { --c: var(--ink-2); }
 .conn-note { margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
 table.tools td.restricted { color: var(--ink); font-weight: 500; }
 .tile.lg { width: 52px; height: 52px; border-radius: 14px; font-size: var(--fs-lg); }
@@ -290,7 +291,7 @@ textarea.team-file { min-height: 220px; padding: 12px 14px; line-height: 1.55; r
 .person-done { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--ink-2); font-size: var(--fs-md); }
 .person-done b { color: var(--ink); font-weight: 600; }
 .person-done .link-btn { margin-left: 6px; font-size: var(--fs-sm); }
-.tile.jira, .tile.hubspot, .tile.slack { flex: none; }
+.tile.jira, .tile.hubspot, .tile.slack, .tile.github { flex: none; }
 
 /* Connections: a tool card or page with accounts to link. */
 .conn-nudge { margin: 0; font-size: var(--fs-sm); color: var(--service); }

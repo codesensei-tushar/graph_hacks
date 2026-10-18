@@ -11,6 +11,7 @@
   let me = null;
   let watcher = null;
   let slackCard = null; // the workspace card, once /console/api/slack answers
+  let githubCard = null; // the GitHub card, once /console/api/github answers
   let unlinkedBy = {}; // connection id -> accounts linked to no person (admins only)
   let lastConnections = null;
 
@@ -30,7 +31,8 @@
     }
   }
 
-  const slackFirst = () => (slackCard ? [slackCard] : []);
+  // Slack, then GitHub, ahead of the connector cards.
+  const slackFirst = () => [slackCard, githubCard].filter(Boolean);
 
   // The Slack workspace: whether the app is in, where it lives, how many channels it reads, when
   // it last heard anything, and Reinstall. A console without that route simply has no card.
@@ -71,6 +73,48 @@
       if (!list.hasAttribute("aria-busy") && list.firstElementChild !== slackCard) list.prepend(slackCard);
     } catch (error) {
       slackCard = null;
+    }
+  }
+
+  // GitHub: its connected accounts and public repos, and a link to its page (/console/github).
+  function githubItem(github, publicRepos) {
+    const link = el("a", { class: "conn-card", href: "/console/github" });
+    const head = el("div", { class: "conn-head" });
+    const names = el("span", { class: "grow" });
+    const accounts = (github.installations || []).map((item) => item.account).filter(Boolean);
+    names.append(el("b", {}, "GitHub"), el("span", { class: "conn-site" }, accounts.join(", ") || "Pull requests, reviews and issues"));
+    head.append(C.tile("github"), names);
+    link.append(head);
+    const repos = [...(github.installations || []).flatMap((item) => item.repos || []), ...((publicRepos && publicRepos.repos) || [])];
+    const pulls = repos.reduce((sum, repo) => sum + (repo.pull_requests || 0), 0);
+    const stats = el("p", { class: "conn-stats" });
+    for (const [n, one, many] of [[pulls, "pull request", "pull requests"], [repos.length, "repo", "repos"]]) {
+      const span = el("span");
+      span.append(el("b", {}, C.fmt(n)), ` ${n === 1 ? one : many}`);
+      stats.append(span);
+    }
+    const reading = repos.some((repo) => repo.status === "backfilling" || repo.status === "waiting");
+    const state = el("div", { class: "conn-state" });
+    state.append(C.pill(!repos.length ? { tone: "warn", text: "Not connected" } : reading ? { tone: "busy", text: "Backfilling" } : { tone: "ok", text: "Up to date" }), stats);
+    link.append(state);
+    const foot = el("div", { class: "conn-foot" });
+    foot.append(el("span", {}, "Private repos only in DMs, for their collaborators."));
+    foot.append(el("span", { class: "go" }, repos.length ? "Manage →" : "Connect →"));
+    link.append(foot);
+    const item = el("li");
+    item.append(link);
+    return item;
+  }
+
+  async function loadGitHub() {
+    try {
+      const [github, publicRepos] = await Promise.all([C.api("GET", "/console/api/github"), C.api("GET", "/console/api/github/public-repos")]);
+      const fresh = githubItem(github || {}, publicRepos);
+      if (githubCard && githubCard.parentNode) githubCard.replaceWith(fresh);
+      githubCard = fresh;
+      if (!list.hasAttribute("aria-busy") && !fresh.parentNode) (slackCard && slackCard.parentNode ? slackCard.after(fresh) : list.prepend(fresh));
+    } catch (error) {
+      githubCard = null;
     }
   }
 
@@ -228,6 +272,7 @@
       return render(connections || []);
     }, $("#poll-note"));
     loadSlack();
+    loadGitHub();
     nudgeTeams();
     loadUnlinked();
     load();
