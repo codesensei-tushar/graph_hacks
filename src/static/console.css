@@ -95,6 +95,8 @@ a.conn-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
 .conn-head .grow { flex: 1; min-width: 0; }
 .conn-head b { display: block; font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em; }
 .conn-site { display: block; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.conn-grid > .empty { grid-column: 1 / -1; }
 .conn-stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font: var(--fs-sm)/1.4 var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .conn-stats b { color: var(--ink); font-weight: 500; }
 .conn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--ink-3); }
@@ -229,6 +231,12 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
 .prose b { color: var(--ink); font-weight: 600; }
 
 @media (max-width: 760px) {
+  /* The console keeps its two links on a phone; the brand keeps its mark. */
+  .console .top nav { display: flex; justify-content: flex-start; gap: 2px; }
+  .console .top nav a { padding: 10px 8px; }
+  .console .top .wrap { gap: 10px; }
+  .console .brand-name { display: none; }
+  .console .top-signin { padding: 0 10px; }
   .console-main .page-head { padding-top: 32px; }
   .conn-grid, .connector-list { grid-template-columns: minmax(0, 1fr); }
   .setup-step { grid-template-columns: minmax(0, 1fr); padding: 18px 16px; }
