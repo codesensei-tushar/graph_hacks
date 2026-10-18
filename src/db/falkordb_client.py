@@ -23,18 +23,40 @@ query passes through. It does two things and forwards everything else untouched:
   A hook that raises is logged and skipped; it never fails or changes the query.
 
 - **Writes need an org.** A graph handed out with no org in context (the legacy fallback) refuses
-  a write (``CREATE``, ``MERGE``, ``SET``, ``DELETE``, ``REMOVE``, or ``delete()``) with
-  ``NoOrgContext`` while ``TENANCY_WRITE_STRICT`` is set (production): a code path that forgot
-  its org must not write another org's data into the legacy graph. Reads keep the fallback.
+  a write with ``NoOrgContext`` while ``TENANCY_WRITE_STRICT`` is set (production): a code path
+  that forgot its org must not write another org's data into the legacy graph. Reads keep the
+  fallback. ``ro_query`` is always a read. A ``query`` is judged by its text: it is a write when
+  it has a write keyword (``CREATE``, ``MERGE``, ``SET``, ``DELETE``, ``REMOVE``, ``DROP``), so a
+  read sent through ``query`` passes. ``delete()`` is a write.
 
 It also keeps each graph's **generation**: a counter in Redis that every ``query`` changing
 something (nodes, edges, properties, labels) and every ``delete`` bumps. Caches of what a graph
 holds (the answer cache) put ``generation(name)`` in their key, so a write anywhere, in any
 process, makes them read again: a disconnected tool's data is not served from a cache after its
 nodes are deleted. Within ``generation_snapshot()`` (one question) Redis is asked once per graph.
+
+The connection (``client()``) is bounded on every side, so a stuck or restarted FalkorDB costs
+a request seconds, never a worker:
+
+- connecting gives up after ``SOCKET_CONNECT_TIMEOUT`` (2 s);
+- a reply gives up after ``SOCKET_TIMEOUT`` (15 s): a few seconds past the server's own read
+  ``TIMEOUT`` (10 s, docker-compose.yml), so FalkorDB's "Query timed out" arrives first and the
+  socket limit only catches a server that stopped answering. Writes are not cut off by the
+  server, so a write still running after 15 s raises ``TimeoutError`` here while the server
+  finishes it; set ``FALKORDB_SOCKET_TIMEOUT`` higher for a bulk job that needs longer;
+- an idle connection is PINGed before reuse after ``HEALTH_CHECK_INTERVAL`` (30 s), so a
+  connection the server or a NAT dropped is replaced instead of failing the next query;
+- at most ``MAX_CONNECTIONS`` (64) connections; a caller beyond that waits up to
+  ``POOL_TIMEOUT`` (5 s) for one, then gets ``ConnectionError``;
+- nothing is retried at the connection level (redis-py's default retries every command three
+  times on a connection error or socket timeout): a write whose reply was lost may have been
+  applied, and sending it again could apply it twice; a read that timed out would only double
+  the load of the query that just ran too long. A connection dropped while idle is caught by
+  the health check, whose PING (and the reconnect after it) gets one more try (``CommandsOnce``).
 """
 
 import logging
+import os
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -46,6 +68,9 @@ from typing import Any
 
 from falkordb import FalkorDB
 from redis.exceptions import ResponseError
+from redis import BlockingConnectionPool
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 from src.core.config import settings
 
@@ -158,15 +183,20 @@ def _run_hooks(hooks: list[QueryHook], call: QueryCall) -> None:
 class _GraphProxy:
     """A FalkorDB graph whose ``query`` and ``ro_query`` take the context's timeout and run the hooks.
 
-    Every other attribute (``name``, ``delete``, ``explain``, ...) is the wrapped graph's own.
+    Every other attribute (``name``, ``explain``, ...) is the wrapped graph's own. ``tracked``
+    graphs bump their generation on changing writes and on ``delete``; a scratch graph is not
+    tracked, so it leaves no generation key behind.
     """
 
-    def __init__(self, graph, implicit_org: bool = False) -> None:
+    def __init__(self, graph, tracked: bool = True, implicit_org: bool = False) -> None:
         self._graph = graph
+        self._tracked = tracked
         # Handed out with no org in context: the legacy org's graph by fallback, not by choice.
         self._implicit_org = implicit_org
 
     def _check_write(self, q: str | None) -> None:
+        """Under ``TENANCY_WRITE_STRICT``, refuse a write on a graph the fallback chose. A ``query`` is a
+        write when its text has a write keyword (``_WRITE``): reads sent through ``query`` pass."""
         if self._implicit_org and settings.tenancy_write_strict and (q is None or _WRITE.search(q)):
             from src.core.tenancy import NoOrgContext
 
@@ -187,7 +217,8 @@ class _GraphProxy:
         try:
             return self._graph.delete()
         finally:
-            bump_generation(getattr(self._graph, "name", ""))
+            if self._tracked:
+                bump_generation(getattr(self._graph, "name", ""))
 
     def _run(self, method: str, q: str, params, timeout, kwargs):
         timeout = _timeout_for(timeout)
@@ -197,7 +228,8 @@ class _GraphProxy:
         try:
             call.result = getattr(self._graph, method)(q, params, timeout=timeout, **kwargs)
             if method == "query" and _changed(call.result):
-                bump_generation(call.graph)
+                if self._tracked:
+                    bump_generation(call.graph)
             return call.result
         except BaseException as error:
             call.error = error
@@ -207,9 +239,48 @@ class _GraphProxy:
             _run_hooks(AFTER_QUERY, call)
 
 
+SOCKET_CONNECT_TIMEOUT = 2.0
+SOCKET_TIMEOUT = float(os.getenv("FALKORDB_SOCKET_TIMEOUT", "15"))
+HEALTH_CHECK_INTERVAL = 30
+MAX_CONNECTIONS = 64
+POOL_TIMEOUT = 5
+
+
+class CommandsOnce(Retry):
+    """No command is sent twice; the health-check PING and the socket connect, which change
+    nothing on the server, get one more try, so a connection that went stale while idle is
+    replaced before the command goes out instead of failing it."""
+
+    SAFE = frozenset({"_send_ping", "_connect"})
+
+    def __init__(self) -> None:
+        super().__init__(NoBackoff(), 0)
+
+    def call_with_retry(self, do, fail, is_retryable=None, with_failure_count=False):
+        if getattr(do, "__name__", "") in self.SAFE:
+            return Retry(NoBackoff(), 1).call_with_retry(do, fail, is_retryable, with_failure_count)
+        return super().call_with_retry(do, fail, is_retryable, with_failure_count)
+
+
+def pool() -> BlockingConnectionPool:
+    """The bounded pool every FalkorDB and Redis call shares (see the module docstring)."""
+    return BlockingConnectionPool(
+        max_connections=MAX_CONNECTIONS,
+        timeout=POOL_TIMEOUT,
+        host=settings.falkordb_host,
+        port=settings.falkordb_port,
+        password=settings.falkordb_password or None,
+        decode_responses=True,
+        socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
+        socket_timeout=SOCKET_TIMEOUT,
+        health_check_interval=HEALTH_CHECK_INTERVAL,
+        retry=CommandsOnce(),
+    )
+
+
 @lru_cache(maxsize=1)
 def client() -> FalkorDB:
-    return FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port, password=settings.falkordb_password or None)
+    return FalkorDB(connection_pool=pool())
 
 
 def graph_name() -> str:
@@ -262,6 +333,13 @@ def connect():
     implicit = current_org_or_none() is None
     db = client()
     return db, _GraphProxy(db.select_graph(graph_name()), implicit_org=implicit)
+
+
+def scratch_graph(name: str):
+    """A throwaway graph (an algorithm's working copy) behind the same proxy as ``connect()``'s, so
+    its queries take the context's timeout and are seen by the hooks. Not tracked: its writes keep
+    no generation key in Redis. The caller deletes it."""
+    return _GraphProxy(client().select_graph(name), tracked=False)
 
 
 def kv():

@@ -168,6 +168,37 @@ An owner or admin clicks **Connect** in the console.
 | `account_claimed` | Another org already reads this Jira site or HubSpot portal |
 | `oauth_failed` | Anything else: the code exchange or the account lookup failed, the consent covers no Jira site on atlassian.net, or the app's client id or secret is missing. The backend logs the failure type, never its text. |
 
+## Teams
+
+A new org's graph starts with its Company node (`{id: <org slug>, name: <org name>}`); every team
+it imports or onboards from Slack joins it. `src/api/v1/console_teams.py`:
+
+- `POST /console/api/teams/import` (owners and admins; JSON, CSRF): `{"file": "<team file TOML>", "check": false}`.
+  The file is the one `/ops/import` takes (docs/ONBOARDING-TEAMS.md), with the same 256 KiB limit and
+  the same checks against the org's graph. `check: true` writes nothing.
+  - 200 check: `{mode: "check", company, team, contents, counts: {people, runs: {<kind>: n}, decisions}}`
+  - 200 merge: the same plus `mode: "merge"`, `nodes`, `nodes_created`, `edges_created`, `properties_set`
+  - 400 `{error: "refused", problems: [...]}` (nothing written); 413 `{error: "too_large", limit_bytes}`
+- `GET /console/api/teams` (members): `{teams: [{id, name, summary, members: [{id, name, role}],
+  runs: [{id, name, kind, owners: [{id, name}]}]}]}`, what the member could read in a Slack DM.
+
+## People
+
+Jira often hides emails, so many synced accounts link to no person. `src/api/v1/console_people.py`
+(owners and admins) lets the org link them; this replaces `CONNECTOR_*_PEOPLE` for console orgs.
+
+- `GET /console/api/people/unlinked`: `{unlinked: [{id, name, source: "jira"|"hubspot", items,
+  suggestions: [{person_id, name, reason: "same_name"|"same_email_domain"}]}], people: [{id, name}]}`.
+  At most 500 accounts, most active first; at most 5 suggestions each; public mail domains suggest
+  nobody. No email or domain is ever returned. Apps and bots are left out (`is_bot`, `account_type`
+  app/bot/customer, Jira accountIds under `557058:`, "Automation for Jira") and cannot be linked.
+- `POST /console/api/people/link` (JSON, CSRF) `{external_user_id, person_id}`: writes
+  `(:ExternalUser)-[:IS {via: "admin", by, at}]->(:Person)` and moves the account's OWNS/WORKED_ON
+  onto the person. Audited as `people.link`. 200 `{ok, external_user_id, person: {id, name}, changed}`;
+  404 unknown account or person (in this org); 409 when the account is already linked by email.
+  An admin link can be corrected by linking again. Like an email link, it lets the person read, in a
+  DM, the restricted Jira projects the account can read.
+
 ## Tokens at run time
 
 Connectors get their bearer token from `src/connectors/oauth.py`'s `bearer_for(install)`:

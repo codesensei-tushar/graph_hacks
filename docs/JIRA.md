@@ -102,6 +102,14 @@ API as `accountId`:
 
 After changing the mapping, run a full sync (below) so accounts already written are linked again.
 
+**People and Services that arrive later.** An account is linked, and a ticket's components are
+resolved to Services, only when the ticket is written. A Jira poll rewrites only issues that
+changed, so it does not link them (unlike HubSpot, whose every poll re-sends every owner).
+A team file import (`/ops/import`, the console) or `onboard team:` that adds people or
+Services therefore queues a full sync of each of the org's connectors. The full sync rewrites
+every synced ticket (each project is capped at 1000) against the People and Services that exist
+by then.
+
 ## Freshness
 
 The sync runs on the app's scheduler, one page of up to 100 issues per step:

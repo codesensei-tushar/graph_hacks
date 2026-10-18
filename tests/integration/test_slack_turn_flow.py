@@ -88,6 +88,27 @@ class SlackTurnFlowTest(unittest.TestCase):
         self.assertIn("ack", names)
         self.assertIn("brain", names)
 
+    def test_a_graph_timeout_is_answered_with_a_sentence_not_an_error(self):
+        """FalkorDB's "Query timed out" inside the turn is the tool_guard sentence in the thread, logged in one
+        warning line with no traceback, not "Sorry, I hit an error" and a logged exception."""
+        from redis.exceptions import ResponseError
+
+        from src.domain.knowledge import tool_guard
+
+        ev = self._event(self.alice, "<@UBOT> how is billing connected to everything", kind="app_mention")
+        with (
+            mock.patch.object(turn_service, "compute_turn", side_effect=ResponseError("Query timed out")),
+            self.assertLogs(level="WARNING") as logged,
+        ):
+            turn_service.run_slack_turn(self.ws, ev)
+        self.assertEqual(self.slack.posts[-1][1], tool_guard.TIMEOUT_REPLY)
+        self.assertEqual(self.slack.posts[-1][2], ev.ts)
+        timeouts = [line for line in logged.output if "timed out" in line]
+        self.assertEqual(len(timeouts), 1, logged.output)
+        self.assertIn("[slack]", timeouts[0])
+        self.assertFalse([r for r in logged.records if r.exc_info], "a timeout is not logged with a traceback")
+        self.assertNotIn("turn failed", "\n".join(logged.output))
+
     def test_owner_can_stop_a_running_turn(self):
         thread_ts = self._ts()
         key = turn_control.slack_thread_turn_key(self.team, self.public, thread_ts)
