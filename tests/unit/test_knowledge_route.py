@@ -332,3 +332,36 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(algorithms.clamp_depth(99), algorithms.MAX_DEPTH)
         self.assertIsNone(algorithms.clamp_depth(None))
         self.assertIsNone(algorithms.clamp_depth("deep"))
+
+
+class PeopleTicketsAndBlocksRouteTest(unittest.TestCase):
+    def test_lists_by_person_go_to_find_with_the_person(self):
+        cases = {
+            "which accounts does Yash Patil own": {"label": "Service", "kind": "account", "owner": "Yash Patil"},
+            "what tickets are assigned to Om Sherikar": {"label": "Ticket", "person": "Om Sherikar"},
+            "which open tickets are assigned to Om Sherikar?": {"label": "Ticket", "state": "open", "person": "Om Sherikar"},
+            "which services does the payments team own": {"label": "Service", "team": "the payments team"},
+            "which tickets are blocked": {"label": "Ticket", "blocked": True},
+            "list blocked tickets": {"label": "Ticket", "blocked": True},
+        }
+        for question, args in cases.items():
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("find", args))
+
+    def test_one_ticket_and_what_is_asked_about_it_goes_to_ticket_status(self):
+        for question in ("what is PAY-12", "status of PAY-11", "is PAY-12 fixed", "who is working on PAY-11", "what blocks PAY-11", "what's the priority of PAY-11"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("ticket_status", {"name": question}))
+
+    def test_other_ticket_questions_keep_their_tools(self):
+        cases = {
+            "who knows about TKT-102": "who_knows",
+            "who should know about TKT-101": "who_knows",
+            "mentions of TKT-102": "search",
+            "everything on TKT-102": "explore",
+            "who should know about notebook#45": "who_should_know",
+            "what is PR-45": "who_knows",
+        }
+        for question, tool in cases.items():
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)

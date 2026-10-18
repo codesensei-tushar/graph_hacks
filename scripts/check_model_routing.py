@@ -119,6 +119,15 @@ QUESTIONS = [
     ("chain 2", "what's around the billing service", "explore", None),
     ("chain 3", "catch me up on what I missed this week", "what_changed", None),
     ("chain 4", "which tickets are open", "find", None),
+    # People only a connected tool knows, one ticket, and blocked tickets.
+    ("people 1", "which accounts does Yash Patil own", "find", None),
+    ("people 2", "what tickets are assigned to Om Sherikar", "find", None),
+    ("people 3", "what if Yash Patil leaves", "if_person_leaves", None),
+    ("ticket 1", "what is PAY-12", "ticket_status", None),
+    ("ticket 2", "is PAY-12 fixed", "ticket_status", None),
+    ("ticket 3", "who is working on PAY-11", "ticket_status", None),
+    ("ticket 4", "what blocks PAY-11", "ticket_status", None),
+    ("ticket 5", "which tickets are blocked", "find", None),
 ]
 
 

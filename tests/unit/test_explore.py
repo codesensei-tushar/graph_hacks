@@ -26,7 +26,7 @@ TOOL = {
     "what if {name} leaves": ("if_person_leaves", None),
     "who is on the {name} team": ("onboarding_brief", None),
     "why did we {lower}": ("decision_trace", None),
-    "what is {name} about": ("who_knows", None),
+    "what is {name} about": ("ticket_status", None),
 }
 # Names each key covers on the Quillfern seed and its Sales team: every kind a Service can have there.
 NAMES = {

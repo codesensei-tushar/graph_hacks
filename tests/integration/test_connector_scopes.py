@@ -49,7 +49,7 @@ class ConnectorScopeTest(unittest.TestCase):
                    (contractor:ExternalUser {id: 'jira:default:user:z9', name: 'Zed Contractor', source: 'jira', scope: 'org_internal'}),
                    (namesake:ExternalUser {id: 'jira:default:user:hidden', name: 'Arjun Mehta', source: 'jira', scope: 'org_internal'}),
                    (linked)-[:ASSIGNED]->(pay), (contractor)-[:OPENED]->(pay), (namesake)-[:OPENED]->(pay),
-                   (:Ticket {id: 'TKT-900', name: 'TKT-900', title: 'Ledger drift'})-[:ABOUT]->(ledger),
+                   (:Ticket {id: 'TKT-900', name: 'TKT-900', title: 'Books drift'})-[:ABOUT]->(ledger),
                    (:Ticket {id: 'github:1:issue:5000', name: 'app#5000', title: 'An issue', source: 'github'}),
                    (:Decision {id: 'decision-ledger', name: 'Close the books nightly', scope: 'org_shared'})-[:ABOUT]->(ledger)
             """
