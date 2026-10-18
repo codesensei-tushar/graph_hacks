@@ -120,7 +120,7 @@ STRONG_HIT = 1.5
 
 
 def _words(question: str) -> str:
-    return " ".join(word for word in resolve.tokens(question) if word not in resolve.STOPWORDS and word not in _ASKING_WORDS)
+    return " ".join(word for word in resolve.tokens(question) if len(word) > 1 and word not in resolve.STOPWORDS and word not in _ASKING_WORDS)
 
 
 def _titled(graph, question: str, scopes: list[str]) -> list[tuple[str, str, str, float]]:
@@ -162,6 +162,10 @@ def _not_a_ticket(question: str, scopes: list[str], miss: ToolResult, graph=None
     that key is shared with Company Brain."""
     from src.domain.knowledge import ask_service, fallback  # ask_service imports this module
 
+    match = HANDLE.search(question or "")
+    if graph is not None and match and coverage.project(graph, match.group(0).rsplit("-", 1)[0], scopes) is not None:
+        # The key of a project that is synced: the ticket is missing from it, whatever else the words name.
+        return ToolResult(tool=TOOL, answer=_unknown_key(graph, question, scopes), found=False, candidates=miss.candidates)
     tool, args = ask_service.route(question, tickets=False)
     answer = ask_service._ROUTED[tool](args, scopes) if tool not in ("none", TOOL) else fallback.before_refusing(question, scopes, miss)
     if answer.found or graph is None:

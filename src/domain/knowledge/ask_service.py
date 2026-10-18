@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, coordination, fallback, find, kinds, memories, resolve, ticket_status
+from src.domain.knowledge import algorithms, bridges, coordination, coverage, fallback, find, kinds, memories, resolve, ticket_status
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -466,6 +466,7 @@ def who_knows(question: str, scopes: list[str], context: str | None = None) -> T
         return fallback.before_refusing(question, scopes, _miss("who_knows", resolution))
     result = knowers(graph, resolution.entity, scopes)
     result.candidates = resolution.candidate_names()
+    result.answer += coverage.note_for(graph, scopes, result.path)
     return result
 
 

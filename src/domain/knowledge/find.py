@@ -445,6 +445,8 @@ _PIPELINE = re.compile(r"\b(?:deals?|(?:sales|deal) pipeline)\b", re.IGNORECASE)
 _CLOSED_STAGE = re.compile(r"\bclosed[ -]?(?:won|lost)\b", re.IGNORECASE)
 _ABOUT = re.compile(r"\b(?:about|for|on|touching|describing)\s+(.+?)\s*\??\s*$", re.IGNORECASE)
 _IN_TEAM = re.compile(r"\bin\s+(?:the\s+)?(.+?)(?:\s+team)?\s*\??\s*$", re.IGNORECASE)
+# A synced project by its key, written as the tracker writes it: "in PLAT", "in the PAY project".
+_PROJECT = re.compile(r"\b[Ii]n\s+(?:the\s+)?(?:[Jj]ira\s+)?(?:project\s+)?([A-Z][A-Z0-9]{1,9})(?:\s+project)?\s*\??\s*$")
 # Whose list it is: "tickets assigned to Om Sherikar", "accounts owned by Yash", "which accounts does Yash own".
 _BY_PERSON = re.compile(r"\b(?:assigned to|worked on by|owned by|opened by|held by)\s+(.+?)\s*\??\s*$", re.IGNORECASE)
 _DOES_PERSON = re.compile(r"\b(?:does|do)\s+(.+?)\s+(?:own|have|hold|handle|work on)\b", re.IGNORECASE)
@@ -499,6 +501,9 @@ def parse(question: str) -> dict:
         args[person_filter] = who.group(1)
     elif (about := _ABOUT.search(text)) and label in _ABOUT_FILTER:
         args[_ABOUT_FILTER[label]] = about.group(1)
+    elif label == "Ticket" and (project := _PROJECT.search(text)):
+        # "open tickets in PLAT", "tickets in the PAY project": a synced project by its key.
+        args["project"] = project.group(1)
     elif (team := _IN_TEAM.search(text)) and "team" in allowed and "stage" not in args:
         args["team"] = team.group(1)
     return args
