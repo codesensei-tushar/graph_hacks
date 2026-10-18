@@ -227,6 +227,8 @@ dialog.confirm .actions { justify-content: flex-end; margin: 4px 0 0; }
 
 .console-ask .askbar { margin: 0 0 20px; box-shadow: 0 1px 0 var(--highlight) inset, 0 24px 48px -32px var(--horizon); }
 .console-ask .answer { margin-top: 4px; }
+.console-ask .answer-empty { gap: 12px; }
+.console-ask .starters { justify-content: center; margin: 0; }
 
 /* --- Privacy --------------------------------------------------------------------------------- */
 

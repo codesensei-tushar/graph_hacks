@@ -64,7 +64,10 @@
     for (const family of ["person", "service", "knowledge", "other"]) {
       if (!seen.has(family)) continue;
       const item = el("li");
-      item.append(el("span", { class: "sw", style: `--c:${FAMILY_COLOR[family]}` }), names[family]);
+      // Styles go through the CSSOM, never a style attribute, so a page under a strict CSP draws the same.
+      const swatch = el("span", { class: "sw" });
+      swatch.style.setProperty("--c", FAMILY_COLOR[family]);
+      item.append(swatch, names[family]);
       list.append(item);
     }
     return list;
@@ -187,8 +190,8 @@
       viewBox: `0 0 ${totalWidth} ${totalHeight}`,
       role: "group",
       "aria-labelledby": `${titleId} ${descId}`,
-      style: `width:100%;height:auto;max-width:${totalWidth}px;min-width:${Math.min(totalWidth, 560)}px`,
     });
+    svg.style.cssText = `width:100%;height:auto;max-width:${totalWidth}px;min-width:${Math.min(totalWidth, 560)}px`;
     const caption = svgEl("title", { id: titleId });
     caption.textContent = `The path: ${edges.length} edge${edges.length === 1 ? "" : "s"} over ${nodes.length} nodes`;
     const desc = svgEl("desc", { id: descId });

@@ -44,6 +44,7 @@ PAGES = {
     "/console/connect/jira/site": "site.html",
     "/console/connectors/{connection_id}/projects": "projects.html",
     "/console/connectors/{connection_id}": "connection.html",
+    "/console/ask": "ask.html",
 }
 
 # The public header's link, hidden in the files; shown when the console runs.

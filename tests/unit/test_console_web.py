@@ -104,6 +104,23 @@ class StrictPageTest(unittest.TestCase):
             self.assertNotIn("insertAdjacentHTML", text, script.name)
             self.assertIsNone(re.search(r"https?://", text), script.name)
 
+    def test_shared_scripts_a_console_page_loads_set_no_style_attribute(self):
+        # graph.js, riskmap.js and answer.js draw the console's answers too; under the CSP a style
+        # attribute is dropped, so they style through the CSSOM (element.style) only.
+        loaded = {src for page in CONSOLE_PAGES for src in re.findall(r'<script src="/static/([^"?]+)', page.read_text())}
+        self.assertIn("graph.js", loaded)
+        for name in sorted(loaded):
+            text = (STATIC / name).read_text()
+            self.assertIsNone(re.search(r"""\bstyle:\s*[`"']|setAttribute\(\s*["']style""", text), name)
+
+    def test_console_nav_links_name_their_own_pages(self):
+        for page in CONSOLE_PAGES:
+            text = page.read_text()
+            if '<nav aria-label="Console">' not in text:
+                continue
+            self.assertIn('<a href="/console" data-nav="connections">Connections</a>', text, page.name)
+            self.assertIn('<a href="/console/ask" data-nav="ask">Ask</a>', text, page.name)
+
     def test_every_page_stamps_the_theme_before_its_stylesheets(self):
         for page in sorted(STATIC.glob("*.html")) + CONSOLE_PAGES:
             text = page.read_text()
