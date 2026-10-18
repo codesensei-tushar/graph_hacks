@@ -250,12 +250,12 @@ class CopyLinkTest(unittest.TestCase):
 
 
 class RiskMapTest(unittest.TestCase):
-    """The risk_map grid (riskmap.js) renders only when the answer carries a risk_map grid."""
+    """The grid table (riskmap.js) renders only when the answer carries a risk_map or person_profile grid."""
 
     def test_the_hook_is_guarded_and_sits_between_the_answer_text_and_the_path(self):
         app_js = (STATIC / "app.js").read_text()
         render = app_js[app_js.index("function render(data, question)"):]
-        hook = 'if (data.grid && data.grid.kind === "risk_map" && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });'
+        hook = 'if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: askFromPage });'
         self.assertEqual(app_js.count("RiskMap.render("), 1)
         self.assertLess(render.index("data.answer));"), render.index(hook))
         self.assertLess(render.index(hook), render.index("BrainGraph.renderPath("))

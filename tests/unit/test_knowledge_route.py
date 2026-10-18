@@ -170,6 +170,17 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("who actually works together")[0], "working_groups")
         self.assertEqual(ask_service.route("who owns billing")[0], "who_owns")
 
+    def test_who_signed_off_is_a_decision_and_summarising_a_team_is_its_brief(self):
+        for question in ("who approved moving the memory layer", "who proposed the billing retries", "who signed off on the graph store", "who decided to leave postgres"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("decision_trace", {"topic": question}))
+        for question in ("summarize the payments team", "summarise the sales team", "overview of the platform team", "tell me about the data team", "describe the payments team"):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("onboarding_brief", {"name": question}))
+        # A service is not a team, and "who knows" is still who_knows.
+        self.assertEqual(ask_service.route("tell me about the billing service")[0], "who_knows")
+        self.assertEqual(ask_service.route("who knows the memory layer")[0], "who_knows")
+
     def test_risk_across_the_company_is_the_risk_map_and_one_person_or_service_is_not(self):
         for question in (
             "what are our riskiest services",

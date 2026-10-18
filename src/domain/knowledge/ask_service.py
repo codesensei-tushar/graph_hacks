@@ -45,7 +45,8 @@ _RECALL = re.compile(r"\b(?:remember|recall|what did .+ say|who said|said|discus
 _BLAST = re.compile(
     r"\b(?:breaks?|goes down|outage|depends?|dependents?|rel(?:y|ies) on|blast|stops? if|stalls?|is down|happens if|affected if)\b", re.IGNORECASE
 )
-_DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b", re.IGNORECASE)
+# "who approved moving the memory layer" asks for the decision and its people, not who knows the layer.
+_DECISION = re.compile(r"\b(?:why|decisions?|decided?)\b|\bwho (?:approved|proposed|signed off on|decided)\b", re.IGNORECASE)
 _PRESSURE = re.compile(r"\b(?:still the last word|still current|still holds?|still stands|still valid|unchallenged|what landed after|left uncited)\b", re.IGNORECASE)
 _GROUPS = re.compile(
     r"\b(?:working groups?|de facto teams?|who (?:actually )?works together|work clusters?"
@@ -77,7 +78,8 @@ _BRIEF = re.compile(
     r"\b(?:just joined|i(?:'m| am) new (?:to|on)|new (?:to|on) the|brief me|onboard me|onboarding brief|up to speed)\b"
     r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b"
     r"|\bwhat (?:does|do) (?:the )?\w+(?: \w+)? team (?:own|run|do|work on|handle)\b|\bwhat (?:does|do) (?:the )?\w+ own\b"
-    r"|\bwho(?:'s| is| are)? (?:on|in) (?:the )?\w+(?: \w+)? team\b|\bmembers of (?:the )?\w+(?: \w+)? team\b",
+    r"|\bwho(?:'s| is| are)? (?:on|in) (?:the )?\w+(?: \w+)? team\b|\bmembers of (?:the )?\w+(?: \w+)? team\b"
+    r"|\b(?:summari[sz]e|overview of|tell me about|describe) (?:the )?\w+(?: \w+)? team\b",
     re.IGNORECASE,
 )
 # A change and the people it should reach: "who should know about notebook#45", "who else should
@@ -464,6 +466,13 @@ def risk_map(scopes: list[str]) -> ToolResult:
     return risk.risk_map(scopes)
 
 
+def person_profile(question: str, scopes: list[str]) -> ToolResult:
+    """Lives in ``person_profile.py``, which reads decisions and the bus factor. Kept here for the keyword router."""
+    from src.domain.knowledge import person_profile as profile
+
+    return profile.person_profile(question, scopes)
+
+
 def onboarding_brief(question: str, scopes: list[str]) -> ToolResult:
     """Lives in ``brief.py``, which reads the team page (and so the ask API). Kept here for the keyword router."""
     from src.domain.knowledge import brief
@@ -493,6 +502,7 @@ _ROUTED = {
     "decision_pressure": lambda args, scopes: decision_pressure(args["topic"], scopes),
     "working_groups": lambda args, scopes: algorithms.working_groups(scopes),
     "risk_map": lambda args, scopes: risk_map(scopes),
+    "person_profile": lambda args, scopes: person_profile(args["name"], scopes),
     "if_person_leaves": lambda args, scopes: if_person_leaves(args["name"], scopes),
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "reading_list": lambda args, scopes: reading_list(args["name"], scopes),
