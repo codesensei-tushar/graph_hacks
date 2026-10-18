@@ -9,7 +9,17 @@
 :root[data-theme="dark"] { --tour-dim: rgba(0, 0, 0, 0.55); }
 
 /* The hero's buttons, side by side at the foot. The tour button shows once tour.js is running. */
-.hero-foot-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* The tour button at the foot of the hero, bottom-right, as a ghost button. */
+.hero-foot {
+  position: absolute; left: 0; right: 0; bottom: 28px; width: min(var(--max), 100% - 2 * var(--gutter)); margin: 0 auto;
+  display: flex; justify-content: flex-end; align-items: end; gap: 8px;
+}
+.hero-foot .btn-ghost { min-height: 36px; font-size: var(--fs-sm); border-radius: 8px; }
+@media (max-width: 760px) {
+  /* Under the chips, in the room style.css keeps there for it on wide screens. */
+  .hero .ask-area { padding-bottom: 0; }
+  .hero-foot { position: static; width: 100%; margin-top: 14px; justify-content: flex-start; }
+}
 .tour-start[hidden] { display: none; }
 
 .tour-spot {
