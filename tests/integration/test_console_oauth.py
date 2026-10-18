@@ -67,6 +67,11 @@ class _Captured(logging.Handler):
         self.lines.append(record.getMessage())
 
 
+async def _fake_admin_session(request):
+    """Stands in for package A's async ``console_admin``."""
+    return ConsoleOAuthTest._session()
+
+
 class ConsoleOAuthTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -90,7 +95,7 @@ class ConsoleOAuthTest(unittest.TestCase):
             mock.patch.object(hubspot_oauth, "INTROSPECT_URL", f"{base}/oauth/2026-09/token/introspect"),
             mock.patch.object(hubspot_oauth, "SPEC", hubspot_spec),
             mock.patch.object(HubSpotConnector, "oauth", hubspot_spec),
-            mock.patch.object(console_oauth, "_admin_session", lambda request: cls._session()),
+            mock.patch.object(console_oauth, "_admin_session", _fake_admin_session),
             mock.patch.object(scheduler, "schedule"),
             mock.patch.object(sync, "MORE_DELAY_SECONDS", 0.0),
         ]
@@ -241,7 +246,10 @@ class ConsoleOAuthTest(unittest.TestCase):
         self.assertNotIn("jira-refresh", raw)
         self.assertEqual(orgs.external_account_org(f"jira:{CLOUD_ID}"), self.acme.id)
 
-        # The admin picks projects (package B's route); then the sync reads through bearer_for.
+        # The admin picks projects (package B's route) from every project the token can browse.
+        offered = registry.get("jira").available_containers(store.get_install(self.acme.id, install_id))
+        self.assertEqual([(c.key, c.external_id) for c in offered], [("HR", "10002"), ("PAY", "10000"), ("PLAT", "10001")])
+        # Then the sync reads through bearer_for.
         with tenancy.org_context(self.acme.id):
             store.update_config(install_id, {"projects": "PAY,PLAT"})
             store.set_status(install_id, "active")

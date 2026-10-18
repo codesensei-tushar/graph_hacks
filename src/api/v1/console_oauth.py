@@ -26,6 +26,7 @@ import urllib.parse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from src.connectors import oauth, registry
 from src.connectors.base import ConnectorError
@@ -47,15 +48,17 @@ def _state_key(state: str) -> str:
     return f"console:oauth:{hashlib.sha256(state.encode()).hexdigest()}"
 
 
-def _admin_session(request: Request):
-    """Package A's ``console_admin``: the signed-in owner or admin, with the org set in context."""
+async def _admin_session(request: Request):
+    """Package A's ``console_admin``: the signed-in owner or admin, with the org set in context.
+    Raises ``HTTPException`` (401 signed out, 403 not an admin, 404 console off); it also checks
+    CSRF and Origin on a mutation."""
     from src.domain.console.session import console_admin
 
-    return console_admin(request)
+    return await console_admin(request)
 
 
-def _admin(request: Request):
-    return _admin_session(request)
+async def _admin(request: Request):
+    return await _admin_session(request)
 
 
 def _connector(source: str):
@@ -73,7 +76,12 @@ def _csrf_ok(request: Request, session) -> bool:
     token = request.headers.get("x-csrf-token") or ""
     origin = request.headers.get("origin") or ""
     expected = getattr(session, "csrf", "") or ""
-    return bool(expected) and secrets.compare_digest(token, expected) and bool(settings.public_url) and origin == settings.public_url
+    return bool(expected) and _same(token, expected) and bool(settings.public_url) and origin == settings.public_url
+
+
+def _same(a: str, b: str) -> bool:
+    """Constant time, on bytes: ``compare_digest`` raises on a non-ASCII ``str`` from a header."""
+    return secrets.compare_digest(a.encode(), b.encode())
 
 
 @router.post("/console/api/connectors/{source}/connect")
@@ -129,23 +137,28 @@ def _session_hash(request: Request) -> str:
 
 
 @router.get("/console/oauth/{source}/callback")
-def callback(source: str, request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+async def callback(source: str, request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if not settings.console_enabled or source not in SOURCES:
         return JSONResponse({"error": "not_found"}, status_code=404)
-    record = _take_state(state) if state else None
+    record = await run_in_threadpool(_take_state, state) if state else None
     if record is None or record.get("source") != source:
         return _fail("oauth_state")
     browser = _session_hash(request)
-    if not browser or not secrets.compare_digest(browser, str(record.get("session") or "")):
+    if not browser or not _same(browser, str(record.get("session") or "")):
         return _fail("oauth_session")
     try:
-        session = _admin_session(request)
+        session = await _admin_session(request)
     except HTTPException:
         return _fail("oauth_session")
     if session.org != record.get("org") or getattr(session, "id_hash", "") != browser:
         return _fail("oauth_session")
     if error or not code:
         return _fail("oauth_denied" if error == "access_denied" else "oauth_failed")
+    return await run_in_threadpool(_complete, source, session, code)
+
+
+def _complete(source: str, session, code: str) -> RedirectResponse:
+    """Exchange the code and store the install: blocking calls, so on a worker thread."""
     connector = _connector(source)
     spec = getattr(connector, "oauth", None)
     if spec is None or not oauth.configured(spec):
