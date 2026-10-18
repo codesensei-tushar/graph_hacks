@@ -28,7 +28,7 @@ from src.db import falkordb_client  # noqa: E402
 from src.db.falkordb_client import connect  # noqa: E402
 from src.domain import orgs  # noqa: E402
 from src.domain.access import approvals  # noqa: E402
-from src.domain.access.roles import set_role  # noqa: E402
+from src.domain.access.roles import role_of, set_role  # noqa: E402
 from src.domain.knowledge import resolve  # noqa: E402
 from src.domain.memory.writeback import SlackMemoryScope  # noqa: E402
 from src.domain.onboarding import team_import  # noqa: E402
@@ -412,6 +412,32 @@ class OrgFollowUpsTest(unittest.TestCase):
             self.assertTrue(outcome.approval.summary.endswith("An owner or admin approves this."), outcome.approval.summary)
         with tenancy.org_context(tenancy.legacy_org()):
             self.assertFalse(turn_service._needs_org_admin("onboard_team"), "the demo keeps the asker's approval")
+
+    def test_the_console_orgs_creator_approves_without_having_installed_the_bot(self):
+        org = orgs.create_org("Creator Co", created_by="TCREATE:UCREATOR")
+        self.created.append(org)
+        orgs.route_team("TCREATE", org.id)
+        try:
+            with tenancy.org_context(org.ref()):
+                self.assertEqual(role_of("UCREATOR", env_roles=False), "owner")
+                self.assertEqual(role_of("UOTHER", env_roles=False), "member")
+                approval = approvals.insert_pending_approval(
+                    team_id="TDAYONE", channel="CPAY", thread_ts="1.3", asker_user="UPAULA", tool_name="onboard_team",
+                    tool_input={}, summary="Onboard", container_tag="org_shared",
+                )
+                self._decide(approval, "UCREATOR")
+                self.assertEqual(approvals.load_approval(approval.approval_id).status, "executed")
+            with tenancy.org_context(tenancy.legacy_org()):
+                self.assertNotEqual(role_of("UCREATOR", env_roles=False), "owner", "only in the org they made")
+        finally:
+            orgs.unroute_team("TCREATE")
+
+    def test_no_org_is_created_without_the_unique_slug_constraint(self):
+        with mock.patch.object(orgs, "_slug_constraint_ready", return_value=False), mock.patch.object(orgs, "ensure_control_indexes"):
+            with self.assertRaises(orgs.SlugConstraintMissing), self.assertLogs("src.domain.orgs", "ERROR"):
+                orgs.create_org("Unsafe Co", created_by="TF:UF")
+        self.assertEqual(tenancy.control_graph().query("MATCH (o:Org {name: 'Unsafe Co'}) RETURN count(o)").result_set, [[0]])
+        self.assertTrue(orgs._slug_constraint_ready())
 
     def test_a_person_known_by_a_handle_gets_their_slack_name_and_a_real_name_stays(self):
         org = self._org("Names Co")

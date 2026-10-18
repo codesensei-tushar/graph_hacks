@@ -73,11 +73,24 @@ class TeamDataTest(unittest.TestCase):
             ],
         )
 
-    def test_a_linked_person_known_by_a_handle_takes_the_slack_name_and_a_real_name_stays(self):
-        args = command_args("Sales | members: <@UAMY> <@UPRIYA>") | {"profiles": {"UAMY": "Amy Member", "UPRIYA": "Priya S."}}
-        lookup = FakeLookup(slack={"UAMY": "amy", "UPRIYA": "priya"})
-        lookup.linked_person = lambda user: {"UAMY": ("amy", "amy"), "UPRIYA": ("priya", "Priya Shah")}.get(user)
-        self.assertEqual([member["name"] for member in team_data(args, lookup)["members"]], ["Amy Member", "Priya Shah"])
+    def test_only_a_stored_name_that_is_the_users_slack_handle_takes_the_slack_name(self):
+        users = {
+            "UAMY": (("amy", "amy"), "Amy Member", "amy"),  # stored as the handle: replaced
+            "UPRIYA": (("priya", "Priya Shah"), "Priya S.", "priya"),
+            "UWANG": (("wang", "王伟"), "Wang Wei", "wang.wei"),
+            "UMADONNA": (("madonna", "madonna"), "Madonna Ciccone", "mciccone"),
+            "UJOSE": (("jose", "josé"), "José Ruiz", "jruiz"),
+        }
+        args = command_args("Sales | members: " + " ".join(f"<@{user}>" for user in users)) | {
+            "profiles": {user: row[1] for user, row in users.items()},
+            "handles": {user: row[2] for user, row in users.items()},
+        }
+        lookup = FakeLookup(slack={})
+        lookup.linked_person = lambda user: users[user][0] if user in users else None
+        self.assertEqual(
+            [member["name"] for member in team_data(args, lookup)["members"]],
+            ["Amy Member", "Priya Shah", "王伟", "madonna", "josé"],
+        )
 
     def test_owners_default_to_the_first_member_and_a_named_owner_joins_the_team(self):
         runs = team_data(self.args, self.lookup)["runs"]

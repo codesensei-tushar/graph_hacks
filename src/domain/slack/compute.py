@@ -269,9 +269,15 @@ def _onboard(request: TurnRequest, write_tag: str | None, names: dict[str, str])
         unlinked = set(onboard_command.unlinked_mentions(args, request.read_tags))
         # A new person may be named by their handle when Slack has nothing better; someone already
         # here keeps their name unless Slack has a real or display name for them.
-        args["profiles"] = {
-            user: name for user in onboard_command.mentioned_users(args) if (name := _profile_name(request.workspace, user, handle=user in unlinked))
-        }
+        args["profiles"], args["handles"] = {}, {}
+        for user in onboard_command.mentioned_users(args):
+            info = _profile(request.workspace, user)
+            if info is None:
+                continue
+            if name := info.real_name or info.display_name or (info.name if user in unlinked else None):
+                args["profiles"][user] = name
+            if info.name:
+                args["handles"][user] = info.name
         args["asker_slack_user_id"] = request.asker_slack_user_id
         args["channel_id"] = request.channel
         if decided_at := _epoch_millis(request.event.ts):
@@ -299,15 +305,16 @@ def _onboard_approver() -> str:
     return "" if tenancy.is_legacy() else " An owner or admin approves this."
 
 
-def _profile_name(workspace, slack_user_id: str, handle: bool = True) -> str | None:
-    """The name Slack shows for a full member: the real name, then the display name, then (with
-    ``handle``) the login handle. None for a bot, a guest, or a failed lookup."""
+def _profile(workspace, slack_user_id: str):
+    """A full member's Slack profile (real name, display name, login handle in ``name``); None for a
+    bot, a guest, or a failed lookup. Names prefer the real name, then the display name, and use the
+    handle only for someone new."""
     from src.domain.slack.workspace import is_workspace_member
 
     info = workspace.client.user_info(slack_user_id)
     if info is None or not is_workspace_member(info):
         return None
-    return info.real_name or info.display_name or (info.name if handle else None) or None
+    return info
 
 
 def _change_role(asker: str, text: str, raw_text: str, bot_user_id: str | None) -> str:

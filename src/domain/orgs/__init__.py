@@ -81,7 +81,29 @@ def ensure_control_indexes() -> None:
         graph.create_node_unique_constraint("Org", "slug")
     except Exception as error:
         if "already" not in str(error).lower():
-            log.warning("[orgs] the unique constraint on Org.slug could not be created: %s", error)
+            log.error("[orgs] the unique constraint on Org.slug could not be created; new orgs are refused until it exists: %s", error)
+
+
+class SlugConstraintMissing(RuntimeError):
+    """The control graph has no working unique constraint on ``Org.slug``, so no org is created."""
+
+
+def _slug_constraint_ready() -> bool:
+    """Whether the unique constraint on Org.slug exists and has not failed (pending counts: it already
+    refuses duplicates being written)."""
+    for constraint in control_graph().list_constraints():
+        if constraint.get("label") == "Org" and constraint.get("type") == "UNIQUE" and list(constraint.get("properties") or []) == ["slug"]:
+            return constraint.get("status") != "FAILED"
+    return False
+
+
+def _require_slug_constraint() -> None:
+    if _slug_constraint_ready():
+        return
+    ensure_control_indexes()
+    if not _slug_constraint_ready():
+        log.error("[orgs] refusing to create an org: the unique constraint on Org.slug is missing or failed (duplicate slugs?)")
+        raise SlugConstraintMissing("org creation is unavailable until the Org.slug unique constraint exists")
 
 
 def get_org(org_id: str) -> Org | None:
@@ -181,6 +203,7 @@ def create_org(name: str, created_by: str | None) -> Org:
     name = " ".join((name or "").split())[:80]
     if not name:
         raise ValueError("an org needs a name")
+    _require_slug_constraint()
     ulid = tenancy.new_ulid()
     # The node first, so the unique constraint on Org.slug settles a race before anything is built:
     # the loser takes the next free slug. The Company node's id is the slug, so it comes after.

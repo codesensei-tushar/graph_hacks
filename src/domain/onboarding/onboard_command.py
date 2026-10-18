@@ -135,14 +135,10 @@ def unlinked_mentions(args: dict, scopes: list[str] | None = None) -> list[str]:
     return [user for user in mentioned_users(args) if lookup.linked_person(user) is None]
 
 
-def _handle_like(name: str | None) -> bool:
-    """A Slack login handle rather than a person's name: one lowercase word, like ``amy`` or ``amy.member``."""
-    return not name or (" " not in name.strip() and name == name.lower())
-
-
 def team_data(args: dict, lookup: GraphLookup) -> dict:
     """The arguments as team-file data, each mention resolved to a member row."""
     profiles = args.get("profiles") or {}
+    handles = args.get("handles") or {}
     members: dict[str, dict] = {}
     problems = []
 
@@ -150,10 +146,12 @@ def team_data(args: dict, lookup: GraphLookup) -> dict:
         if user not in members:
             linked = lookup.linked_person(user)
             if linked is not None:
-                # A stored name that is only a handle ("amy") gives way to the name Slack shows; any other
-                # stored name stays. The caller gives a linked person's real or display name, never the handle.
+                # A stored name that is this user's Slack login handle ("amy") gives way to the name
+                # Slack shows; any other stored name stays. The caller gives a linked person's real or
+                # display name, never the handle, so a handle never replaces anything.
                 stored = linked[1]
-                name = profiles.get(user) if profiles.get(user) and _handle_like(stored) else stored
+                handle = handles.get(user)
+                name = profiles[user] if profiles.get(user) and handle and stored == handle else stored
                 members[user] = {"id": linked[0], "name": name, "slack_id": user}
             elif profiles.get(user):
                 # A new person, never someone already here matched by name.
