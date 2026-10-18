@@ -1,4 +1,4 @@
-"""A question in two parts answers both, on a real FalkorDB with the Quillfern seed: through the
+"""A question in two or three parts answers each, on a real FalkorDB with the Quillfern seed: through the
 keyword router (``ask_service.ask``), the ask page (``ask_api.answer_question``), the Slack turn
 with no model, and the agent with a model choosing each part.
 
@@ -81,7 +81,7 @@ class CompoundAnswerTest(unittest.TestCase):
         self.assertEqual([part["question"] for part in result.parts], questions)
         self.assertEqual([part["tool"] for part in result.parts], tools)
         paragraphs = result.answer.split(compound.SEPARATOR)
-        self.assertEqual(len(paragraphs), 2, result.answer)
+        self.assertEqual(len(paragraphs), len(tools), result.answer)
         for paragraph, part, lead in zip(paragraphs, result.parts, leads, strict=True):
             self.assertEqual(paragraph, part["answer"])
             self.assertTrue(paragraph.startswith(lead), paragraph)
@@ -144,6 +144,52 @@ class CompoundAnswerTest(unittest.TestCase):
         self.assertEqual([part["question"] for part in result.parts], ["what does the invoice worker depend on", "what depends on Invoice Worker"])
         self.assertTrue(result.answer.startswith("Invoice Worker depends on Billing Service and Notification Service (1 hop)"), result.answer)
         self.assertTrue(result.answer.endswith("Nothing in the graph depends on Invoice Worker."), result.answer)
+
+    # --- three parts, and more ---------------------------------------------------------------------
+
+    def test_three_parts_answer_each_about_the_first_parts_thing(self):
+        question = "what breaks if auth goes down, who owns it and who should know"
+        self.assertEqual(compound.split(question), (["what breaks if auth goes down", "who owns it", "who should know"], None))
+        result = ask_service.ask(question, ORG)
+        self.assert_both(
+            result,
+            ["blast_radius", "who_owns", "who_should_know"],
+            ["what breaks if auth goes down", "who owns Auth Service", "who should know about Auth Service"],
+            [AUTH_DOWN, "Auth Service is owned by Maya Ortiz. Run by the Platform team.", "Auth Service is owned by Maya Ortiz. If it changes,"],
+        )
+        cited = {step.cite() for step in result.path}
+        self.assertTrue({"API Gateway -[DEPENDS_ON]-> Auth Service", "Maya Ortiz -[OWNS]-> Auth Service", "Platform -[RUNS]-> Auth Service"} <= cited, cited)
+        reply = agent_turn.answer_turn(_turn(question, [{"user": "UALICE", "text": f"<@UBOT> {question}", "ts": "1"}])).reply or ""
+        headings = [line for line in reply.split("\n") if line.startswith("*") and line.endswith("?*")]
+        self.assertEqual(headings, ["*What breaks if auth goes down?*", "*Who owns Auth Service?*", "*Who should know about Auth Service?*"])
+        self.assertIn("_Tool `blast_radius + who_owns + who_should_know`, picked by keywords.", reply)
+        self.assertEqual(agent.reply_tool(reply), "who_should_know")
+
+    def test_past_three_parts_the_rest_is_asked_separately(self):
+        question = "what breaks if auth goes down, who owns it, who should know and who knows postgres"
+        self.assertEqual(compound.split(question), (["what breaks if auth goes down", "who owns it", "who should know"], "who knows postgres"))
+        result = ask_service.ask(question, ORG)
+        three = ask_service.ask("what breaks if auth goes down, who owns it and who should know", ORG)
+        self.assertEqual(result.tool, three.tool)
+        self.assertEqual(result.path, three.path)
+        self.assertEqual(result.answer, three.answer + " Ask the rest separately: “who knows postgres”.")
+        self.assertEqual(result.answer, compound.SEPARATOR.join(part["answer"] for part in result.parts))
+        page = ask_api.answer_question(question).to_dict()
+        self.assertTrue(page["parts"][-1]["answer"].endswith("Ask the rest separately: “who knows postgres”."), page["parts"][-1])
+
+    def test_a_third_part_the_graph_cannot_answer_is_offered_after_the_other_two(self):
+        result = ask_service.ask("who owns billing, what breaks if it goes down and what breaks if the payments gateway goes down", ORG)
+        self.assertEqual(result.tool, "who_owns + blast_radius")
+        self.assertEqual([part["question"] for part in result.parts], ["who owns billing", "what breaks if Billing Service goes down"])
+        self.assertTrue(result.answer.endswith("You also asked “what breaks if the payments gateway goes down”: ask it on its own for that answer."), result.answer)
+        self.assertEqual(result.answer, compound.SEPARATOR.join(part["answer"] for part in result.parts))
+
+    def test_the_earliest_join_wins_unless_its_rest_is_about_more_people(self):
+        # Two parts: the comma's rest asks who else, so the question splits at "and".
+        self.assertEqual(
+            compound.split("who knows billing, who else worked on it and what breaks if it goes down"),
+            (["who knows billing, who else worked on it", "what breaks if it goes down"], None),
+        )
 
     # --- a part that cannot be answered ------------------------------------------------------------
 
