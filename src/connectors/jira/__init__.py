@@ -115,7 +115,9 @@ class JiraConnector(Connector):
         for project in projects:
             project_id, key = str(project.get("id") or ""), str(project.get("key") or "")
             if project_id.isdigit() and PROJECT_KEY.fullmatch(key) and project_id not in offered:
-                offered[project_id] = AvailableContainer(external_id=project_id, key=key, name=str(project.get("name") or key)[:200])
+                offered[project_id] = AvailableContainer(
+                    external_id=project_id, key=key, name=str(project.get("name") or key)[:200], available=mapper.issue_count(project)
+                )
         return list(offered.values())
 
     def fetch(self, install: Install, container: Container, cursor: str | None) -> Page:

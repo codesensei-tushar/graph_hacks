@@ -136,6 +136,8 @@ class FakeVendors:
             return 200, {"results": [{"stages": [{"id": key, "label": label} for key, label in fake.deal_stages().items()]}]}, {}
         parts = path.strip("/").split("/")
         if parts[:3] == ["crm", "objects", "2026-09"] and parts[4:] == ["search"]:
+            if body.get("limit") == 1 and "sorts" not in body:  # HubSpotClient.total: the count, one record
+                return 200, {"total": fake.total(parts[3], body["filterGroups"]), "results": []}, {"Date": SERVER_DATE}
             records, after, headers = fake.search(parts[3], body)
             return 200, {"results": records, **({"paging": {"next": {"after": after}}} if after else {})}, {"Date": SERVER_DATE}
         if parts[:3] == ["crm", "objects", "2026-09"] and parts[4:] == ["batch", "read"]:
