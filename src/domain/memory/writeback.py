@@ -25,6 +25,8 @@ from pydantic import BaseModel, Field
 
 from src.domain.memory.containers import (
     AGENT_SELF_CONTAINER_TAG,
+    CONNECTOR_SCOPE_PREFIX,
+    ORG_INTERNAL_CONTAINER_TAG,
     SHARED_TEAM_BRAIN_CONTAINER_TAG,
     private_container_tag_for,
     private_slack_channel_container_tag,
@@ -43,6 +45,7 @@ from src.integrations.slack.events import is_private_slack_channel
 
 __all__ = [
     "AGENT_SELF_CONTAINER_TAG",
+    "ORG_INTERNAL_CONTAINER_TAG",
     "SHARED_TEAM_BRAIN_CONTAINER_TAG",
     "private_container_tag_for",
     "private_slack_channel_container_tag",
@@ -315,6 +318,8 @@ def scope_label(tag: str, channel_names: dict[str, str] | None = None) -> str:
         return "public channels"
     if tag == AGENT_SELF_CONTAINER_TAG:
         return "what I've learned about myself"
+    if tag == ORG_INTERNAL_CONTAINER_TAG:
+        return "connected tools"
     if tag.startswith("slack_channel_"):
         channel_id = tag.removeprefix("slack_channel_")
         name = (channel_names or {}).get(channel_id)
@@ -324,4 +329,7 @@ def scope_label(tag: str, channel_names: dict[str, str] | None = None) -> str:
     if tag.startswith("github_repo_"):
         name = (channel_names or {}).get(tag)
         return f"the {name} repo" if name else "a private GitHub repo"
+    if tag.startswith(CONNECTOR_SCOPE_PREFIX):
+        name = (channel_names or {}).get(tag)
+        return f"the restricted {name}" if name else "a restricted connected project"
     return tag
