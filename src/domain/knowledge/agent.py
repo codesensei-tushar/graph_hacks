@@ -33,7 +33,7 @@ import re
 from dataclasses import dataclass
 
 from src.core import query_metrics
-from src.domain.knowledge import algorithms, ask_service, catalogue, coordination, resolve
+from src.domain.knowledge import algorithms, ask_service, catalogue, compound, coordination, resolve
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 from src.domain.knowledge.resolve import Entity
 from src.integrations.llm.model import ModelRequest, ModelUnavailable, generate_object
@@ -49,7 +49,8 @@ THREAD_LABELS = ("Service", "Document", "Ticket", "Decision")
 # The footer names the tool: "Tool `who_knows`, picked by ..." in the blocks. Slack's plain-text
 # fallback of the same reply drops the backticks and, stripping italics, the underscores in the
 # name ("whatchanged"); ``reply_tool`` maps that back.
-_TOOL_IN_REPLY = re.compile(r"(?<![A-Za-z])Tool `?([a-z_]+)`?, (?:picked|run)\b")
+# A reply to a question in two parts names both tools ("Tool `blast_radius + who_knows`"); the last is its subject's.
+_TOOL_IN_REPLY = re.compile(r"(?<![A-Za-z])Tool `?(?:[a-z_]+ \+ )?([a-z_]+)`?, (?:picked|run)\b")
 _DEPTH_IN_REPLY = re.compile(r"depth (\d+)")
 # An approved write's reply names what it filed: "Filed *TKT-104* about Billing Service."
 _FILED_IN_REPLY = re.compile(r"Filed \*([^*]+)\*")
@@ -369,14 +370,52 @@ def run_choice(
 ) -> tuple[ToolResult, ToolChoice]:
     """Run the chosen tool. A question that names nothing is retried about the thread's subject.
 
-    A compound question the keyword router answered in its first part offers the second as the next question."""
+    A question in two parts that keywords or the model chose for answers both (``compound.py``)."""
+    first, rest = ask_service.split_compound(question) if choice.via in ("keywords", "model") else (question, None)
+    if rest is None:
+        return _run_noted(choice, question, scopes, thread, bot_ids)
+    if choice.via == "model":
+        # The model read both parts; the first is chosen again on its own words.
+        first_choice = choose_tool(first, thread, scopes=scopes, bot_ids=bot_ids)
+        choice = first_choice if not catalogue.get_tool(first_choice.tool).needs_approval else choose_with_keywords(first)
+    result, ran = _run_noted(choice, first, scopes, thread, bot_ids)
+    rest_choice = choose_with_keywords(rest) if choice.via == "keywords" else choose_tool(rest, thread, scopes=scopes, bot_ids=bot_ids)
+    if compound.CONTACT.search(rest) or catalogue.get_tool(rest_choice.tool).needs_approval:
+        # "who to contact": the people who know it. The keyword router reads "who to ping about the outage" as blast radius.
+        rest_choice = ToolChoice("who_knows", {"name": rest}, rest_choice.via)
+    asked = rest
+    if compound.names_nothing(rest, scopes, THREAD_LABELS):
+        subject = _subject_of(ran, first, scopes) if result.found else None
+        if subject is None:
+            # Nothing to ask it about: a search on "who to contact" would answer something else.
+            return compound.offer(rest, result), ran
+        rest_choice = follow_up_choice(rest, rest_choice, ThreadSubject(subject)) or rest_choice
+        asked = compound.about(rest, subject)
+    # The rest's subject comes from the first part, never from the thread.
+    rest_result, _rest_ran = _run_noted(rest_choice, rest, scopes, None, bot_ids)
+    if not rest_result.found:
+        return compound.offer(rest, result), ran
+    return compound.combine((first, result), (asked, rest_result)), ran
+
+
+def _subject_of(ran: ToolChoice, first: str, scopes: list[str]) -> Entity | None:
+    """What the first part was about: the name it was answered with, else its own words."""
+    named = next((ran.args[key] for key in ("name", "topic", "query") if isinstance(ran.args.get(key), str)), first)
+    for text in dict.fromkeys((named, first)):
+        resolution = resolve.resolve_name(text, THREAD_LABELS, scopes)
+        if resolution.found:
+            return resolution.entity
+    return None
+
+
+def _run_noted(
+    choice: ToolChoice, question: str, scopes: list[str], thread: list[dict] | None = None, bot_ids: frozenset[str] = frozenset()
+) -> tuple[ToolResult, ToolChoice]:
     with resolve.noting_taken() as taken:
         result, ran = _run_choice(choice, question, scopes, thread, bot_ids)
     if result.found and taken:
         # A name taken from part of it ("billing" for Billing Service) is said, so a wrong guess shows.
         result.answer = resolve.taken_note(taken, result.answer) + result.answer
-    if ran.via == "keywords":
-        ask_service.offer_rest(question, result)
     return result, ran
 
 

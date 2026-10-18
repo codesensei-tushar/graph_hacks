@@ -47,6 +47,8 @@ STOPWORDS = frozenset(
         # Depth and reporting words, so a refusal quotes what was named: "and two hops out" names
         # nothing, and "what did anyone say about billing" names billing.
         "two", "three", "four", "five", "six", "out", "say", "says", "said",
+        # Who to go to: "who should I ask about pricing" names pricing.
+        "ask", "ping", "talk",
     }
 )
 # Words that open a noun phrase. The words between one and a match describe the thing named.

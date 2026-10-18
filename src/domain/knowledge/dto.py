@@ -60,6 +60,9 @@ class ToolResult:
     # A table for a page to draw, for tools that rank many things at once (risk_map):
     # {"kind", "columns", "rows", "scoring"}.
     grid: dict | None = None
+    # Each part of a two-part question, in order: {"question", "tool", "answer", "found"}.
+    # Empty for a question in one part.
+    parts: list[dict] = field(default_factory=list)
 
     def add(self, step: PathStep) -> None:
         """Append an edge unless the path already has it. A set mirrors the path, so adding N edges
@@ -92,6 +95,8 @@ class ToolResult:
             result["memories"] = [memory.to_dict() for memory in self.memories]
         if self.grid is not None:
             result["grid"] = self.grid
+        if self.parts:
+            result["parts"] = [dict(part) for part in self.parts]
         return result
 
 

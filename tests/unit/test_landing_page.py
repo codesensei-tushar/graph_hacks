@@ -291,7 +291,9 @@ class RiskMapTest(unittest.TestCase):
         render = answer_js[answer_js.index("function render(out, data, question, opts)"):]
         hook = 'if (data.grid && ["risk_map", "person_profile"].includes(data.grid.kind) && window.RiskMap) RiskMap.render(out, data.grid, { ask: onAsk });'
         self.assertEqual(answer_js.count("RiskMap.render("), 1)
-        self.assertLess(render.index("data.answer));"), render.index(hook))
+        # Each part of a question in two parts is its own paragraph; one part is the answer itself.
+        self.assertLess(render.index("part.answer));"), render.index(hook))
+        self.assertIn("data.parts && data.parts.length ? data.parts : [data]", render)
         self.assertLess(render.index(hook), render.index("BrainGraph.renderPath("))
         self.assertIn("onAsk: askFromPage,", (STATIC / "app.js").read_text())
 

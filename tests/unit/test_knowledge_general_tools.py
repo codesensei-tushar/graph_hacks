@@ -115,7 +115,9 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(schema["required"], ["label"])
         self.assertFalse(schema["additionalProperties"])
         self.assertEqual(schema["properties"]["label"]["enum"], list(find.LABELS))
-        self.assertEqual(set(schema["properties"]) - {"label"}, set(find.FILTER_NAMES))
+        # limit is no filter: it caps how many are named.
+        self.assertEqual(set(schema["properties"]) - {"label", "limit"}, set(find.FILTER_NAMES))
+        self.assertEqual((schema["properties"]["limit"]["minimum"], schema["properties"]["limit"]["maximum"]), (1, find.MAX_ROWS))
         self.assertEqual(schema["properties"]["kind"]["enum"], list(SERVICE_KINDS))
         self.assertEqual(schema["properties"]["standing"]["type"], "boolean")
         self.assertIn("Ticket: state, about, team, person, blocked, project", schema["properties"]["label"]["description"])
