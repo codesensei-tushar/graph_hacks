@@ -25,6 +25,8 @@ log = logging.getLogger(__name__)
 
 MAX_DEPTH = 6
 MAX_PATH_LENGTH = 6
+# Equal-length routes kept when the readable-only search has to walk them out itself.
+MAX_ROUTES = 50
 DEFAULT_LOAD_BEARING = 5
 MAX_LOAD_BEARING = 10
 
@@ -360,7 +362,60 @@ def _shortest_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: 
         """,
         {"a": start.id, "b": end.id, "rels": rels, "scopes": scopes},
     ).result_set
-    return [(hops, length) for hops, length in rows]
+    if rows:
+        # Some shortest route is readable, so the readable ones are the shortest the asker can have.
+        return [(hops, length) for hops, length in rows]
+    # SPpaths finds the shortest routes over every node and only then are unreadable ones dropped:
+    # a shortcut through something hidden (a Jira ticket, a private repo) would hide every longer
+    # route the asker may see, and hint that the shortcut exists. Search over readable nodes only.
+    return _readable_shortest_paths(graph, start, end, rels, scopes)
+
+
+def _readable_shortest_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: list[str]) -> list[tuple[list, int]]:
+    """Every shortest route (at most ``MAX_ROUTES``) through nodes the asker may read, by a
+    breadth-first search one hop at a time, in both edge directions, up to ``MAX_PATH_LENGTH``."""
+    seen = {start.id: (0, start.name, start.label)}
+    parents: dict[str, list[tuple[str, str, bool]]] = {}
+    frontier = [start.id]
+    for depth in range(1, MAX_PATH_LENGTH + 1):
+        rows = graph.ro_query(
+            f"""
+            MATCH (n)-[r]-(m)
+            WHERE n.id IN $frontier AND type(r) IN $rels AND {resolve.SCOPED.format(var="m")}
+            RETURN n.id, type(r), startNode(r) = n, m.id, m.name, labels(m)[0]
+            """,
+            {"frontier": frontier, "rels": rels, "scopes": scopes},
+        ).result_set
+        frontier = []
+        for from_id, rel, forward, to_id, to_name, to_label in rows:
+            if to_id is None:
+                continue
+            if to_id not in seen:
+                seen[to_id] = (depth, to_name, to_label)
+                frontier.append(to_id)
+            if seen[to_id][0] == depth and (from_id, rel, forward) not in parents.setdefault(to_id, []):
+                parents[to_id].append((from_id, rel, forward))
+        if end.id in seen or not frontier:
+            break
+    if end.id not in seen:
+        return []
+    routes: list[list] = []
+
+    def walk(node_id: str, tail: list) -> None:
+        if len(routes) >= MAX_ROUTES:
+            return
+        if node_id == start.id:
+            routes.append(tail[::-1])
+            return
+        for from_id, rel, forward in parents.get(node_id, []):
+            walk(from_id, [*tail, (from_id, rel, forward, node_id)])
+
+    walk(end.id, [])
+    hops = [
+        [[a, seen[a][1], seen[a][2], rel, b, seen[b][1], seen[b][2], forward] for a, rel, forward, b in route]
+        for route in routes
+    ]
+    return [(route, len(route)) for route in hops]
 
 
 # --- PageRank ------------------------------------------------------------------------------

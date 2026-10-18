@@ -1,17 +1,18 @@
 """Keep each configured install in step with its source: one page per scheduler step.
 
 A step lists the containers when that is due (hourly, and after a restart), refreshes who
-may read the restricted ones, then fetches one page for the container most in need: one
-with more pages waiting, else the one whose poll is due soonest. The page is written,
-its ``next_cursor`` stored on the container's state node, and the job re-armed for the
-next step, always, in ``finally``. Short steps keep the shared scheduler thread free for
-Slack's own jobs.
+may read the restricted ones, then fetches one page for a container that is due, the one
+fetched least recently, so a long backfill and the other containers' polls take turns.
+The page is written, its ``next_cursor`` stored on the container's state node, and the job
+re-armed for the next step, always, in ``finally``. Short steps keep the shared scheduler
+thread free for Slack's own jobs. A container that reaches ``MAX_ITEMS_PER_CONTAINER``
+stops its backfill there: it keeps its cursor and is fetched again at its next poll.
 
 | Outcome                    | Next step                                                   |
 |----------------------------|-------------------------------------------------------------|
 | more pages waiting         | ``MORE_DELAY_SECONDS``, or the page's ``retry_after``       |
 | caught up                  | the connector's ``poll_seconds``                             |
-| ``RetryLater(s)``          | ``s``; the cursor does not move                              |
+| ``RetryLater(s)``          | ``s``, at most an hour; the cursor does not move             |
 | ``CredentialsRejected``    | an hour                                                      |
 | any other failure          | 1, 5, 15, then 60 minutes as failures repeat; others go on   |
 
@@ -24,7 +25,17 @@ import logging
 import time
 
 from src.connectors import graph, registry
-from src.connectors.base import Connector, ConnectorError, Container, CredentialsRejected, Install, RetryLater, WebhookRequest
+from src.connectors.base import (
+    MAX_RETRY_AFTER_SECONDS,
+    Connector,
+    ConnectorError,
+    Container,
+    CredentialsRejected,
+    Install,
+    RetryLater,
+    WebhookRequest,
+    clamp_wait,
+)
 from src.core import scheduler
 from src.db.falkordb_client import kv
 
@@ -48,15 +59,24 @@ def job_id(source: str) -> str:
     return f"connector:sync:{source}"
 
 
+def max_delay(source: str) -> float:
+    """The longest a step may be put off: an hour, or the connector's poll interval when longer."""
+    connector = registry.get(source)
+    return float(max(MAX_RETRY_AFTER_SECONDS, CREDENTIALS_BACKOFF_SECONDS, *FAILURE_BACKOFF_SECONDS, connector.poll_seconds if connector else 0))
+
+
 def schedule(source: str, delay: float = 0.0) -> None:
+    delay = min(max(0.0, float(delay)), max_delay(source))
     scheduler.schedule(delay, SYNC_JOB, {"source": source}, job_id=job_id(source))
 
 
 def schedule_all() -> list[str]:
-    """Arm every configured install that has no step pending (startup)."""
+    """Arm every configured install that has no step pending, or one put off further than any
+    step may be (written before the clamp, or by a clock that jumped). Startup."""
     armed = []
     for connector, _install in registry.installs():
-        if not scheduler.exists(job_id(connector.source)):
+        due = scheduler.due_at(job_id(connector.source))
+        if due is None or due - time.time() > max_delay(connector.source):
             schedule(connector.source, 0)
             armed.append(connector.source)
     return armed
@@ -145,15 +165,11 @@ def _current_containers(connector: Connector, install: Install) -> list[Containe
 
 
 def _next_container(containers: list[Container], states: dict[str, dict], now: int) -> Container | None:
-    """A container with pages waiting (the least recently fetched), else the one due soonest, if due."""
-    def last(container: Container) -> int:
-        return int(states[container.id].get("last_fetch_at") or 0)
-
-    waiting = [container for container in containers if states[container.id].get("has_more") and int(states[container.id].get("due_at") or 0) <= now]
-    if waiting:
-        return min(waiting, key=last)
+    """The due container fetched least recently, whether it has pages waiting or its poll came round."""
     due = [container for container in containers if int(states[container.id].get("due_at") or 0) <= now]
-    return min(due, key=lambda container: (int(states[container.id].get("due_at") or 0), last(container))) if due else None
+    if not due:
+        return None
+    return min(due, key=lambda container: (int(states[container.id].get("last_fetch_at") or 0), int(states[container.id].get("due_at") or 0)))
 
 
 def _next_in(states: dict[str, dict], now: int, connector: Connector) -> float:
@@ -185,25 +201,28 @@ def _fetch_one(connector: Connector, install: Install, container: Container, sta
         log.warning("[connectors] fetch failed container=%s: %s", container.id, _error(error))
         return {"status": "failed", "container": container.id}
 
-    wait = max(MORE_DELAY_SECONDS if page.has_more else float(connector.poll_seconds), float(page.retry_after or 0))
+    # At the cap a backfill ends: paging on would only drop what it reads. The cursor is kept.
+    capped = graph.count_items(container.id) >= MAX_ITEMS_PER_CONTAINER
+    more = bool(page.has_more) and not capped
+    wait = max(MORE_DELAY_SECONDS if more else float(connector.poll_seconds), clamp_wait(page.retry_after or 0))
     items = int(state.get("items") or 0) + written["items"]
     graph.set_state(
         container.id,
         install,
         cursor=page.next_cursor,
-        has_more=bool(page.has_more),
+        has_more=more,
         due_at=now + int(wait * 1000),
         last_fetch_at=now,
         last_error=None,
         failures=0,
         items=items,
-        backfilled=bool(state.get("backfilled")) or not page.has_more,
-        capped=written["skipped"] > 0 and graph.count_items(container.id) >= MAX_ITEMS_PER_CONTAINER,
+        backfilled=bool(state.get("backfilled")) or not more,
+        capped=capped,
     )
     graph.set_state(install.key, install, last_sync_at=now, last_error=None, failures=0)
     log.info(
         "[connectors] synced container=%s items=%d users=%d edges=%d deleted=%d skipped=%d more=%s",
-        container.id, written["items"], written["users"], written["edges"], written["deleted"], written["skipped"], page.has_more,
+        container.id, written["items"], written["users"], written["edges"], written["deleted"], written["skipped"], more,
     )
     return {"status": "synced", "container": container.id, **written}
 

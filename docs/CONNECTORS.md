@@ -24,8 +24,9 @@ that must be set), `poll_seconds` and `accepts_webhooks`, and calls
 
 Raise `RetryLater(seconds)` to wait, `CredentialsRejected` on a 401, any `ConnectorError`
 otherwise. `src/connectors/http.py`'s `JsonClient(base_url, headers)` does this already: it
-retries short 429/503 waits and 5xx in place, raises `RetryLater` for long waits, never sends
-the headers to another host, and never logs them. `basic_auth(email, token)` and `bearer(token)`
+retries short 429/503 waits and 5xx in place, raises `RetryLater` for long waits, never follows
+a redirect (it would resend the credentials), never sends the headers to another host, and never
+logs them. No wait is honoured past an hour (`base.MAX_RETRY_AFTER_SECONDS`), whoever asks for it. `basic_auth(email, token)` and `bearer(token)`
 build the headers.
 
 **The install.** `Install(source, id, config)`. In v1 it comes from environment variables
@@ -59,7 +60,8 @@ PAY-13). An edge whose item is not in the page is only added.
 `fetch`; None starts the next fetch over. `has_more` fetches the next page on the next
 scheduler step; otherwise the next fetch is `poll_seconds` away. `retry_after` is the least wait
 before the next fetch either way. A container keeps at most `sync.MAX_ITEMS_PER_CONTAINER`
-items; past that, new items are dropped and existing ones still update.
+items; past that, new items are dropped and existing ones still update. Reaching it ends the
+backfill: the cursor is kept and the next page waits for the next poll.
 
 **Pull requests.** `graph.link_references(pull_request_id, handles, source, rel="REFERENCES")`
 links a pull request `-[:REFERENCES]->` (or, with `rel="CLOSES"`, `-[:CLOSES]->`) the tickets
@@ -104,12 +106,14 @@ ExternalUser` is one of its `readers()` reads it. With readers unknown, nobody d
 - **Sync** (`src/connectors/sync.py`, scheduler job `runConnectorSync`, id `connector:sync:<source>`).
   Each step fetches one page. Credentials are checked and containers listed hourly and after
   a restart; a container that disappears is deleted with its items. Then one page for the
-  container most in need: one with pages waiting, else the one due soonest. The cursor,
+  due container fetched least recently, so backfills and polls of different containers take
+  turns. The cursor,
   due time, counts and last error live on a `ConnectorState` node per container and one per
   install (scope `system`, which no read set holds). The job is re-armed in `finally`.
-  `RetryLater` waits as asked without moving the cursor; a 401 waits an hour; other failures
+  `RetryLater` waits as asked, up to an hour, without moving the cursor; a 401 waits an hour; other failures
   wait 1, 5, 15, then 60 minutes, per container, so one broken project does not hold up the
-  rest. A container keeps at most 1000 items.
+  rest. A container keeps at most 1000 items. No step is put off past an hour (or the poll
+  interval, if longer); at startup a job parked further out is re-armed.
 - **Webhooks.** `POST /connectors/<source>/webhook`: 404 unless the source is configured and
   accepts webhooks, 413 over 1 MB, 401 unless `verify_webhook` passes, then answered at once.
   The page is written in the background. A delivery is identified by its body's SHA-256

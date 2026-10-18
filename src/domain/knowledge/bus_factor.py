@@ -105,7 +105,8 @@ def _things(graph, person: Entity, params: dict, reach: dict[str, int]) -> tuple
     for service_id, name, kind, mine, other_owners in rows:
         thing = Entity(service_id, name, "Service", kind)
         known = ask_service.knowers(graph, thing, params["scopes"])
-        ranked = [who for who, _score, _reasons in ask_service.rank_people(known.path, thing) if who != person.name]
+        # The person leaving is told apart by id: an unlinked account with their name is someone else.
+        ranked = [name for who, name, _score, _reasons in ask_service.rank_people_keyed(known.path, thing) if who != ("Person", person.id)]
         owns = "OWNS" in mine
         alone = not ranked
         if not alone and not (owns and not other_owners):
@@ -188,8 +189,8 @@ def _tickets(graph, person: Entity, params: dict, reach: dict[str, int]) -> tupl
         MATCH (k:Ticket)
         WHERE k.id IN $tickets
         OPTIONAL MATCH (other)-[:WORKED_ON|ASSIGNED]->(k)
-        WHERE (labels(other)[0] = 'Person' AND other.id <> $id)
-           OR (labels(other)[0] IN $accounts AND NOT (other)-[:IS]->(:Person {{id: $id}}))
+        WHERE {SCOPED.format(var="other")}
+          AND ((labels(other)[0] = 'Person' AND other.id <> $id) OR (labels(other)[0] IN $accounts AND NOT (other)-[:IS]->(:Person {{id: $id}})))
         WITH k, count(DISTINCT other) AS others
         OPTIONAL MATCH (k)-[:ABOUT]->(s:Service)
         WHERE {SCOPED.format(var="s")}
