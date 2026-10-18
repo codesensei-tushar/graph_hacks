@@ -169,6 +169,30 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(ask_service.route("who actually works together")[0], "working_groups")
         self.assertEqual(ask_service.route("who owns billing")[0], "who_owns")
 
+    def test_risk_across_the_company_is_the_risk_map_and_one_person_or_service_is_not(self):
+        for question in (
+            "what are our riskiest services",
+            "what's our biggest bus factor risk",
+            "bus factor across the company",
+            "where are we one person away from an outage",
+            "which services have no runbook",
+            "what is undocumented",
+            "what are our knowledge gaps",
+            "risk map",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("risk_map", {}))
+        for question, tool in (
+            ("the bus factor on arjun", "if_person_leaves"),
+            ("what's the bus factor on billing's owner", "if_person_leaves"),
+            ("who is the bus factor for billing", "who_knows"),
+            ("what is most at risk if arjun leaves", "if_person_leaves"),
+            ("which services are load bearing", "load_bearing"),
+            ("what breaks if auth goes down", "blast_radius"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question)[0], tool)
+
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)
         self.assertEqual(algorithms.depth_in("and 3 hops out"), 3)

@@ -5,7 +5,7 @@ hand; the model only picks a tool and fills in its arguments. ``register`` lets 
 modules add tools (a decision writer, for example) without editing this file.
 """
 
-from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, memories
+from src.domain.knowledge import algorithms, ask_service, bridges, bus_factor, coordination, memories, risk_map
 from src.domain.knowledge.dto import ToolResult, ToolSpec
 
 _TOOLS: dict[str, ToolSpec] = {}
@@ -85,6 +85,10 @@ def _run_path_between(args: dict, scopes: list[str]) -> ToolResult:
 
 def _run_load_bearing(args: dict, _scopes: list[str]) -> ToolResult:
     return algorithms.load_bearing(args.get("limit", algorithms.DEFAULT_LOAD_BEARING))
+
+
+def _run_risk_map(_args: dict, scopes: list[str]) -> ToolResult:
+    return risk_map.risk_map(scopes)
 
 
 def _run_related_memories(args: dict, scopes: list[str]) -> ToolResult:
@@ -302,6 +306,20 @@ register(
             [],
         ),
         run=_run_load_bearing,
+    )
+)
+register(
+    ToolSpec(
+        name="risk_map",
+        description=(
+            "Where risk concentrates across the company: every owned thing (service, system, process, playbook, account) "
+            "ranked by how much depends on it times its gaps: only one person knows it, no document describes it, or its "
+            "owner is on a different team from the one that runs it. Use for the riskiest things, bus-factor risk across "
+            "the company, knowledge gaps or what is undocumented. For one person leaving use if_person_leaves; for what "
+            "one service takes down, blast_radius; for dependency weight alone, load_bearing."
+        ),
+        args_schema=_schema({}, []),
+        run=_run_risk_map,
     )
 )
 register(

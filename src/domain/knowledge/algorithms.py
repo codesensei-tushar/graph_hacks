@@ -364,6 +364,14 @@ def _shortest_paths(graph, start: Entity, end: Entity, rels: list[str], scopes: 
 # --- PageRank ------------------------------------------------------------------------------
 
 
+def pagerank_by_id(graph) -> dict[str, float]:
+    """Every Service's PageRank over DEPENDS_ON, by id: the same call ``load_bearing`` ranks by,
+    over the same unfiltered nodes, so the scores agree. FalkorDB's scores shift with everything
+    else in the graph, so compare them within one graph, never across seeds."""
+    rows = graph.ro_query("CALL algo.pageRank('Service', 'DEPENDS_ON') YIELD node, score RETURN node.id, score").result_set
+    return {service_id: score for service_id, score in rows}
+
+
 def load_bearing(limit=DEFAULT_LOAD_BEARING) -> ToolResult:
     """The services the rest of the company leans on: PageRank over DEPENDS_ON."""
     try:
