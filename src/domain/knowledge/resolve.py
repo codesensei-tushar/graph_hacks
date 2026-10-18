@@ -13,6 +13,8 @@ which version ("the current billing service") or what kind ("the billing system"
 count. Ingestion code that only needs a best guess for classification uses ``best_match`` instead.
 """
 
+import contextlib
+import contextvars
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -200,12 +202,12 @@ def load_rows(graph, labels: tuple[str, ...], scopes: list[str]) -> list[EntityR
     ]
 
 
-def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: list[str] | None = None, graph=None) -> Resolution:
+def resolve_name(text: str, labels: tuple[str, ...] = DEFAULT_LABELS, scopes: list[str] | None = None, graph=None, partial: bool = True) -> Resolution:
     """The one node ``text`` names, within the asker's scopes, or the nearest candidates."""
     if graph is None:
         _, graph = connect()
     scopes = scopes or [ORG_SHARED]
-    return resolve_rows(text, load_rows(graph, labels, scopes), labels, known=_graph_words(graph, scopes))
+    return resolve_rows(text, load_rows(graph, labels, scopes), labels, known=_graph_words(graph, scopes), partial=partial)
 
 
 def _graph_words(graph, scopes: list[str]):
@@ -291,12 +293,19 @@ def entities_in_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] =
     return list(dict.fromkeys(match.entity for match in _kept_matches(text, rows, labels)))
 
 
-def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEFAULT_LABELS, known=None) -> Resolution:
+def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEFAULT_LABELS, known=None, partial: bool = True) -> Resolution:
     """``known(word)``, when given, says whether a word names anything in the graph; it lets a
     match that is only the end of a noun phrase ("the claude api") be refused."""
     resolution = Resolution(query=text)
     kept = _kept_matches(text, rows, labels)
     if not kept:
+        taken = _partial_match(text, rows) if partial else None
+        if taken is not None:
+            # "billing" for Billing Service when nothing else in scope has it as a word of its name.
+            entity, said = taken
+            resolution.entity = entity
+            _note(said, entity.name)
+            return resolution
         resolution.reason = "no_match"
         resolution.candidates = _fuzzy_candidates(text, rows)
         return resolution
@@ -327,6 +336,69 @@ def resolve_rows(text: str, rows: list[EntityRow], labels: tuple[str, ...] = DEF
     resolution.entity = best.entity
     resolution.candidates = [candidate for candidate in _candidates_from(kept) if candidate.entity != best.entity][:MAX_CANDIDATES]
     return resolution
+
+
+# --- a name taken from part of it ----------------------------------------------------------
+#
+# A team onboarded without aliases has "Billing Service" and nothing called "billing". When nothing
+# matches whole, a question whose every real word is a whole word of exactly one thing's name or
+# alias (or the unique start of one, four letters or more) takes that thing, and the answer says so:
+# "(Taking “billing” as Billing Service.)". Two things that fit is no answer, as before.
+
+MIN_PREFIX = 4
+# Things named in a few words. A decision or ticket is titled in a sentence; part of one is never taken for it.
+PARTIAL_LABELS = frozenset({"Service", "Team", "Person", "Document"})
+_taken: contextvars.ContextVar[list | None] = contextvars.ContextVar("resolve_taken", default=None)
+
+
+def _partial_match(text: str, rows: list[EntityRow]) -> tuple[Entity, str] | None:
+    words = [word for word in core(text).split() if len(word) >= 3 and word not in GENERIC_MODIFIERS]
+    if not words:
+        return None
+    fits: dict[str, Entity] = {}
+    for row in rows:
+        if row.label not in PARTIAL_LABELS:
+            continue
+        for key in (row.name, *row.aliases.split(",")):
+            key_words = tokens(key)
+            if not key_words or not all(any(_fits(word, other) for other in key_words) for word in words):
+                continue
+            # The words asked must be at least half of what makes the name distinctive: "larkspur" for
+            # Larkspur Freightways, never "tables" for a decision titled in eight words.
+            distinctive = [other for other in key_words if len(other) >= 3 and other not in STOPWORDS and not any(same_word(other, head) for head in GENERIC_HEADS)]
+            covered = [other for other in distinctive if any(_fits(word, other) for word in words)]
+            if distinctive and 2 * len(covered) >= len(distinctive):
+                fits.setdefault(row.id, Entity(row.id, row.name, row.label, row.kind))
+                break
+    if len(fits) != 1:
+        return None
+    return next(iter(fits.values())), " ".join(words)
+
+
+def _fits(word: str, key_word: str) -> bool:
+    return same_word(word, key_word) or (len(word) >= MIN_PREFIX and key_word.startswith(word))
+
+
+def _note(said: str, name: str) -> None:
+    taken = _taken.get()
+    if taken is not None and (said, name) not in taken:
+        taken.append((said, name))
+
+
+@contextlib.contextmanager
+def noting_taken():
+    """Collect the names taken from part of them while a tool runs: ``[(said, name), ...]``."""
+    token = _taken.set([])
+    try:
+        yield _taken.get()
+    finally:
+        _taken.reset(token)
+
+
+def taken_note(taken: list[tuple[str, str]], answer: str) -> str:
+    """"(Taking “billing” as Billing Service.) " for each name taken that the answer is about."""
+    used = [(said, name) for said, name in taken if name in answer and said.lower() != name.lower()]
+    return "".join(f"(Taking “{said}” as {name}.) " for said, name in used)
 
 
 def _phrase_start(words: list[str], match: _Match) -> int | None:
