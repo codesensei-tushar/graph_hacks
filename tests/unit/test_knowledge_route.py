@@ -24,6 +24,7 @@ class RouteTest(unittest.TestCase):
             ),
             "who actually works together": ("working_groups", {}),
             "what breaks if arjun leaves": ("if_person_leaves", {"name": "what breaks if arjun leaves"}),
+            "who should know about notebook#45": ("who_should_know", {"name": "who should know about notebook#45"}),
             "": ("none", {}),
         }
         for question, expected in cases.items():
@@ -70,6 +71,28 @@ class RouteTest(unittest.TestCase):
             with self.subTest(question=question):
                 self.assertEqual(ask_service.route(question), ("connectors", {"source": question, "target": ""}))
         self.assertEqual(ask_service.route("how is maya connected to the invoice worker")[0], "path_between")
+
+    def test_who_should_know_about_a_change_is_not_who_knows_it_or_what_breaks(self):
+        for question in (
+            "who should know about notebook#45",
+            "who else should review notebook#45",
+            "who needs to know if auth changes",
+            "who else needs to know about PR 52",
+            "who should be told about #45",
+            "who should hear about the billing change",
+            "who should we loop in on notebook#52",
+            "who should I ping about billing-internal#7",
+            "Who should know about notebook#45?",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(ask_service.route(question), ("who_should_know", {"name": question}))
+        self.assertEqual(ask_service.route("what breaks if auth goes down")[0], "blast_radius")
+        self.assertEqual(ask_service.route("who owns billing")[0], "who_owns")
+        self.assertEqual(ask_service.route("who knows billing")[0], "who_knows")
+        # The demo's thread follow-up after a ticket still asks who knows the service.
+        self.assertEqual(ask_service.route("who should look at it")[0], "who_knows")
+        # A person leaving is still about the person.
+        self.assertEqual(ask_service.route("who should know if arjun leaves")[0], "if_person_leaves")
 
     def test_depth_words(self):
         self.assertEqual(algorithms.depth_in("what breaks if auth goes down, one hop"), 1)

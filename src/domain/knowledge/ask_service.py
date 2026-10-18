@@ -17,7 +17,7 @@ functions through the catalogue.
 import re
 
 from src.db.falkordb_client import connect
-from src.domain.knowledge import algorithms, bridges, kinds, memories, resolve
+from src.domain.knowledge import algorithms, bridges, coordination, kinds, memories, resolve
 from src.domain.knowledge.dto import PathStep, TicketCreated, ToolResult
 from src.domain.knowledge.resolve import ORG_SHARED, SCOPED, Entity, Resolution, join_names
 
@@ -60,6 +60,12 @@ _BRIEF = re.compile(
     r"|\bwhat should (?:i|a new \w+) know about the \w+(?: \w+)? team\b",
     re.IGNORECASE,
 )
+# A change and the people it should reach: "who should know about notebook#45", "who else should
+# review it", "who should we loop in". Before blast radius and owners, which share its words.
+_SHOULD_KNOW = re.compile(
+    r"\bwho (?:else )?(?:should|needs to) (?:know|review|be told|hear)\b|\bwho should (?:i|we) (?:loop in|tell|ping)\b",
+    re.IGNORECASE,
+)
 # People between teams. "how is maya connected to the invoice worker" is a path question.
 _CONNECTORS = re.compile(r"\bwho (?:connects|bridges|links)\b|\b(?:bridges?|connectors?|go-betweens?) between\b", re.IGNORECASE)
 
@@ -76,6 +82,8 @@ def route(question: str) -> tuple[str, dict]:
         return "if_person_leaves", {"name": text}
     if _BRIEF.search(text):
         return "onboarding_brief", {"name": text}
+    if _SHOULD_KNOW.search(text):
+        return "who_should_know", {"name": text}
     if _PRESSURE.search(text):
         return "decision_pressure", {"topic": text}
     if _LOAD_BEARING.search(text):
@@ -418,6 +426,7 @@ _ROUTED = {
     "onboarding_brief": lambda args, scopes: onboarding_brief(args["name"], scopes),
     "connectors": lambda args, scopes: bridges.connectors(args["source"], args.get("target") or "", scopes),
     "blast_radius": lambda args, scopes: algorithms.blast_radius(args["name"], scopes, args.get("depth")),
+    "who_should_know": lambda args, scopes: coordination.who_should_know(args["name"], scopes),
     "who_owns": lambda args, scopes: who_owns(args["name"], scopes),
     "who_knows": lambda args, scopes: who_knows(args["name"], scopes),
     "path_between": lambda args, scopes: algorithms.path_between(args["source"], args.get("target") or "", scopes),

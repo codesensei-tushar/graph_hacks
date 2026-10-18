@@ -48,9 +48,9 @@ Every node written from Slack or GitHub carries the scope of the room or repo it
 4. **Return the path.** The answer carries the exact edges walked, and who picked the tool.
 5. **Writes wait.** A write stops at an Approve card that names its resolved target.
 
-No model-generated string ever reaches a query, so there is nothing to inject. **Ten read-only tools, two that write only after a human approves.**
+No model-generated string ever reaches a query, so there is nothing to inject. **Fourteen read-only tools, three that write only after a human approves.**
 
-> Notes: read tools are who_owns, who_knows, decision_trace, decision_pressure, working_groups, blast_radius, path_between, load_bearing, related_memories and recall; the writers are ingest_ticket and record_decision.
+> Notes: read tools are who_owns, who_knows, decision_trace, decision_pressure, working_groups, blast_radius, who_should_know, if_person_leaves, onboarding_brief, connectors, path_between, load_bearing, related_memories and recall; the writers are ingest_ticket, record_decision and onboard_team.
 
 ## 6. The answer is the path
 

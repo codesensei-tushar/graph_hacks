@@ -1,7 +1,7 @@
 """Check the model's tool routing on the demo questions, once, by hand.
 
 The only place this project spends model calls on purpose: one structured call per
-question (23 in all, fast profile), printing the tool and arguments the model chose
+question (25 in all, fast profile), printing the tool and arguments the model chose
 next to what the keyword router would do and what the recording script expects. Run
 it after changing a tool description or the routing prompt, read the table, and paste
 it into the pull request. It is not a test and must never run in CI.
@@ -58,6 +58,8 @@ QUESTIONS = [
     ),
     ("quill 6", "who knows the payments gateway", "who_knows", None),
     ("quill 7", "how is maya connected to the invoice worker", "path_between", None),
+    ("quill 8", "who should know about notebook#45", "who_should_know", None),
+    ("quill 9", "who else should review notebook#52", "who_should_know", None),
     # The Sales beat, on Quillfern with its Sales team imported.
     ("sales S1", "who owns renewals, and who else has worked on it", "who_knows", None),
     ("sales S2", "what breaks if hubspot goes down", "blast_radius", None),

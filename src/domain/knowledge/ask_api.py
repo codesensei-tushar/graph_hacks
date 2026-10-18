@@ -42,6 +42,7 @@ EXAMPLES: dict[str, list[str]] = {
         "which services are load-bearing",
         "who actually works together",
         "is the billing retries decision still the last word",
+        "who should know about notebook#45",
         "who knows the payments gateway",
     ],
     "company-brain": [

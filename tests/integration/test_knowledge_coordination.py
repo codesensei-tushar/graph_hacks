@@ -12,7 +12,7 @@ from unittest import mock
 import tests  # noqa: F401  pins the test graph and owner before src loads
 
 from src.db import falkordb_client  # noqa: E402
-from src.domain.knowledge import catalogue, coordination, mcp_tools  # noqa: E402
+from src.domain.knowledge import ask_service, catalogue, coordination, mcp_tools  # noqa: E402
 from src.seed import quillfern, quillfern_sales, seed  # noqa: E402
 from scripts.replay.driver import load_github_history  # noqa: E402
 
@@ -296,6 +296,11 @@ class WhoShouldKnowTest(unittest.TestCase):
         self.assertTrue(served["found"])
         self.assertEqual(served["answer"], _ask("notebook#45").answer)
         self.assertIn({"from": "notebook#45", "rel": "TOUCHES", "to": "Auth Service"}, served["path"])
+
+    def test_the_keyword_path_with_no_model_runs_it(self):
+        routed = ask_service.ask("who should know about notebook#45", ORG)
+        self.assertEqual(routed.tool, "who_should_know")
+        self.assertEqual(routed.answer, _ask("notebook#45").answer)
 
 
 if __name__ == "__main__":

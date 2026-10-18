@@ -11,6 +11,7 @@ Ask it in Slack and it answers from the graph, then prints the edges it walked:
 | Who owns billing, and who else has worked on it? | `Person -[OWNS]-> Service`, then past work, pull requests and reviews |
 | Why did we move the memory layer off Postgres? | `Person -[PROPOSED]-> Decision -[BASED_ON]-> Document`, the decision it `SUPERSEDES`, and the chat it came from |
 | What breaks if auth goes down? | `Service -[DEPENDS_ON]-> Service`, to a depth you choose |
+| Who should know about notebook#45? | `PullRequest -[TOUCHES]-> Service`, back two `DEPENDS_ON` hops to the owners who were not on the pull request, each tagged by whether they have worked with its author |
 | A billing bug just landed. Who should look at it? | Writes the ticket after you approve, then ranks the people connected to that service |
 | What if Priya Shah leaves? | What only they own or know, ranked by what depends on it, and who is next in line by the same edges `who_knows` ranks |
 
@@ -149,7 +150,7 @@ One FalkorDB graph (`company`) holds everything: the seeded company, what Slack 
 
 The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/knowledge/catalogue.py`): each is a `ToolSpec` with a JSON schema for its arguments and a hand-written, parameterised query behind it. The loop (`src/domain/knowledge/agent.py`) makes one structured call to Claude Haiku on the fast profile. The reply must match a small schema: `tool`, an enum of the catalogue's names, and `args`, the chosen tool's arguments as JSON text (each tool's argument names, types and bounds are in the prompt, because the structured-output API rejects integer bounds and refuses the union of every tool's arguments as too complex). The choice is checked against the registry, extra arguments are dropped, integers are clamped to their bounds, and required arguments must be present. If no key is set, the call fails, or the choice is invalid, a keyword router in `ask_service.py` picks the tool instead, so every path works with no model. Before any tool runs, the names in the question are resolved against the graph (`resolve.py`); a miss returns `found = false` with the nearest candidates, never a guess. Every tool returns a `ToolResult` with the exact edges it walked as `PathStep`s. The Slack reply prints them as `A -[REL]-> B` lines and ends with the tool's name and whether the model or the keywords picked it. Tools that write the graph are marked `needs_approval`: the loop never runs them. The turn suspends with an Approve/Deny card whose text comes from the tool's `preview`, so the asker sees the resolved target ("File a ticket titled *X*, linked to *Billing Service*") before the write lands. `$scopes` is always the asker's read set.
 
-**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (49 of them on 17 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH` and `MAX_PATH_LENGTH` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
+**No model or user text ever reaches a query.** Every value from a question, a thread, a Slack event, a webhook or an imported team file travels as a Cypher parameter (`$id`, `$scopes`, `$title`, `$q`). An audit of every f-string, `.format` or concatenated Cypher literal in `src/` (49 of them on 17 Oct) finds only these interpolations: the scope clause `coalesce(n.scope, 'org_shared') IN $scopes` and the kind clause `coalesce(n.kind, 'service')`, each with a code-chosen alias; the liveness clause for memories; fixed field lists for `RETURN`; the path-length ceilings `MAX_DEPTH`, `MAX_PATH_LENGTH` and `who_should_know`'s `MAX_HOPS` and the team page's row limits, which are module constants, with the asker's depth clamped to an integer in Python and applied to the rows; the `github_repo_` scope prefix; and, in the seed, the team importer and the container settings, labels, relationship types and property names that come from code. A team file never names a label, a relationship type or a property: the importer copies only the fields it lists for each section, and the seed's writer, which it shares, refuses any name that is not a plain identifier. The full-text search string is built from the question's words but is passed as the `$q` parameter, never spliced into the query. Names are resolved against the graph first, so even the tool arguments the model fills in only ever select an existing node id.
 
 | Tool | Answers | Writes |
 | --- | --- | --- |
@@ -157,6 +158,7 @@ The agent never writes Cypher. The tools live in a fixed catalogue (`src/domain/
 | `who_knows` | Everyone connected to a service, document or ticket, and through which edge | no |
 | `decision_trace` | Why a decision was made: the one that stands today, quoted from the message it was recorded from, who proposed and approved it, what it rests on, and what it replaced | no |
 | `blast_radius` | What stops working if a service goes down, grouped by hop, with the main connector | no |
+| `who_should_know` | Who should know about a pull request or service change but wasn't involved: owners of what depends on it within two hops, minus the author and reviewers, each tagged by past work with the author | no |
 | `path_between` | Why two things are connected: the shortest route, each hop cited in its true direction | no |
 | `load_bearing` | Which services the company leans on most, by PageRank, with dependent counts | no |
 | `related_memories` | What was said about a thing and its neighbours, each memory dated | no |
@@ -261,6 +263,36 @@ WHERE all(n IN nodes(path) WHERE NOT coalesce(n.kind, 'service') IN $excluded)
 RETURN dependent.id, dependent.name, length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name],
        coalesce(dependent.kind, 'service')
 ORDER BY length(path), dependent.name
+```
+
+**who_should_know** (who a change should reach but did not). What changed is every service a pull request `TOUCHES`, or the named service; its dependents within two hops, at their shortest hop count, are found as in `blast_radius` with every node on the route readable, and their owners are named unless they authored or reviewed the pull request (matched through `(:GitHubUser)-[:IS]->(:Person)`; for a service, unless they own it). Each is tagged by the pull requests, tickets and decisions they share with the author, only those the asker may read: an owner of a dependent who has never worked with the author is the coordination gap that Cataldo & Herbsleb tie to software failures ("Coordination Breakdowns and Their Impact on Development Productivity and Software Failures", IEEE TSE 39(3), 2013).
+
+```cypher
+MATCH path = (dep:Service)-[:DEPENDS_ON*1..2]->(changed:Service)
+WHERE changed.id IN $changed AND NOT dep.id IN $changed
+  AND all(n IN nodes(path) WHERE coalesce(n.scope, 'org_shared') IN $scopes AND NOT coalesce(n.kind, 'service') IN $excluded)
+RETURN dep.id, dep.name, coalesce(dep.kind, 'service'), length(path), [n IN nodes(path) | n.id], [n IN nodes(path) | n.name]
+ORDER BY length(path), dep.name
+
+MATCH (owner:Person)-[:OWNS]->(s:Service)
+WHERE s.id IN $ids AND coalesce(s.scope, 'org_shared') IN $scopes AND coalesce(owner.scope, 'org_shared') IN $scopes
+OPTIONAL MATCH (gh:GitHubUser)-[:IS]->(owner)
+WHERE coalesce(gh.scope, 'org_shared') IN $scopes
+RETURN s.id, owner.id, owner.name, collect(DISTINCT gh.id)
+ORDER BY owner.name
+
+// Past work with the author, in one call. Every branch also filters mine, work and theirs by $scopes.
+MATCH (mine:GitHubUser)-[m:AUTHORED|REVIEWED]->(work:PullRequest)<-[t:AUTHORED|REVIEWED]-(theirs:GitHubUser)
+WHERE mine.id IN $owner_github AND theirs.id IN $anchor_github AND mine.id <> theirs.id AND NOT work.id IN $skip
+RETURN 'PullRequest' AS label, mine.id AS mine, theirs.id AS theirs, work.id AS id, work.name AS name, type(m) AS mine_rel, type(t) AS their_rel
+UNION ALL
+MATCH (mine:Person)-[m:WORKED_ON]->(work:Ticket)<-[t:WORKED_ON]-(theirs:Person)
+WHERE mine.id IN $owners AND theirs.id IN $anchor_people AND mine.id <> theirs.id
+RETURN 'Ticket' AS label, mine.id AS mine, theirs.id AS theirs, work.id AS id, work.name AS name, type(m) AS mine_rel, type(t) AS their_rel
+UNION ALL
+MATCH (mine:Person)-[m:PROPOSED|APPROVED]->(work:Decision)<-[t:PROPOSED|APPROVED]-(theirs:Person)
+WHERE mine.id IN $owners AND theirs.id IN $anchor_people AND mine.id <> theirs.id
+RETURN 'Decision' AS label, mine.id AS mine, theirs.id AS theirs, work.id AS id, work.name AS name, type(m) AS mine_rel, type(t) AS their_rel
 ```
 
 **path_between** (why two things are connected). Every shortest route, in both edge directions, through the knowledge edges first and the team edges only if nothing else connects them; every node on the path must be readable; the route with the most `OWNS`, `DEPENDS_ON` and `TOUCHES` edges is shown and each hop is cited in the direction the edge really points:
