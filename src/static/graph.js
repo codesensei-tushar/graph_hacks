@@ -222,7 +222,8 @@
     for (const node of nodes) {
       const b = box(node.id);
       const color = FAMILY_COLOR[familyOf(node.label)];
-      const kind = node.label ? kindOf(node.label) : "";
+      // A Service says what it is (process, system, playbook); every other node names its label.
+      const kind = node.label === "Service" && node.kind ? node.kind : node.label ? kindOf(node.label) : "";
       const group = svgEl("g", { class: "node", transform: `translate(${b.x},${b.y})`, tabindex: "0", "aria-label": kind ? `${node.name}, ${kind}` : node.name });
       const body = svgEl("g", { class: "body" });
       body.style.setProperty("--d", `${reached.get(node.id) || 0}ms`);

@@ -155,7 +155,7 @@ class TeamPage:
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
 
     def to_dict(self) -> dict:
-        nodes, edges = graph_of(self.path)
+        nodes, edges = graph_of(self.path, {thing.id: thing.kind for group in self.owns for thing in group.items})
         return {
             "id": self.id,
             "name": self.name,
