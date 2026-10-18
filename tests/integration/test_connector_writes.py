@@ -140,6 +140,11 @@ class ConnectorWritesTest(unittest.TestCase):
         graph.write_page(INSTALL, Page(items=[_ticket(3, about=("Graph Store",)), _ticket(4, about=("graph store latency spikes",))]))
         self.assertEqual(self._one("MATCH (t:Ticket)-[:ABOUT]->(s:Service) RETURN t.name, s.id ORDER BY t.name"), [["OPS-3", "graph-store"], ["OPS-4", "graph-store"]])
 
+    def test_a_component_named_like_a_customer_account_is_not_about_it(self):
+        self.g.query("CREATE (:Service {id: 'hubspot:default:acme', name: 'Acme Robotics', kind: 'account', scope: 'org_internal'})")
+        graph.write_page(INSTALL, Page(items=[_ticket(1, about=("Acme Robotics",)), _ticket(2, about=("acme robotics export",))]))
+        self.assertEqual(self._one("MATCH (:Ticket)-[:ABOUT]->(s:Service) RETURN s.id"), [])
+
     def test_changed_at_ms_is_the_vendors_time_in_milliseconds(self):
         graph.write_page(INSTALL, Page(items=[_ticket(1), _ticket(2, updated="2026-09-01T10:00:00Z"), _ticket(3, updated="")]))
         rows = dict(self._one("MATCH (t:Ticket) RETURN t.name, t.changed_at_ms"))

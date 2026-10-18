@@ -515,19 +515,10 @@ def _stored_items(graph, items: list[Item]) -> dict[str, str | None]:
 
 
 def _services(graph) -> list:
-    """The Services an ABOUT hint may name, as ``resolve`` matches them: one read on the Service label."""
-    rows = graph.ro_query(
-        """
-        MATCH (n:Service)
-        WHERE n.name IS NOT NULL AND coalesce(n.scope, 'org_shared') IN $scopes
-        RETURN n.id, n.name, coalesce(n.aliases, ''), CASE WHEN n.external_id IS NULL THEN coalesce(n.title, '') ELSE '' END, n.kind
-        """,
-        {"scopes": [resolve.ORG_SHARED, ORG_INTERNAL]},
-    ).result_set
-    return [
-        resolve.EntityRow(id=row[0], name=row[1], label="Service", aliases=row[2] or "", title=row[3] or "", kind=kinds.kind_or_default(row[4]))
-        for row in rows
-    ]
+    """The Services an ABOUT hint may name, read once per page (``resolve.load_rows``, cached per graph
+    generation). A tracker item is about a service or system, never a customer account: HubSpot's
+    accounts (``kind: account``) are left out, so a Jira component named like a customer never points at it."""
+    return resolve.Rows(row for row in resolve.load_rows(graph, ("Service",), [resolve.ORG_SHARED, ORG_INTERNAL]) if row.kind != "account")
 
 
 def _hash(*parts) -> str:
